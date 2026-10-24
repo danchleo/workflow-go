@@ -18,7 +18,7 @@ import (
 // NewSQLStore creates a GORM-backed Store using SQLite (file or :memory:).
 // Example: NewSQLStore("/tmp/mistral.db") or NewSQLStore(":memory:")
 func NewSQLStore(dsn string) (Store, error) {
-	gormDB, err := gorm.Open(sqlite.Open(dsn+"?_journal_mode=WAL"), &gorm.Config{
+	gormDB, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {

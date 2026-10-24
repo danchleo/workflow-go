@@ -553,13 +553,13 @@ func (s *sqlCronTriggerStore) Delete(id string) error {
 // --- ScheduledJobStore ---
 
 type gScheduledJob struct {
-	ID         string  `gorm:"primaryKey"`
-	JobType    string  `gorm:"index"`
+	ID         string `gorm:"primaryKey"`
+	JobType    string
 	JobArgs    string  // JSON blob
-	ExecuteAt  string  // ISO8601
-	CapturedAt *string // ISO8601 or NULL
-	Key        string
-	CreatedAt  string // ISO8601
+	ExecuteAt  string  `gorm:"index:idx_execute_at_captured_at"`
+	CapturedAt *string `gorm:"index:idx_execute_at_captured_at"`
+	Key        string  `gorm:"index:idx_key"`
+	CreatedAt  string  // ISO8601
 }
 
 func (gScheduledJob) TableName() string { return "scheduled_jobs" }

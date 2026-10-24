@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"fmt"
 	"log"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -56,6 +57,7 @@ type jobHeapElem struct {
 	executeAt time.Time
 	seq       int // tiebreaker for same execution time
 	dbJobID   string
+	key       string // dedup key (optional)
 }
 
 type jobHeap []*jobHeapElem
@@ -79,12 +81,19 @@ func (h *jobHeap) Pop() interface{} {
 type Scheduler interface {
 	// Schedule persists a job to DB and (if in-memory) pushes to heap.
 	Schedule(jobType JobType, args map[string]interface{}, delay time.Duration) (string, error)
+	// ScheduleWithKey like Schedule but associates a dedup key.
+	// If HasScheduledJobs(key) returns true, scheduling is skipped.
+	ScheduleWithKey(jobType JobType, args map[string]interface{}, delay time.Duration, key string) (string, error)
 	// Cancel removes a pending job by id.
 	Cancel(id string) error
 	// Start begins the heap dispatcher + job-store checker goroutines.
 	Start()
 	// Stop halts both goroutines. Heap jobs are dropped; DB jobs survive.
 	Stop()
+	// HasScheduledJobs returns true if there's at least one pending job
+	// with the given key (checked in-memory first, then DB).
+	// Empty key means "any pending job". Matches Python's has_scheduled_jobs().
+	HasScheduledJobs(key string) bool
 }
 
 // DefaultScheduler is the heap + DB-backed implementation — the Go
@@ -92,17 +101,19 @@ type Scheduler interface {
 type DefaultScheduler struct {
 	store db.Store
 
-	mu   sync.Mutex
-	heap jobHeap
-	seq  int
-	wake chan struct{}
+	mu       sync.Mutex
+	heap     jobHeap
+	seq      int
+	wake     chan struct{}
+	keyIndex map[string]map[string]bool // key → set of db job IDs; Python in_memory_jobs dedup
 
 	dispatcherStop chan struct{}
 	checkerStop    chan struct{}
 	wg             sync.WaitGroup
 	once           sync.Once
 	captureTimeout time.Duration // how long captured_at protects a job before re-capture
-	pollInterval   time.Duration // how often jobStoreChecker polls DB
+	pollInterval   time.Duration // Python fixed_delay — base poll cadence
+	randomDelay    time.Duration // Python random_delay — jitter added to each poll
 	pickupJobAfter time.Duration // Python pickup_job_after — give heapDispatcher a head-start
 	started        bool
 }
@@ -110,14 +121,18 @@ type DefaultScheduler struct {
 // NewDefaultScheduler creates a scheduler backed by the given store.
 // Parameters (match Python DefaultScheduler config defaults):
 //
-//	pollInterval    — DB poll cadence (Python fixed_delay; default 500ms)
+//	pollInterval    — DB poll base cadence (Python fixed_delay; default 500ms)
+//	randomDelay     — jitter added to each poll (Python random_delay; default 0)
 //	captureTimeout  — captured_at ownership window (Python captured_job_timeout; default 30s)
 //	pickupJobAfter  — only jobs whose execute_at has passed this long are
 //	                  eligible for DB pickup. Gives heapDispatcher priority
 //	                  for recently-due jobs. (Python pickup_job_after; default 60s)
-func NewDefaultScheduler(store db.Store, pollInterval, captureTimeout, pickupJobAfter time.Duration) *DefaultScheduler {
+func NewDefaultScheduler(store db.Store, pollInterval, randomDelay, captureTimeout, pickupJobAfter time.Duration) *DefaultScheduler {
 	if pollInterval <= 0 {
 		pollInterval = 500 * time.Millisecond
+	}
+	if randomDelay < 0 {
+		randomDelay = 0
 	}
 	if captureTimeout <= 0 {
 		captureTimeout = 30 * time.Second
@@ -133,13 +148,26 @@ func NewDefaultScheduler(store db.Store, pollInterval, captureTimeout, pickupJob
 		wake:           make(chan struct{}, 1),
 		captureTimeout: captureTimeout,
 		pollInterval:   pollInterval,
+		randomDelay:    randomDelay,
 		pickupJobAfter: pickupJobAfter,
+		keyIndex:       make(map[string]map[string]bool),
 	}
 }
 
 // Schedule persists a ScheduledJob to DB first, then pushes to in-memory heap.
 // Returns the DB job id (caller can pass it back to Cancel if needed).
 func (s *DefaultScheduler) Schedule(jobType JobType, args map[string]interface{}, delay time.Duration) (string, error) {
+	return s.ScheduleWithKey(jobType, args, delay, "")
+}
+
+// ScheduleWithKey is like Schedule but associates a dedup key.
+// If key != "" and HasScheduledJobs(key) is true, the call is a no-op
+// (returns empty id, nil error). Matches Python's schedule + key dedup.
+func (s *DefaultScheduler) ScheduleWithKey(jobType JobType, args map[string]interface{}, delay time.Duration, key string) (string, error) {
+	if key != "" && s.HasScheduledJobs(key) {
+		return "", nil // dedup hit — skip (Python schedule() doesn't skip, but callers can)
+	}
+
 	id := fmt.Sprintf("sj-%d", time.Now().UnixNano())
 	executeAt := db.Now().Add(delay)
 
@@ -148,6 +176,7 @@ func (s *DefaultScheduler) Schedule(jobType JobType, args map[string]interface{}
 		JobType:   string(jobType),
 		JobArgs:   args,
 		ExecuteAt: executeAt,
+		Key:       key,
 		CreatedAt: db.Now(),
 	}
 	if err := s.store.ScheduledJobs().Create(j); err != nil {
@@ -160,11 +189,52 @@ func (s *DefaultScheduler) Schedule(jobType JobType, args map[string]interface{}
 		executeAt: executeAt,
 		seq:       s.seq,
 		dbJobID:   id,
+		key:       key,
 	})
+	if key != "" {
+		if s.keyIndex[key] == nil {
+			s.keyIndex[key] = make(map[string]bool)
+		}
+		s.keyIndex[key][id] = true
+	}
 	s.pokeLocked()
 	s.mu.Unlock()
 
 	return id, nil
+}
+
+// HasScheduledJobs returns true if a pending job exists for the given key.
+// Empty key → "any pending job at all".
+// Checks in-memory first (fast path), then DB (crash-recovery path).
+func (s *DefaultScheduler) HasScheduledJobs(key string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if key == "" {
+		if s.heap.Len() > 0 {
+			return true
+		}
+	} else {
+		if len(s.keyIndex[key]) > 0 {
+			return true
+		}
+	}
+
+	// DB fallback — covers: crash (heap+keyIndex lost), or another scheduler
+	// scheduled this job.
+	jobs, err := s.store.ScheduledJobs().List()
+	if err != nil {
+		return false
+	}
+	for _, j := range jobs {
+		if key == "" {
+			return true
+		}
+		if j.Key == key {
+			return true
+		}
+	}
+	return false
 }
 
 // Cancel deletes a pending job from DB. If it's also in the in-memory heap,
@@ -235,7 +305,17 @@ func (s *DefaultScheduler) heapDispatcher() {
 				continue // another scheduler claimed it — skip
 			}
 			s.mu.Unlock()
-			s.invokeAndDelete(dbJob)
+			// Fire asynchronously — matches Python ThreadPoolExecutor behavior.
+			// A slow handler must NOT block the heap dispatcher; otherwise all
+			// subsequent heap jobs (timeouts, retries) would fire late.
+			go func(j *db.ScheduledJob) {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("scheduler: heap job %s panic in invokeAndDelete: %v", j.ID, r)
+					}
+				}()
+				s.invokeAndDelete(j)
+			}(dbJob)
 			s.mu.Lock()
 		}
 
@@ -266,18 +346,33 @@ func (s *DefaultScheduler) heapDispatcher() {
 // jobStoreChecker is the crash-recovery + DB-driven path — poll DB for due jobs
 // that aren't captured (or whose captures are stale due to scheduler crash).
 // Mirrors Python DefaultScheduler._job_store_checker + _process_store_jobs.
+// Uses fixed_delay + random_delay sleep (not a ticker) to match Python's
+// anti-thundering-herd behavior in multi-scheduler deployments.
 func (s *DefaultScheduler) jobStoreChecker() {
 	defer s.wg.Done()
-	ticker := time.NewTicker(s.pollInterval)
-	defer ticker.Stop()
 
 	for {
+		// Sleep with jitter: matches Python's
+		//   fixed_delay + random.Random().randint(0, random_delay_ms) * 0.001
+		sleepFor := s.pollInterval
+		if s.randomDelay > 0 {
+			sleepFor += time.Duration(rand.Int63n(int64(s.randomDelay)))
+		}
+
 		select {
 		case <-s.checkerStop:
 			return
-		case <-ticker.C:
-			s.processStoreJobs()
+		case <-time.After(sleepFor):
 		}
+
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("scheduler: jobStoreChecker panic in processStoreJobs: %v", r)
+				}
+			}()
+			s.processStoreJobs()
+		}()
 	}
 }
 
@@ -308,6 +403,7 @@ func (s *DefaultScheduler) invokeAndDelete(j *db.ScheduledJob) {
 
 	if !ok {
 		log.Printf("scheduler: no handler for job type %s (id=%s) — deleting", j.JobType, j.ID)
+		s.removeFromKeyIndex(j.ID, j.Key)
 		_ = s.store.ScheduledJobs().Delete(j.ID)
 		return
 	}
@@ -321,7 +417,22 @@ func (s *DefaultScheduler) invokeAndDelete(j *db.ScheduledJob) {
 		handler(j.JobArgs)
 	}()
 
+	s.removeFromKeyIndex(j.ID, j.Key)
 	if err := s.store.ScheduledJobs().Delete(j.ID); err != nil {
 		log.Printf("scheduler: delete job %s: %v", j.ID, err)
+	}
+}
+
+func (s *DefaultScheduler) removeFromKeyIndex(id, key string) {
+	if key == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ids := s.keyIndex[key]; ids != nil {
+		delete(ids, id)
+		if len(ids) == 0 {
+			delete(s.keyIndex, key)
+		}
 	}
 }
