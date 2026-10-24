@@ -97,16 +97,25 @@ func NewTaskSpec(name string, data map[string]interface{}, taskType string) *Tas
 
 	// Concurrency limit — positive integer; 0 means unlimited (Python default).
 	// Mirrors mistral/lang/v2/tasks.py EXPRESSION_OR_POSITIVE_INTEGER schema.
-	if v, ok := data["concurrency"]; ok {
+	// Read from both top-level key and policies.block (Python accepts both).
+	readConcurrency := func(v interface{}) int {
 		switch n := v.(type) {
 		case float64:
 			if n > 0 {
-				s.concurrency = int(n)
+				return int(n)
 			}
 		case int:
 			if n > 0 {
-				s.concurrency = n
+				return n
 			}
+		}
+		return 0
+	}
+	if v, ok := data["concurrency"]; ok {
+		s.concurrency = readConcurrency(v)
+	} else if pol, ok := data["policies"].(map[string]interface{}); ok {
+		if v, fok := pol["concurrency"]; fok {
+			s.concurrency = readConcurrency(v)
 		}
 	}
 
