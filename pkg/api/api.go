@@ -52,6 +52,9 @@ func (s *Server) Router() http.Handler {
 	// Action executions.
 	mux.HandleFunc("/v2/action_executions", s.handleActionExecutions)
 
+	// Engine RPC endpoints (used by HttpEngineClient for cross-process calls).
+	mux.HandleFunc("/rpc/", s.handleRPC)
+
 	return mux
 }
 
@@ -307,4 +310,140 @@ tasks:
 // ParseDemoWorkflowDef is a helper — exported for convenience.
 func ParseDemoWorkflowDef(yamlDef string) (map[string]interface{}, error) {
 	return parser.ParseYAML(yamlDef)
+}
+
+// --- Engine RPC handlers (used by HttpEngineClient) ---
+
+func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("POST required"))
+		return
+	}
+	// Extract method name from URL path: /rpc/{method}
+	method := r.URL.Path[len("/rpc/"):]
+	if method == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("missing rpc method"))
+		return
+	}
+	log.Printf("RPC call: %s", method)
+
+	switch method {
+	case "start_workflow":
+		s.rpcStartWorkflow(w, r)
+	case "start_task":
+		s.rpcStartTask(w, r)
+	case "on_action_complete":
+		s.rpcOnActionComplete(w, r)
+	case "pause_workflow":
+		s.rpcPauseWorkflow(w, r)
+	case "resume_workflow":
+		s.rpcResumeWorkflow(w, r)
+	case "stop_workflow":
+		s.rpcStopWorkflow(w, r)
+	default:
+		writeError(w, http.StatusNotFound, fmt.Errorf("unknown rpc method: %s", method))
+	}
+}
+
+type rpcStartWorkflowBody struct {
+	WFDefID     string                 `json:"wf_def_id"`
+	WFNamespace string                 `json:"wf_namespace"`
+	WFExID      string                 `json:"wf_ex_id"`
+	WFInput     map[string]interface{} `json:"wf_input"`
+	Description string                 `json:"description"`
+	Params      map[string]interface{} `json:"params"`
+}
+
+func (s *Server) rpcStartWorkflow(w http.ResponseWriter, r *http.Request) {
+	var body rpcStartWorkflowBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	wfEx, err := s.engine.StartWorkflow(r.Context(), body.WFDefID, body.WFNamespace, body.WFExID, body.WFInput, body.Description, body.Params)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, wfEx)
+}
+
+func (s *Server) rpcStartTask(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		TaskExID    string                   `json:"task_ex_id"`
+		FirstRun    bool                     `json:"first_run"`
+		Waiting     bool                     `json:"waiting"`
+		TriggeredBy []map[string]interface{} `json:"triggered_by"`
+		Rerun       bool                     `json:"rerun"`
+		Reset       bool                     `json:"reset"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.engine.StartTask(r.Context(), body.TaskExID, body.FirstRun, body.Waiting, body.TriggeredBy, body.Rerun, body.Reset); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) rpcOnActionComplete(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ActionExID string                 `json:"action_ex_id"`
+		Result     map[string]interface{} `json:"result"`
+		WFAction   bool                   `json:"wf_action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	res := &db.Result{}
+	if body.Result != nil {
+		res.FromDict(body.Result)
+	}
+	if err := s.engine.OnActionComplete(r.Context(), body.ActionExID, res, body.WFAction); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) rpcPauseWorkflow(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		WFExID string `json:"wf_ex_id"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	if err := s.engine.PauseWorkflow(r.Context(), body.WFExID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) rpcResumeWorkflow(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		WFExID string                 `json:"wf_ex_id"`
+		Env    map[string]interface{} `json:"env"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	if err := s.engine.ResumeWorkflow(r.Context(), body.WFExID, body.Env); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) rpcStopWorkflow(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		WFExID  string `json:"wf_ex_id"`
+		State   string `json:"state"`
+		Message string `json:"message"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	if err := s.engine.StopWorkflow(r.Context(), body.WFExID, body.State, body.Message); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }

@@ -233,3 +233,20 @@ func (r *Result) ToDict() map[string]interface{} {
 	}
 	return result
 }
+
+// FromDict populates Result fields from a map (used by HttpEngineClient).
+func (r *Result) FromDict(d map[string]interface{}) {
+	if v, ok := d["result"]; ok {
+		r.Data = v
+	} else if v, ok := d["data"]; ok {
+		r.Data = v
+	}
+	if v, ok := d["error"]; ok {
+		r.Error = v
+	}
+	if v, ok := d["cancel"]; ok {
+		if b, ok := v.(bool); ok {
+			r.Cancel = b
+		}
+	}
+}
