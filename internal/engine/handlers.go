@@ -41,8 +41,9 @@ func (e *DefaultEngine) WithScheduler(s scheduler.Scheduler) *DefaultEngine {
 }
 
 // scheduleTaskTimeout checks the task's timeout policy and, if set, fires
-// a goroutine that will fail the ActionExecution after `timeoutSec` seconds
-// if it's still not completed. Mirrors Python TimeoutPolicy.before_task_start
+// a delayed callback via the shared scheduler (or time.AfterFunc as fallback)
+// that will force the ActionExecution to ERROR after timeoutSec seconds if
+// it's still not completed. Mirrors Python TimeoutPolicy.before_task_start
 // (mistral/engine/policies.py ~line 412) which schedules _fail_if_incomplete
 // via the system scheduler.
 func (e *DefaultEngine) scheduleTaskTimeout(actionEx *db.ActionExecution, taskEx *db.TaskExecution, taskSpec *v2.TaskSpec) {
@@ -68,10 +69,15 @@ func (e *DefaultEngine) scheduleTaskTimeout(actionEx *db.ActionExecution, taskEx
 		return
 	}
 	delay := time.Duration(timeoutSec) * time.Second
-	// Schedule the timeout failure. Runs in its own goroutine via time.AfterFunc.
-	time.AfterFunc(delay, func() {
+	fn := func() {
 		e.failIfIncomplete(actionEx.ID, timeoutSec)
-	})
+	}
+	if e.sched != nil {
+		e.sched.Schedule(delay, fn)
+	} else {
+		// Fallback when no scheduler is wired (compat for old callers).
+		time.AfterFunc(delay, fn)
+	}
 }
 
 // failIfIncomplete is the Go equivalent of Python's
@@ -414,6 +420,44 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 	// Evaluate action input.
 	inputDict := evaluateTaskInput(taskSpec, taskEx.InContext, wfEx.Input, wfEx.Context)
 	taskEx.RuntimeContext["resolved_input"] = inputDict
+
+	// ================================================================
+	// WaitBeforePolicy — mirror Python policies.py WaitBeforePolicy.
+	// If task has wait_before: N, set state→RUNNING_DELAYED and defer
+	// StartTask completion via the shared scheduler. Mirrors
+	// task._before_task_start() → WaitBeforePolicy.before_task_start.
+	// ================================================================
+	if e.sched != nil && taskEx.RuntimeContext["wait_before_done"] == nil {
+		policies := taskSpec.GetPolicies()
+		if policies != nil {
+			if wbRaw := policies.GetWaitBefore(); wbRaw != nil {
+				wbSec := 0
+				switch v := wbRaw.(type) {
+				case float64:
+					wbSec = int(v)
+				case int:
+					wbSec = v
+				}
+				if wbSec > 0 {
+					delay := time.Duration(wbSec) * time.Second
+					taskEx.State = states.RUNNING_DELAYED
+					taskEx.StateInfo = fmt.Sprintf("Delayed by 'wait-before' policy [delay=%ds]", wbSec)
+					// Stash skip flag so the deferred StartTask doesn't re-enter this block.
+					taskEx.RuntimeContext["wait_before_done"] = true
+					if err := e.store.TaskExecutions().Update(taskEx); err != nil {
+						log.Printf("wait-before: update taskEx to RUNNING_DELAYED failed: %v", err)
+					}
+					e.sched.Schedule(delay, func() {
+						if err := e.StartTask(context.Background(), taskExID, false, waiting, triggeredBy, rerun, reset); err != nil {
+							log.Printf("wait-before: deferred StartTask failed: %v", err)
+						}
+					})
+					log.Printf("wait-before: task %s delayed %ds → RUNNING_DELAYED", taskEx.Name, wbSec)
+					return nil
+				}
+			}
+		}
+	}
 
 	// Check for with-items FIRST (parallel iterations). This is the container that
 	// can hold either action or sub-workflow — Python WithItemsTask inherits RegularTask,
@@ -866,6 +910,64 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 			taskEx.Name, total, failedCount, newState)
 	}
 
+	// ================================================================
+	// WaitAfterPolicy — mirror Python policies.py WaitAfterPolicy.
+	// Before completing the task, if wait_after: N is set, defer the
+	// final state change + ContinueWorkflow via scheduler. Mirrors
+	// task._after_task_complete() → WaitAfterPolicy.after_task_complete.
+	// ================================================================
+	if e.sched != nil && taskEx.RuntimeContext["wait_after_done"] == nil {
+		wfDef, _ := e.store.WorkflowDefinitions().Get(wfEx.WorkflowID)
+		if wfDef != nil {
+			wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
+			wbTaskSpec := wfSpec.GetTask(taskEx.Name)
+			if wbTaskSpec != nil {
+				policies := wbTaskSpec.GetPolicies()
+				if policies != nil {
+					if waRaw := policies.GetWaitAfter(); waRaw != nil {
+						waSec := 0
+						switch v := waRaw.(type) {
+						case float64:
+							waSec = int(v)
+						case int:
+							waSec = v
+						}
+						if waSec > 0 {
+							endState := newState
+							endInfo := stateInfo
+							delay := time.Duration(waSec) * time.Second
+							taskEx.State = states.RUNNING_DELAYED
+							taskEx.StateInfo = fmt.Sprintf("Delayed by 'wait-after' policy [delay=%ds]", waSec)
+							taskEx.RuntimeContext["wait_after_done"] = true
+							if err := e.store.TaskExecutions().Update(taskEx); err != nil {
+								log.Printf("wait-after: update taskEx to RUNNING_DELAYED failed: %v", err)
+							}
+							wfExID := wfEx.ID
+							taskExID := taskEx.ID
+							e.sched.Schedule(delay, func() {
+								te, _ := e.store.TaskExecutions().Get(taskExID)
+								if te == nil {
+									return
+								}
+								te.State = endState
+								te.StateInfo = endInfo
+								te.Processed = true
+								if err := e.store.TaskExecutions().Update(te); err != nil {
+									log.Printf("wait-after: finalize task state failed: %v", err)
+									return
+								}
+								e.advanceWorkflow(wfExID, taskExID)
+							})
+							log.Printf("wait-after: task %s completion delayed %ds → RUNNING_DELAYED (will finish as %s)",
+								taskEx.Name, waSec, endState)
+							return nil
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Complete the task.
 	taskEx.State = newState
 	taskEx.StateInfo = stateInfo
@@ -1097,6 +1199,50 @@ func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExec
 		actionEx.ID, attempt, retryCount, newActionEx.ID)
 
 	return true, nil
+}
+
+// advanceWorkflow is the deferred-completion helper used by wait-after policy
+// (and any future policy that defers task → workflow advancement). It mirrors
+// the tail of OnActionComplete: load wfSpec, get controller, ContinueWorkflow,
+// DispatchWorkflowCommands, and checkAndCompleteWorkflow.
+//
+// wfExID is the workflow execution; doneTaskExID (optional, "") is the
+// task that just completed — passed through so workflow policies like
+// direct-join can observe it.
+func (e *DefaultEngine) advanceWorkflow(wfExID string, doneTaskExID string) {
+	wfEx, err := e.store.WorkflowExecutions().Get(wfExID)
+	if err != nil || wfEx == nil {
+		log.Printf("advanceWorkflow: wfEx %s not found: %v", wfExID, err)
+		return
+	}
+	wfDef, _ := e.store.WorkflowDefinitions().Get(wfEx.WorkflowID)
+	if wfDef == nil {
+		return
+	}
+	wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
+	tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
+
+	var doneTaskEx *db.TaskExecution
+	if doneTaskExID != "" {
+		for _, te := range tasks {
+			if te.ID == doneTaskExID {
+				doneTaskEx = te
+				break
+			}
+		}
+	}
+
+	ctrl := workflow.GetController(wfEx, wfSpec, tasks)
+	cmds := ctrl.ContinueWorkflow(doneTaskEx)
+
+	if err := e.dispatcher.DispatchWorkflowCommands(wfEx, cmds); err != nil {
+		log.Printf("advanceWorkflow: DispatchWorkflowCommands failed: %v", err)
+		return
+	}
+
+	if err := e.checkAndCompleteWorkflow(wfEx, ctrl, wfSpec); err != nil {
+		log.Printf("advanceWorkflow: checkAndCompleteWorkflow failed: %v", err)
+	}
 }
 
 // checkAndCompleteWorkflow checks if all tasks are done and the workflow should complete.
