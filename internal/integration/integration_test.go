@@ -1770,3 +1770,80 @@ tasks:
 
 	t.Logf("  cron trigger test: 2 wfExs auto-created, trigger auto-deleted ✅")
 }
+
+// ================================================================
+// Scenario: CronTrigger unlimited mode (remaining=0). The trigger
+// fires every interval forever — we call RunOnce 3 times with the
+// interval elapsing each time. Verify 3 wfExs created, trigger still
+// alive with remaining=0, NextExecutionTime keeps advancing.
+// ================================================================
+func TestIntegration_CronTrigger_Unlimited(t *testing.T) {
+	t.Helper()
+
+	store, err := db.NewSQLStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	eng := engine.NewDefaultEngine(store)
+	svc := services.NewWorkflowService(store)
+
+	wfYAML := `version: "2.0"
+name: cron_target_forever
+tasks:
+  echo:
+    action: std.echo
+    input:
+      output: "cron-fired-forever"
+`
+	wfDef, err := svc.CreateWorkflow("cron_target_forever", wfYAML, "integration-test", "")
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	ct := &db.CronTrigger{
+		Name:                "forever-cron",
+		Pattern:             "interval:1s",
+		IntervalSeconds:     1,
+		WorkflowID:          wfDef.ID,
+		RemainingExecutions: 0, // 0 = unlimited
+		ProjectID:           "integration-test",
+		NextExecutionTime:   db.Now(),
+	}
+	if err := store.CronTriggers().Create(ct); err != nil {
+		t.Fatalf("Create CronTrigger: %v", err)
+	}
+
+	sched := scheduler.NewDefaultScheduler(store, eng, 100*time.Millisecond)
+
+	// Fire 1.
+	sched.RunOnce()
+	time.Sleep(1100 * time.Millisecond)
+
+	// Fire 2.
+	sched.RunOnce()
+	time.Sleep(1100 * time.Millisecond)
+
+	// Fire 3.
+	sched.RunOnce()
+	time.Sleep(200 * time.Millisecond)
+
+	wfExs, _ := store.WorkflowExecutions().List("")
+	if len(wfExs) != 3 {
+		t.Fatalf("wfExs = %d, want 3 (trigger 3 times in unlimited mode)", len(wfExs))
+	}
+
+	// Trigger must still exist, remaining=0, next time advanced.
+	ctFinal, err := store.CronTriggers().GetByName("forever-cron")
+	if err != nil || ctFinal == nil {
+		t.Fatal("trigger should NOT be deleted in unlimited mode")
+	}
+	if ctFinal.RemainingExecutions != 0 {
+		t.Errorf("remaining = %d, want 0 (unlimited unchanged)", ctFinal.RemainingExecutions)
+	}
+	if !ctFinal.NextExecutionTime.After(db.Now()) {
+		t.Error("NextExecutionTime should be in the future after 3 fires")
+	}
+
+	t.Logf("  unlimited cron: 3 wfExs created, trigger alive (remaining=0), next=%v ✅",
+		ctFinal.NextExecutionTime)
+}
