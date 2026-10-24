@@ -1555,6 +1555,144 @@ func TestIntegration_RetryWithItems_AllExhausted(t *testing.T) {
 }
 
 // ================================================================
+// Scenario: Retry delay policy. Task flaky with retry{count:2, delay:2}.
+// Without driving anything, all attempts will time out via our timeout.
+// With delay=2 and the scheduler wired in:
+//
+//	t=0   attempt 0 starts → fails immediately (we drive ERROR)? No — we let it timeout.
+//	      Actually we drive each attempt to ERROR after delay expires.
+//	Simpler: drive attempt 0 → ERROR → handleRetry → delay=2s → task=RUNNING_DELAYED
+//	t=2   scheduler fires → attempt 1 created → we drive → ERROR → delay=2s → RUNNING_DELAYED
+//	t=4   scheduler fires → attempt 2 created → we drive → ERROR → retry exhausted → ERROR
+//	→ on-error: recovered
+//
+// Key assertion: task should be RUNNING_DELAYED during the gaps, and the
+// total elapsed time must be >= 4s (2 × 2s delay).
+// ================================================================
+func TestIntegration_RetryDelay_RespectsDelay(t *testing.T) {
+	t.Helper()
+
+	store, err := db.NewSQLStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	coreSched := scheduler.NewDefaultScheduler()
+	coreSched.Start()
+	defer coreSched.Stop()
+
+	eng := engine.NewDefaultEngine(store).WithScheduler(coreSched)
+	svc := services.NewWorkflowService(store)
+
+	data, err := os.ReadFile("testdata/retry_delay.yaml")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	wfDef, err := svc.CreateWorkflow("retry_delay_demo", string(data), "integration-test", "")
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	params := map[string]interface{}{
+		"env":       make(map[string]interface{}),
+		"namespace": "",
+	}
+	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", params)
+	if err != nil {
+		t.Fatalf("StartWorkflow: %v", err)
+	}
+
+	start := time.Now()
+
+	// Drive loop: each time we find RUNNING actionEx, drive it.
+	// For the "flaky" task we inject ERROR; for everything else
+	// (i.e. recovered from on-error) we inject SUCCESS.
+	const maxIter = 30
+	for iter := 0; iter < maxIter; iter++ {
+		var foundRunning bool
+		tasks, _ := store.TaskExecutions().List(wfEx.ID, "")
+		for _, te := range tasks {
+			if te.State != states.RUNNING {
+				continue
+			}
+			actionExs, _ := store.ActionExecutions().List(te.ID, "")
+			for _, ae := range actionExs {
+				if ae.State == states.RUNNING {
+					foundRunning = true
+					var res *db.Result
+					if te.Name == "flaky" {
+						res = &db.Result{Error: "injected-failure"}
+					} else {
+						res = &db.Result{Data: "ok"}
+					}
+					if err := eng.OnActionComplete(context.Background(), ae.ID, res, false); err != nil {
+						t.Fatalf("OnActionComplete: %v", err)
+					}
+					status := "SUCCESS"
+					if te.Name == "flaky" {
+						status = "ERROR"
+					}
+					t.Logf("  iter %d: drove %s action_ex=%s → %s", iter, te.Name, ae.ID, status)
+					break
+				}
+			}
+			if foundRunning {
+				break
+			}
+		}
+
+		final, _ := store.WorkflowExecutions().Get(wfEx.ID)
+		if states.IsCompleted(final.State) {
+			break
+		}
+
+		if !foundRunning {
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+
+	elapsed := time.Since(start)
+
+	final, _ := store.WorkflowExecutions().Get(wfEx.ID)
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	var flakyTask, recoveredTask *db.TaskExecution
+	for _, te := range tasks {
+		switch te.Name {
+		case "flaky":
+			flakyTask = te
+		case "recovered":
+			recoveredTask = te
+		}
+	}
+
+	if flakyTask == nil {
+		t.Fatal("flaky task not found")
+	}
+	if flakyTask.State != states.ERROR {
+		t.Errorf("flaky state = %s, want ERROR (all retries exhausted)", flakyTask.State)
+	}
+	if recoveredTask == nil || recoveredTask.State != states.SUCCESS {
+		t.Error("recovered task missing or not SUCCESS")
+	}
+	if final.State != states.SUCCESS {
+		t.Errorf("final = %s, want SUCCESS", final.State)
+	}
+
+	// Critical assertion: elapsed time should reflect the delays.
+	// With 2 delays of 2s each (between attempt 0→1 and 1→2),
+	// plus our driving time, total should be >= ~4.0s.
+	if elapsed < 3500*time.Millisecond {
+		t.Errorf("elapsed %v too short — retry delay was NOT respected (expected >= 4s)", elapsed)
+	}
+
+	actions, _ := store.ActionExecutions().List(flakyTask.ID, "")
+	if len(actions) != 3 {
+		t.Errorf("actions = %d, want 3 (attempt 0 + 1 + 2 all ERROR)", len(actions))
+	}
+
+	t.Logf("  retry delay respected: elapsed=%v, flaky=%s, actions=%d ✅", elapsed, flakyTask.State, len(actions))
+}
+
+// ================================================================
 // Scenario: Timeout policy. A task hangs forever (we never drive its
 // ActionExecution). Timeout fires after 1 second → forces ERROR →
 // retry gate runs (none configured) → with-items gate (none) →
@@ -1954,7 +2092,7 @@ tasks:
 	}
 
 	// Wire the scheduler to the engine (engine.StartWorkflow IS the WorkflowStarter).
-	sched := scheduler.NewDefaultScheduler(store, eng, 100*time.Millisecond)
+	sched := scheduler.NewCronRunner(store, eng, 100*time.Millisecond)
 
 	// 1st RunOnce → trigger should fire immediately.
 	sched.RunOnce()
@@ -2047,7 +2185,7 @@ tasks:
 		t.Fatalf("Create CronTrigger: %v", err)
 	}
 
-	sched := scheduler.NewDefaultScheduler(store, eng, 100*time.Millisecond)
+	sched := scheduler.NewCronRunner(store, eng, 100*time.Millisecond)
 
 	// Fire 1.
 	sched.RunOnce()

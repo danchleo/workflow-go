@@ -11,6 +11,7 @@ import (
 	"github.com/mistral/workflow/internal/expressions"
 	"github.com/mistral/workflow/internal/lang"
 	v2 "github.com/mistral/workflow/internal/lang/v2"
+	"github.com/mistral/workflow/internal/scheduler"
 	"github.com/mistral/workflow/internal/states"
 	"github.com/mistral/workflow/internal/workflow"
 )
@@ -20,6 +21,7 @@ import (
 type DefaultEngine struct {
 	store      db.Store
 	dispatcher *Dispatcher
+	sched      scheduler.Scheduler // optional delayed-job scheduler (nil if none)
 }
 
 // NewDefaultEngine creates a DefaultEngine with the given store.
@@ -29,6 +31,13 @@ func NewDefaultEngine(store db.Store) *DefaultEngine {
 	}
 	eng.dispatcher = NewDispatcher(store, eng)
 	return eng
+}
+
+// WithScheduler wires a generic delayed-job scheduler into the engine.
+// Policies like retry-delay, wait-before, wait-after and timeout need it.
+func (e *DefaultEngine) WithScheduler(s scheduler.Scheduler) *DefaultEngine {
+	e.sched = s
+	return e
 }
 
 // scheduleTaskTimeout checks the task's timeout policy and, if set, fires
@@ -935,8 +944,14 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 // operates on individual ActionExecutions (finer granularity — sibling
 // with-items iterations retry independently).
 //
-// Returns (retried, error): retried=true means we created a new ActionExecution
-// and the caller should NOT advance task state or with-items counters.
+// Supports retry.delay via the shared scheduler: if delay > 0 and the
+// engine has a scheduler wired in, we set the task to RUNNING_DELAYED
+// and defer the new ActionExecution creation + StartTask call by delay.
+// Otherwise retry is immediate (delay=0 or no scheduler).
+//
+// Returns (retried, error): retried=true means a new ActionExecution will
+// be created (either now or later via scheduler) — caller must NOT advance
+// task state or with-items counters.
 func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExecution, taskEx *db.TaskExecution, wfEx *db.WorkflowExecution) (bool, error) {
 	// Load taskSpec to find retry policy.
 	wfDef, _ := e.store.WorkflowDefinitions().Get(wfEx.WorkflowID)
@@ -960,7 +975,6 @@ func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExec
 		return false, nil
 	}
 
-	// Resolve retry count (support literal int; expression form can come later).
 	retryCount := -1
 	switch c := retrySpec.GetCount().(type) {
 	case float64:
@@ -972,7 +986,15 @@ func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExec
 		return false, nil
 	}
 
-	// Track retries on the ActionExecution itself (per-iteration granularity).
+	// Resolve delay.
+	retryDelaySeconds := 0
+	switch d := retrySpec.GetDelay().(type) {
+	case float64:
+		retryDelaySeconds = int(d)
+	case int:
+		retryDelaySeconds = d
+	}
+
 	attempt := db.CoerceInt(actionEx.RuntimeContext["retry_attempts"])
 	if attempt >= retryCount {
 		log.Printf("retry: ActionExecution %s already attempted %d times (limit %d) — giving up",
@@ -980,35 +1002,97 @@ func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExec
 		return false, nil
 	}
 
-	// New attempt: create a fresh ActionExecution with same input, linked to same taskEx.
 	attempt++
 	sync := true
-	newActionEx := &db.ActionExecution{
-		Name:  actionEx.Name,
-		State: states.RUNNING,
-		Input: actionEx.Input, // same input
-		RuntimeContext: map[string]interface{}{
-			"index":          db.CoerceInt(actionEx.RuntimeContext["index"]),
-			"safe_rerun":     true,
-			"retry_attempts": attempt,
-		},
-		WorkflowNamespace: actionEx.WorkflowNamespace,
-		TaskExecutionID:   actionEx.TaskExecutionID,
-		WorkflowName:      actionEx.WorkflowName,
-		WorkflowID:        actionEx.WorkflowID,
-		ProjectID:         actionEx.ProjectID,
-		IsSync:            &sync,
+	buildRetryActionEx := func() *db.ActionExecution {
+		return &db.ActionExecution{
+			Name:  actionEx.Name,
+			State: states.RUNNING,
+			Input: actionEx.Input,
+			RuntimeContext: map[string]interface{}{
+				"index":          db.CoerceInt(actionEx.RuntimeContext["index"]),
+				"safe_rerun":     true,
+				"retry_attempts": attempt,
+			},
+			WorkflowNamespace: actionEx.WorkflowNamespace,
+			TaskExecutionID:   actionEx.TaskExecutionID,
+			WorkflowName:      actionEx.WorkflowName,
+			WorkflowID:        actionEx.WorkflowID,
+			ProjectID:         actionEx.ProjectID,
+			IsSync:            &sync,
+		}
 	}
+
+	// Delayed retry path: set task → RUNNING_DELAYED, defer via scheduler.
+	if retryDelaySeconds > 0 && e.sched != nil {
+		delay := time.Duration(retryDelaySeconds) * time.Second
+
+		// Move task to RUNNING_DELAYED (mirrors Python RetryPolicy.after_task_complete:
+		// task.set_state(RUNNING_DELAYED, "Delayed by 'retry' policy [delay=%d]"))
+		taskEx.State = states.RUNNING_DELAYED
+		taskEx.StateInfo = fmt.Sprintf("Delayed by 'retry' policy [delay=%ds]", retryDelaySeconds)
+		if err := e.store.TaskExecutions().Update(taskEx); err != nil {
+			log.Printf("retry: update taskEx to RUNNING_DELAYED failed: %v", err)
+		}
+
+		// Capture attempt in closure scope.
+		nextAttempt := attempt
+		e.sched.Schedule(delay, func() {
+			// 1. Create new ActionExecution (mirrors task._schedule_actions).
+			sync2 := true
+			newActionEx := &db.ActionExecution{
+				Name:  taskSpec.GetActionName(),
+				State: states.RUNNING,
+				Input: actionEx.Input,
+				RuntimeContext: map[string]interface{}{
+					"index":          db.CoerceInt(actionEx.RuntimeContext["index"]),
+					"safe_rerun":     true,
+					"retry_attempts": nextAttempt,
+				},
+				WorkflowNamespace: actionEx.WorkflowNamespace,
+				TaskExecutionID:   taskEx.ID,
+				WorkflowName:      actionEx.WorkflowName,
+				WorkflowID:        actionEx.WorkflowID,
+				ProjectID:         actionEx.ProjectID,
+				IsSync:            &sync2,
+			}
+			if err := e.store.ActionExecutions().Create(newActionEx); err != nil {
+				log.Printf("retry [delayed]: create ActionExecution failed: %v", err)
+				return
+			}
+			e.scheduleTaskTimeout(newActionEx, taskEx, taskSpec)
+			log.Printf("retry [delayed]: attempt %d/%d fired → action_ex=%s",
+				nextAttempt, retryCount, newActionEx.ID)
+
+			// 2. Restore task → RUNNING (mirrors Python _continue_task).
+			te, _ := e.store.TaskExecutions().Get(taskEx.ID)
+			if te == nil {
+				return
+			}
+			te.State = states.RUNNING
+			te.StateInfo = ""
+			if err := e.store.TaskExecutions().Update(te); err != nil {
+				log.Printf("retry [delayed]: restore task to RUNNING failed: %v", err)
+			}
+			// NOTE: We do NOT call StartTask here — that would create a second
+			// ActionExecution (StartTask's normal flow auto-creates one). Instead
+			// the driver loop picks up the RUNNING task + the RUNNING ActionExecution
+			// we just created.
+		})
+
+		log.Printf("retry: ActionExecution %s scheduled DELAYED retry attempt %d/%d (delay=%ds)",
+			actionEx.ID, attempt, retryCount, retryDelaySeconds)
+		return true, nil
+	}
+
+	// Immediate retry path (delay=0 or no scheduler).
+	newActionEx := buildRetryActionEx()
 	if err := e.store.ActionExecutions().Create(newActionEx); err != nil {
 		return false, fmt.Errorf("retry creating ActionExecution: %w", err)
 	}
 
-	// Retried execution also gets its own timeout timer.
 	e.scheduleTaskTimeout(newActionEx, taskEx, taskSpec)
 
-	// Retry scheduled — caller (OnActionComplete) returns early without
-	// advancing task state or with-items counters. The driver loop or
-	// external executor will pick up the new RUNNING ActionExecution.
 	log.Printf("retry: ActionExecution %s scheduled retry attempt %d/%d → new action_ex=%s (state=RUNNING)",
 		actionEx.ID, attempt, retryCount, newActionEx.ID)
 
