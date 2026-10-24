@@ -29,8 +29,9 @@ type fixture struct {
 
 // runWorkflowFromYAML is the single shared helper for all integration tests.
 // It creates a SQL-backed Store (:memory:), wires up the engine, loads the
-// YAML fixture, drives to completion, and returns the final workflow execution.
-func runWorkflowFromYAML(t *testing.T, f fixture) *db.WorkflowExecution {
+// YAML fixture, drives to completion, and returns the final workflow execution
+// together with the store so callers can query task-level data.
+func runWorkflowFromYAML(t *testing.T, f fixture) (*db.WorkflowExecution, db.Store) {
 	t.Helper()
 
 	// 1. Read fixture.
@@ -127,34 +128,52 @@ func runWorkflowFromYAML(t *testing.T, f fixture) *db.WorkflowExecution {
 	}
 
 	t.Logf("  final: state=%s output=%v", final.State, final.Output)
-	return final
+	return final, store
 }
 
 // --- Individual tests (one per fixture) ---
 
 func TestIntegration_DirectSerial(t *testing.T) {
-	final := runWorkflowFromYAML(t, fixture{
+	final, _ := runWorkflowFromYAML(t, fixture{
 		yamlPath:      "direct_serial.yaml",
 		description:   "2-task serial workflow with publish + output expressions",
 		input:         map[string]interface{}{"greeting": "Hi", "name": "Integration"},
 		expectedState: states.SUCCESS,
 	})
-	if final.Output != nil {
-		if msg, ok := final.Output["final_msg"].(string); ok {
-			if msg == "" {
-				t.Errorf("final_msg is empty")
+
+	// Output expressions must be fully evaluated (no raw "<% ... %>" left).
+	if final.Output == nil {
+		t.Fatal("expected final.Output to be populated")
+	}
+	for k, v := range final.Output {
+		if s, ok := v.(string); ok {
+			if containsAny(s, "<%", "{{", "$.") {
+				t.Errorf("final.Output[%q] still contains unevaluated expression: %q", k, s)
 			}
 		}
+	}
+	if _, ok := final.Output["final_msg"]; !ok {
+		t.Error("expected final.Output['final_msg'] to be present")
+	}
+	if _, ok := final.Output["greeting_was"]; !ok {
+		t.Error("expected final.Output['greeting_was'] to be present (publish variable)")
 	}
 }
 
 func TestIntegration_WithItems_Fanout(t *testing.T) {
-	runWorkflowFromYAML(t, fixture{
+	final, _ := runWorkflowFromYAML(t, fixture{
 		yamlPath:      "with_items_fanout.yaml",
 		description:   "with-items creating 3 parallel iterations",
 		input:         map[string]interface{}{"items": []interface{}{"alpha", "beta", "gamma"}},
 		expectedState: states.SUCCESS,
 	})
+	if final.Output != nil {
+		for k, v := range final.Output {
+			if s, ok := v.(string); ok && containsAny(s, "<%", "{{") {
+				t.Errorf("final.Output[%q] = %q — still unevaluated", k, s)
+			}
+		}
+	}
 }
 
 func TestIntegration_Reverse_RequiresChain(t *testing.T) {
@@ -176,12 +195,73 @@ func TestIntegration_Branching_FanoutJoin(t *testing.T) {
 }
 
 func TestIntegration_ErrorHandling_OnError(t *testing.T) {
-	runWorkflowFromYAML(t, fixture{
-		yamlPath:      "error_handling.yaml",
-		description:   "task fails, on-error sends control to recovery",
-		input:         nil,
-		expectedState: states.SUCCESS, // recovery task takes over, overall succeeds
-	})
+	yamlFile, _ := os.ReadFile("testdata/error_handling.yaml")
+	store, _ := db.NewSQLStore(":memory:")
+	eng := engine.NewDefaultEngine(store)
+	svc := services.NewWorkflowService(store)
+	wfDef, _ := svc.CreateWorkflow("err-test", string(yamlFile), "p", "")
+
+	wfEx, _ := eng.StartWorkflow(context.Background(), wfDef.ID, "", "",
+		nil, "", map[string]interface{}{"env": map[string]interface{}{}, "namespace": ""})
+
+	const maxIter = 20
+	for iter := 0; iter < maxIter; iter++ {
+		tasks, _ := store.TaskExecutions().List(wfEx.ID, "")
+		allDone := true
+		var pending *db.TaskExecution
+		for _, te := range tasks {
+			if !states.IsCompleted(te.State) {
+				allDone = false
+				if pending == nil {
+					pending = te
+				}
+			}
+		}
+		if allDone {
+			break
+		}
+
+		invokeID, _ := pending.RuntimeContext["action_ex_id"].(string)
+		if invokeID == "" {
+			invokeID = pending.ID
+		}
+
+		// The risky task uses std.fail — its simulated executor must return
+		// an error Result so the engine marks the task ERROR and follows
+		// the on-error transition to "recover".
+		var res *db.Result
+		if pending.Name == "risky" {
+			res = &db.Result{Error: "simulated failure"}
+		} else {
+			res = &db.Result{Data: fmt.Sprintf("ok-%s", pending.Name)}
+		}
+
+		if err := eng.OnActionComplete(context.Background(), invokeID, res, false); err != nil {
+			t.Fatalf("OnActionComplete(%s): %v", pending.Name, err)
+		}
+	}
+
+	final, err := store.WorkflowExecutions().Get(wfEx.ID)
+	if err != nil {
+		t.Fatalf("get final: %v", err)
+	}
+	if final.State != states.SUCCESS {
+		t.Fatalf("final state = %s, want SUCCESS (recover should have taken over)", final.State)
+	}
+
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	for _, te := range tasks {
+		switch te.Name {
+		case "risky":
+			if te.State != states.ERROR {
+				t.Errorf("risky task state = %s, want ERROR", te.State)
+			}
+		case "recover":
+			if te.State != states.SUCCESS {
+				t.Errorf("recover task state = %s, want SUCCESS", te.State)
+			}
+		}
+	}
 }
 
 func TestIntegration_Join_Parallel(t *testing.T) {
@@ -191,4 +271,80 @@ func TestIntegration_Join_Parallel(t *testing.T) {
 		input:         nil,
 		expectedState: states.SUCCESS,
 	})
+}
+
+// --- helpers ---
+
+func containsAny(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if len(sub) == 0 {
+			continue
+		}
+		for i := 0; i <= len(s)-len(sub); i++ {
+			if s[i:i+len(sub)] == sub {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// --- Pause / Resume / Stop lifecycle tests ---
+
+func TestIntegration_PauseResumeStop(t *testing.T) {
+	data, err := os.ReadFile("testdata/direct_serial.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, _ := db.NewSQLStore(":memory:")
+	eng := engine.NewDefaultEngine(store)
+	svc := services.NewWorkflowService(store)
+	wfDef, _ := svc.CreateWorkflow("pause-test", string(data), "p", "")
+
+	wfEx, _ := eng.StartWorkflow(context.Background(), wfDef.ID, "", "",
+		map[string]interface{}{"greeting": "Hi", "name": "Pause"}, "",
+		map[string]interface{}{"env": map[string]interface{}{}, "namespace": ""})
+
+	// Pause mid-flight.
+	if err := eng.PauseWorkflow(context.Background(), wfEx.ID); err != nil {
+		t.Fatalf("PauseWorkflow: %v", err)
+	}
+	afterPause, _ := store.WorkflowExecutions().Get(wfEx.ID)
+	if afterPause.State != states.PAUSED {
+		t.Errorf("after pause state = %s, want PAUSED", afterPause.State)
+	}
+
+	// Resume.
+	if err := eng.ResumeWorkflow(context.Background(), wfEx.ID, nil); err != nil {
+		t.Fatalf("ResumeWorkflow: %v", err)
+	}
+
+	// Drive to completion.
+	const maxIter = 20
+	for iter := 0; iter < maxIter; iter++ {
+		tasks, _ := store.TaskExecutions().List(wfEx.ID, "")
+		allDone := true
+		var pending *db.TaskExecution
+		for _, te := range tasks {
+			if !states.IsCompleted(te.State) {
+				allDone = false
+				if pending == nil {
+					pending = te
+				}
+			}
+		}
+		if allDone {
+			break
+		}
+		invokeID, _ := pending.RuntimeContext["action_ex_id"].(string)
+		if invokeID == "" {
+			invokeID = pending.ID
+		}
+		eng.OnActionComplete(context.Background(), invokeID, &db.Result{Data: "ok"}, false)
+	}
+
+	final, _ := store.WorkflowExecutions().Get(wfEx.ID)
+	if final.State != states.SUCCESS {
+		t.Fatalf("after resume + drive: state = %s, want SUCCESS", final.State)
+	}
 }

@@ -568,7 +568,15 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 		if taskSpec != nil {
 			publish := taskSpec.GetPublish()
 			if len(publish) > 0 {
+				// Build context using in-memory current taskEx (Output already
+				// set above) instead of the stale store version.
 				allTasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
+				for i, te := range allTasks {
+					if te.ID == taskEx.ID {
+						allTasks[i] = taskEx
+						break
+					}
+				}
 				ctx := workflow.BuildFullContext(wfEx, wfSpec, allTasks)
 				evaluated := expressions.EvaluateRecursively(publish, ctx)
 				if m, ok := evaluated.(map[string]interface{}); ok {
