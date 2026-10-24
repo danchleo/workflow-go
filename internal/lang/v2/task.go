@@ -27,6 +27,7 @@ type TaskSpec struct {
 	target         interface{}
 	keepResult     interface{}
 	safeRerun      interface{}
+	concurrency    int
 
 	// Direct workflow specific.
 	join       interface{}
@@ -92,6 +93,21 @@ func NewTaskSpec(name string, data map[string]interface{}, taskType string) *Tas
 	// With-items.
 	if v, ok := data["with-items"]; ok {
 		s.withItems = parseWithItems(v)
+	}
+
+	// Concurrency limit — positive integer; 0 means unlimited (Python default).
+	// Mirrors mistral/lang/v2/tasks.py EXPRESSION_OR_POSITIVE_INTEGER schema.
+	if v, ok := data["concurrency"]; ok {
+		switch n := v.(type) {
+		case float64:
+			if n > 0 {
+				s.concurrency = int(n)
+			}
+		case int:
+			if n > 0 {
+				s.concurrency = n
+			}
+		}
 	}
 
 	// Publish.
@@ -294,6 +310,7 @@ func (s *TaskSpec) GetPolicies() *PoliciesSpec                { return s.policie
 func (s *TaskSpec) GetTarget() interface{}                    { return s.target }
 func (s *TaskSpec) GetKeepResult() interface{}                { return s.keepResult }
 func (s *TaskSpec) GetSafeRerun() interface{}                 { return s.safeRerun }
+func (s *TaskSpec) GetConcurrency() int                       { return s.concurrency }
 func (s *TaskSpec) GetType() string {
 	if s.workflow != "" {
 		return WorkflowTaskType

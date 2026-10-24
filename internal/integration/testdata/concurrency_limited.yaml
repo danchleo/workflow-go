@@ -1,0 +1,22 @@
+version: "2.0"
+name: concurrency_demo
+description: with-items(5 iters) + concurrency:2 — only 2 start at a time, next batches deferred
+
+tasks:
+  launch:
+    action: std.echo
+    input:
+      output: "iter-<% $.item %>"
+    with-items:
+      item:
+        - "a"
+        - "b"
+        - "c"
+        - "d"
+        - "e"
+    concurrency: 2
+    on-success:
+      done:
+        action: std.echo
+        input:
+          output: "all-iters-complete"

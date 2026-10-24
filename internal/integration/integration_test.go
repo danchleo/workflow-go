@@ -1218,3 +1218,54 @@ func filterWfExByName(wfExs []*db.WorkflowExecution, name string) []*db.Workflow
 	}
 	return out
 }
+
+// ================================================================
+// Scenario 9: Concurrency-limited with-items. with-items(5 items) +
+// concurrency:2. Only 2 iterations start immediately; remaining 3 launch
+// lazily as running iterations complete (Python WithItemsTask capacity gate).
+// Assert RuntimeContext tracking is correct — total=5, concurrency=2,
+// final started=5, final done_count=5.
+// ================================================================
+func TestIntegration_WithItemsConcurrency_Limited(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "concurrency_limited.yaml",
+		expectedState: states.SUCCESS,
+	})
+
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	var launchTask *db.TaskExecution
+	for _, te := range tasks {
+		if te.Name == "launch" {
+			launchTask = te
+		}
+	}
+	if launchTask == nil {
+		t.Fatal("launch task not found")
+	}
+
+	total := db.CoerceInt(launchTask.RuntimeContext["with_items_total"])
+	concurrency := db.CoerceInt(launchTask.RuntimeContext["with_items_concurrency"])
+	started := db.CoerceInt(launchTask.RuntimeContext["with_items_started"])
+
+	if total != 5 {
+		t.Errorf("with_items_total = %d, want 5", total)
+	}
+	if concurrency != 2 {
+		t.Errorf("with_items_concurrency = %d, want 2", concurrency)
+	}
+	if started != 5 {
+		t.Errorf("final with_items_started = %d, want 5 (capacity refill must launch all)", started)
+	}
+	if launchTask.State != states.SUCCESS {
+		t.Errorf("launch state = %s, want SUCCESS", launchTask.State)
+	}
+
+	// Total ActionExecutions must be 5 (one per iteration).
+	actions, _ := store.ActionExecutions().List(launchTask.ID, "")
+	if len(actions) != 5 {
+		t.Errorf("launch ActionExecutions = %d, want 5", len(actions))
+	}
+
+	t.Logf("  concurrency limit: total=%d concurrency=%d started(final)=%d actions=%d",
+		total, concurrency, started, len(actions))
+}
