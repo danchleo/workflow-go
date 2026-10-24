@@ -706,13 +706,13 @@ func (m *memScheduledJobStore) List() ([]*ScheduledJob, error) {
 	}
 	return result, nil
 }
-func (m *memScheduledJobStore) GetDueJobs(now time.Time, captureTimeout time.Duration, batchSize int) ([]*ScheduledJob, error) {
+func (m *memScheduledJobStore) GetDueJobs(executeCutoff time.Time, now time.Time, captureTimeout time.Duration, batchSize int) ([]*ScheduledJob, error) {
 	m.s.mu.RLock()
 	defer m.s.mu.RUnlock()
 	timeoutBoundary := now.Add(-captureTimeout)
 	var out []*ScheduledJob
 	for _, j := range m.s.scheduledJobs {
-		if j.ExecuteAt.After(now) {
+		if j.ExecuteAt.After(executeCutoff) {
 			continue
 		}
 		if j.CapturedAt != nil && !j.CapturedAt.Before(timeoutBoundary) {

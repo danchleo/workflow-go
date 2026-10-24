@@ -101,29 +101,39 @@ type DefaultScheduler struct {
 	checkerStop    chan struct{}
 	wg             sync.WaitGroup
 	once           sync.Once
-	captureTimeout time.Duration // how long captured_at is valid before re-capture
+	captureTimeout time.Duration // how long captured_at protects a job before re-capture
 	pollInterval   time.Duration // how often jobStoreChecker polls DB
+	pickupJobAfter time.Duration // Python pickup_job_after — give heapDispatcher a head-start
 	started        bool
 }
 
 // NewDefaultScheduler creates a scheduler backed by the given store.
-// Parameters:
+// Parameters (match Python DefaultScheduler config defaults):
 //
-//	pollInterval — DB poll cadence for crash-recovery jobs (default 500ms if 0)
-//	captureTimeout — how long a captured job is still "owned" before
-//	  another scheduler can re-capture (default 30s if 0).
-func NewDefaultScheduler(store db.Store, pollInterval, captureTimeout time.Duration) *DefaultScheduler {
+//	pollInterval    — DB poll cadence (Python fixed_delay; default 500ms)
+//	captureTimeout  — captured_at ownership window (Python captured_job_timeout; default 30s)
+//	pickupJobAfter  — only jobs whose execute_at has passed this long are
+//	                  eligible for DB pickup. Gives heapDispatcher priority
+//	                  for recently-due jobs. (Python pickup_job_after; default 60s)
+func NewDefaultScheduler(store db.Store, pollInterval, captureTimeout, pickupJobAfter time.Duration) *DefaultScheduler {
 	if pollInterval <= 0 {
 		pollInterval = 500 * time.Millisecond
 	}
 	if captureTimeout <= 0 {
 		captureTimeout = 30 * time.Second
 	}
+	// pickupJobAfter: 0 = disabled (immediate pickup, for unit tests),
+	// >0 = explicit window (matches Python default 60s).
+	// Negative values are treated as default (60s).
+	if pickupJobAfter < 0 {
+		pickupJobAfter = 60 * time.Second
+	}
 	return &DefaultScheduler{
 		store:          store,
 		wake:           make(chan struct{}, 1),
 		captureTimeout: captureTimeout,
 		pollInterval:   pollInterval,
+		pickupJobAfter: pickupJobAfter,
 	}
 }
 
@@ -272,7 +282,12 @@ func (s *DefaultScheduler) jobStoreChecker() {
 }
 
 func (s *DefaultScheduler) processStoreJobs() {
-	jobs, err := s.store.ScheduledJobs().GetDueJobs(db.Now(), s.captureTimeout, 0)
+	// Python: execute_at < time - pickup_job_after
+	// i.e. only pick up jobs that have been due for pickupJobAfter window.
+	// This gives heapDispatcher first chance for recently-due work.
+	now := db.Now()
+	executeCutoff := now.Add(-s.pickupJobAfter)
+	jobs, err := s.store.ScheduledJobs().GetDueJobs(executeCutoff, now, s.captureTimeout, 0)
 	if err != nil {
 		log.Printf("scheduler: GetDueJobs: %v", err)
 		return

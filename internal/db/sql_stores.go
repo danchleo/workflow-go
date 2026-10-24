@@ -647,14 +647,15 @@ func (s *sqlScheduledJobStore) List() ([]*ScheduledJob, error) {
 	return out, nil
 }
 
-func (s *sqlScheduledJobStore) GetDueJobs(now time.Time, captureTimeout time.Duration, batchSize int) ([]*ScheduledJob, error) {
-	// due = (captured_at IS NULL OR captured_at < now - captureTimeout) AND execute_at <= now
+func (s *sqlScheduledJobStore) GetDueJobs(executeCutoff time.Time, now time.Time, captureTimeout time.Duration, batchSize int) ([]*ScheduledJob, error) {
+	// due = (captured_at IS NULL OR captured_at < now - captureTimeout) AND execute_at <= executeCutoff
+	// executeCutoff = now - pickupJobAfter in Python (gives heapDispatcher a head-start)
 	timeoutBoundary := now.Add(-captureTimeout).Format(time.RFC3339)
-	nowStr := now.Format(time.RFC3339)
+	cutoffStr := executeCutoff.Format(time.RFC3339)
 
 	q := s.db.Where(
 		"((captured_at IS NULL OR captured_at < ?) AND execute_at <= ?)",
-		timeoutBoundary, nowStr,
+		timeoutBoundary, cutoffStr,
 	)
 	if batchSize > 0 {
 		q = q.Limit(batchSize)

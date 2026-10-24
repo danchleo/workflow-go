@@ -70,10 +70,15 @@ type ScheduledJobStore interface {
 	Create(j *ScheduledJob) error
 	Get(id string) (*ScheduledJob, error)
 	List() ([]*ScheduledJob, error)
-	// GetDueJobs returns all jobs where execute_at <= now that are NOT captured
-	// (captured_at IS NULL) OR whose captured_at is older than captureTimeout
-	// (stuck captures, e.g. previous scheduler crash). batchSize = 0 means all.
-	GetDueJobs(now time.Time, captureTimeout time.Duration, batchSize int) ([]*ScheduledJob, error)
+	// GetDueJobs returns all jobs where execute_at <= executeCutoff that are
+	// NOT captured (captured_at IS NULL) OR whose captured_at is older than
+	// (now - captureTimeout) — i.e. stuck captures (previous scheduler crash).
+	// batchSize = 0 means all.
+	// executeCutoff — Python's (time - pickup_job_after). Only jobs whose
+	//   execute_at has passed this cutoff are considered for DB pickup.
+	//   heapDispatcher handles everything between executeCutoff and now.
+	// now — current wall-clock time. Used ONLY for the captured_at lock check.
+	GetDueJobs(executeCutoff time.Time, now time.Time, captureTimeout time.Duration, batchSize int) ([]*ScheduledJob, error)
 	// Capture marks a job as captured for execution. Uses optimistic lock:
 	// UPDATE ... SET captured_at = NOW() WHERE id = ? AND captured_at = oldCapturedAt.
 	// Returns true if this call captured the job (affected rows == 1).
