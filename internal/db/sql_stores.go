@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -469,3 +470,82 @@ func (s *sqlEnvStoreSQL) Update(e *Environment) error {
 	return s.db.Save(&gEnv{ID: e.ID, Name: e.Name, Data: blobMarshal(e)}).Error
 }
 func (s *sqlEnvStoreSQL) Delete(id string) error { return s.db.Delete(&gEnv{}, "id = ?", id).Error }
+
+// --- CronTriggerStore (hybrid: key columns + Data blob) ---
+
+type gCronTrigger struct {
+	ID                  string `gorm:"primaryKey"`
+	Name                string `gorm:"index"`
+	NextExecutionTime   string // ISO8601
+	RemainingExecutions int
+	Data                string // blob with full CronTrigger JSON
+}
+
+func (gCronTrigger) TableName() string { return "cron_triggers" }
+
+type sqlCronTriggerStore struct{ db *gorm.DB }
+
+func (s *sqlCronTriggerStore) Create(ct *CronTrigger) error {
+	if ct.ID == "" {
+		ct.ID = GenerateID()
+	}
+	if ct.NextExecutionTime.IsZero() && ct.IntervalSeconds > 0 {
+		ct.NextExecutionTime = Now().Add(time.Duration(ct.IntervalSeconds) * time.Second)
+	}
+	return s.db.Create(&gCronTrigger{
+		ID: ct.ID, Name: ct.Name,
+		NextExecutionTime:   ct.NextExecutionTime.Format(time.RFC3339),
+		RemainingExecutions: ct.RemainingExecutions,
+		Data:                blobMarshal(ct),
+	}).Error
+}
+func (s *sqlCronTriggerStore) Get(id string) (*CronTrigger, error) {
+	var g gCronTrigger
+	if err := s.db.First(&g, "id = ?", id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, &NotFoundError{Entity: "CronTrigger", ID: id}
+		}
+		return nil, err
+	}
+	var ct CronTrigger
+	if err := json.Unmarshal([]byte(g.Data), &ct); err != nil {
+		return nil, fmt.Errorf("unmarshal: %w", err)
+	}
+	return &ct, nil
+}
+func (s *sqlCronTriggerStore) GetByName(name string) (*CronTrigger, error) {
+	var all []gCronTrigger
+	if err := s.db.Find(&all).Error; err != nil {
+		return nil, err
+	}
+	for _, g := range all {
+		var ct CronTrigger
+		_ = json.Unmarshal([]byte(g.Data), &ct)
+		if ct.Name == name {
+			return &ct, nil
+		}
+	}
+	return nil, &NotFoundError{Entity: "CronTrigger", ID: name}
+}
+func (s *sqlCronTriggerStore) List() ([]*CronTrigger, error) {
+	var all []gCronTrigger
+	_ = s.db.Find(&all).Error
+	out := make([]*CronTrigger, 0, len(all))
+	for _, g := range all {
+		var ct CronTrigger
+		_ = json.Unmarshal([]byte(g.Data), &ct)
+		out = append(out, &ct)
+	}
+	return out, nil
+}
+func (s *sqlCronTriggerStore) Update(ct *CronTrigger) error {
+	return s.db.Save(&gCronTrigger{
+		ID: ct.ID, Name: ct.Name,
+		NextExecutionTime:   ct.NextExecutionTime.Format(time.RFC3339),
+		RemainingExecutions: ct.RemainingExecutions,
+		Data:                blobMarshal(ct),
+	}).Error
+}
+func (s *sqlCronTriggerStore) Delete(id string) error {
+	return s.db.Delete(&gCronTrigger{}, "id = ?", id).Error
+}

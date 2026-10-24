@@ -25,7 +25,7 @@ func NewSQLStore(dsn string) (Store, error) {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 	if err := gormDB.AutoMigrate(
-		&gWorkflowDef{}, &gActionDef{}, &gWfEx{}, &gTaskEx{}, &gActEx{}, &gEnv{},
+		&gWorkflowDef{}, &gActionDef{}, &gWfEx{}, &gTaskEx{}, &gActEx{}, &gEnv{}, &gCronTrigger{},
 	); err != nil {
 		return nil, fmt.Errorf("autmigrate: %w", err)
 	}
@@ -45,6 +45,7 @@ func (s *sqlStore) WorkflowExecutions() WorkflowExecutionStore   { return &sqlWf
 func (s *sqlStore) TaskExecutions() TaskExecutionStore           { return &sqlTaskExStoreSQL{db: s.db} }
 func (s *sqlStore) ActionExecutions() ActionExecutionStore       { return &sqlActExStoreSQL{db: s.db} }
 func (s *sqlStore) Environments() EnvironmentStore               { return &sqlEnvStoreSQL{db: s.db} }
+func (s *sqlStore) CronTriggers() CronTriggerStore               { return &sqlCronTriggerStore{db: s.db} }
 
 func (s *sqlStore) AcquireLock(name string) error {
 	// Use an in-process named channel — good enough for :memory: SQLite

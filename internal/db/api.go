@@ -63,6 +63,16 @@ type EnvironmentStore interface {
 	Delete(id string) error
 }
 
+// CronTriggerStore defines CRUD for cron trigger definitions.
+type CronTriggerStore interface {
+	Create(ct *CronTrigger) error
+	Get(id string) (*CronTrigger, error)
+	GetByName(name string) (*CronTrigger, error)
+	List() ([]*CronTrigger, error)
+	Update(ct *CronTrigger) error
+	Delete(id string) error
+}
+
 // Store is the aggregate database interface that combines all entity stores.
 type Store interface {
 	WorkflowDefinitions() WorkflowDefinitionStore
@@ -71,6 +81,7 @@ type Store interface {
 	TaskExecutions() TaskExecutionStore
 	ActionExecutions() ActionExecutionStore
 	Environments() EnvironmentStore
+	CronTriggers() CronTriggerStore
 
 	// Lock management (named locks for concurrency control).
 	AcquireLock(lockName string) error

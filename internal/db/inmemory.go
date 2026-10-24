@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // InMemoryStore provides an in-memory implementation of the Store interface.
@@ -18,6 +19,7 @@ type InMemoryStore struct {
 	taskExecs    map[string]*TaskExecution
 	actionExecs  map[string]*ActionExecution
 	environments map[string]*Environment
+	cronTriggers map[string]*CronTrigger
 
 	// Locks: map of lock name -> channel used for simple mutex semantics.
 	locks map[string]chan struct{}
@@ -32,6 +34,7 @@ func NewInMemoryStore() *InMemoryStore {
 		taskExecs:    make(map[string]*TaskExecution),
 		actionExecs:  make(map[string]*ActionExecution),
 		environments: make(map[string]*Environment),
+		cronTriggers: make(map[string]*CronTrigger),
 		locks:        make(map[string]chan struct{}),
 	}
 }
@@ -42,6 +45,7 @@ func (s *InMemoryStore) WorkflowExecutions() WorkflowExecutionStore   { return &
 func (s *InMemoryStore) TaskExecutions() TaskExecutionStore           { return &tmExecStore{s} }
 func (s *InMemoryStore) ActionExecutions() ActionExecutionStore       { return &amExecStore{s} }
 func (s *InMemoryStore) Environments() EnvironmentStore               { return &envStore{s} }
+func (s *InMemoryStore) CronTriggers() CronTriggerStore               { return &memCronTriggerStore{s} }
 
 func (s *InMemoryStore) AcquireLock(name string) error {
 	s.mu.Lock()
@@ -594,6 +598,77 @@ func (e *envStore) Delete(id string) error {
 	e.s.mu.Lock()
 	defer e.s.mu.Unlock()
 	delete(e.s.environments, id)
+	return nil
+}
+
+// --- CronTriggerStore ---
+
+type memCronTriggerStore struct{ s *InMemoryStore }
+
+func (m *memCronTriggerStore) Create(ct *CronTrigger) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	if ct.ID == "" {
+		ct.ID = GenerateID()
+	}
+	if ct.NextExecutionTime.IsZero() && ct.IntervalSeconds > 0 {
+		ct.NextExecutionTime = Now().Add(time.Duration(ct.IntervalSeconds) * time.Second)
+	}
+	now := Now()
+	ct.CreatedAt = now
+	ct.UpdatedAt = now
+	m.s.cronTriggers[ct.ID] = ct
+	return nil
+}
+
+func (m *memCronTriggerStore) Get(id string) (*CronTrigger, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	ct, ok := m.s.cronTriggers[id]
+	if !ok {
+		return nil, &NotFoundError{Entity: "CronTrigger", ID: id}
+	}
+	return ct, nil
+}
+
+func (m *memCronTriggerStore) GetByName(name string) (*CronTrigger, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	for _, ct := range m.s.cronTriggers {
+		if ct.Name == name {
+			return ct, nil
+		}
+	}
+	return nil, &NotFoundError{Entity: "CronTrigger", ID: name}
+}
+
+func (m *memCronTriggerStore) List() ([]*CronTrigger, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	result := make([]*CronTrigger, 0, len(m.s.cronTriggers))
+	for _, ct := range m.s.cronTriggers {
+		result = append(result, ct)
+	}
+	return result, nil
+}
+
+func (m *memCronTriggerStore) Update(ct *CronTrigger) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	existing, ok := m.s.cronTriggers[ct.ID]
+	if !ok {
+		return &NotFoundError{Entity: "CronTrigger", ID: ct.ID}
+	}
+	ct.CreatedAt = existing.CreatedAt
+	ct.UpdatedAt = Now()
+	m.s.cronTriggers[ct.ID] = ct
+	return nil
+}
+
+func (m *memCronTriggerStore) Delete(id string) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	delete(m.s.cronTriggers, id)
 	return nil
 }
 

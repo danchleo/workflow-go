@@ -192,10 +192,11 @@ type CronTrigger struct {
 	ID                  string                 `json:"id"`
 	Name                string                 `json:"name"`
 	Pattern             string                 `json:"pattern"`
+	IntervalSeconds     int                    `json:"interval_seconds"` // simple interval (v1)
 	FirstExecutionTime  *time.Time             `json:"first_execution_time"`
 	NextExecutionTime   time.Time              `json:"next_execution_time"`
 	WorkflowName        string                 `json:"workflow_name"`
-	RemainingExecutions int                    `json:"remaining_executions"`
+	RemainingExecutions int                    `json:"remaining_executions"` // 0 = unlimited
 	WorkflowID          string                 `json:"workflow_id"`
 	WorkflowParams      map[string]interface{} `json:"workflow_params"`
 	WorkflowInput       map[string]interface{} `json:"workflow_input"`

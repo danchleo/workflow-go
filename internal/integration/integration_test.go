@@ -15,6 +15,7 @@ import (
 	"github.com/mistral/workflow/internal/db"
 	"github.com/mistral/workflow/internal/engine"
 	"github.com/mistral/workflow/internal/lang/parser"
+	"github.com/mistral/workflow/internal/scheduler"
 	"github.com/mistral/workflow/internal/services"
 	"github.com/mistral/workflow/internal/states"
 	"gopkg.in/yaml.v3"
@@ -1672,4 +1673,100 @@ func TestIntegration_TimeoutPolicy_ForcesError(t *testing.T) {
 
 	t.Logf("  timeout: hanging=%s, recovered=%v, final=%s",
 		hangingTask.State, recoveredTask != nil, final.State)
+}
+
+// ================================================================
+// Scenario: Cron Trigger / Scheduler. Register a CronTrigger with
+// interval=1s, remaining=2. Manually call scheduler.RunOnce() twice
+// at t=0 and t=1s+ to fire the trigger. Verify exactly 2 WorkflowExecutions
+// were auto-created and the trigger was deleted after exhausting.
+// ================================================================
+func TestIntegration_CronTrigger_FiresWorkflow(t *testing.T) {
+	t.Helper()
+
+	store, err := db.NewSQLStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	eng := engine.NewDefaultEngine(store)
+	svc := services.NewWorkflowService(store)
+
+	// Register a tiny inline workflow.
+	wfYAML := `version: "2.0"
+name: cron_target
+tasks:
+  echo:
+    action: std.echo
+    input:
+      output: "cron-fired"
+`
+	wfDef, err := svc.CreateWorkflow("cron_target", wfYAML, "integration-test", "")
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	// Create CronTrigger: fires now (interval=0 → auto-fires), remaining=2.
+	ct := &db.CronTrigger{
+		Name:                "test-cron",
+		Pattern:             "interval:1s",
+		IntervalSeconds:     1,
+		WorkflowID:          wfDef.ID,
+		RemainingExecutions: 2,
+		ProjectID:           "integration-test",
+		NextExecutionTime:   db.Now(), // due immediately
+	}
+	if err := store.CronTriggers().Create(ct); err != nil {
+		t.Fatalf("Create CronTrigger: %v", err)
+	}
+
+	// Wire the scheduler to the engine (engine.StartWorkflow IS the WorkflowStarter).
+	sched := scheduler.NewDefaultScheduler(store, eng, 100*time.Millisecond)
+
+	// 1st RunOnce → trigger should fire immediately.
+	sched.RunOnce()
+	time.Sleep(200 * time.Millisecond) // let goroutines settle
+
+	wfExs, _ := store.WorkflowExecutions().List("")
+	if len(wfExs) != 1 {
+		t.Fatalf("after 1st RunOnce: wfExs=%d, want 1", len(wfExs))
+	}
+	// Trigger remaining should be 1 now.
+	ctAfter1, _ := store.CronTriggers().GetByName("test-cron")
+	if ctAfter1 == nil {
+		t.Fatal("cron trigger not found after 1st fire")
+	}
+	if ctAfter1.RemainingExecutions != 1 {
+		t.Errorf("remaining after 1st fire = %d, want 1", ctAfter1.RemainingExecutions)
+	}
+	if !ctAfter1.NextExecutionTime.After(db.Now()) {
+		t.Error("NextExecutionTime should have advanced")
+	}
+	t.Logf("  1st fire: wfEx=%s, remaining=%d", wfExs[0].ID, ctAfter1.RemainingExecutions)
+
+	// Sleep past the 1s interval → 2nd RunOnce → 2nd fire.
+	time.Sleep(1100 * time.Millisecond)
+	sched.RunOnce()
+	time.Sleep(200 * time.Millisecond)
+
+	wfExs, _ = store.WorkflowExecutions().List("")
+	if len(wfExs) != 2 {
+		t.Fatalf("after 2nd RunOnce: wfExs=%d, want 2", len(wfExs))
+	}
+
+	// Trigger should be DELETED (remaining decremented to 0).
+	ctAfter2, err := store.CronTriggers().GetByName("test-cron")
+	if err == nil && ctAfter2 != nil {
+		t.Error("trigger should be deleted after remaining=0, but still exists")
+	}
+	t.Logf("  2nd fire: total wfExs=%d, trigger deleted (remaining→0)", len(wfExs))
+
+	// 3rd RunOnce (should be a no-op — trigger is gone).
+	sched.RunOnce()
+	time.Sleep(100 * time.Millisecond)
+	wfExs, _ = store.WorkflowExecutions().List("")
+	if len(wfExs) != 2 {
+		t.Errorf("after 3rd RunOnce: wfExs=%d, want still 2", len(wfExs))
+	}
+
+	t.Logf("  cron trigger test: 2 wfExs auto-created, trigger auto-deleted ✅")
 }
