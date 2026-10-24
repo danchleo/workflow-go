@@ -134,7 +134,7 @@ func runWorkflowFromYAML(t *testing.T, f fixture) (*db.WorkflowExecution, db.Sto
 // --- Individual tests (one per fixture) ---
 
 func TestIntegration_DirectSerial(t *testing.T) {
-	final, _ := runWorkflowFromYAML(t, fixture{
+	final, store := runWorkflowFromYAML(t, fixture{
 		yamlPath:      "direct_serial.yaml",
 		description:   "2-task serial workflow with publish + output expressions",
 		input:         map[string]interface{}{"greeting": "Hi", "name": "Integration"},
@@ -152,21 +152,73 @@ func TestIntegration_DirectSerial(t *testing.T) {
 			}
 		}
 	}
-	if _, ok := final.Output["final_msg"]; !ok {
-		t.Error("expected final.Output['final_msg'] to be present")
+
+	// Cross-reference: greeting_was (evaluated from greeting_result publish)
+	// must equal the actual greeting_task's result value.
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	var greetingResult interface{}
+	for _, te := range tasks {
+		if te.Name == "greeting_task" && len(te.Output) > 0 {
+			greetingResult = te.Output["result"]
+		}
 	}
-	if _, ok := final.Output["greeting_was"]; !ok {
-		t.Error("expected final.Output['greeting_was'] to be present (publish variable)")
+	if greetingWas, ok := final.Output["greeting_was"].(string); ok {
+		if greetingResult != nil {
+			if greetingWas != fmt.Sprintf("%v", greetingResult) {
+				t.Errorf("greeting_was = %q, want %q (greeting_task.result)", greetingWas, greetingResult)
+			}
+		} else {
+			t.Errorf("couldn't find greeting_task result for cross-check")
+		}
+	} else {
+		t.Error("final.Output['greeting_was'] missing or not a string")
 	}
 }
 
 func TestIntegration_WithItems_Fanout(t *testing.T) {
-	final, _ := runWorkflowFromYAML(t, fixture{
+	final, store := runWorkflowFromYAML(t, fixture{
 		yamlPath:      "with_items_fanout.yaml",
 		description:   "with-items creating 3 parallel iterations",
 		input:         map[string]interface{}{"items": []interface{}{"alpha", "beta", "gamma"}},
 		expectedState: states.SUCCESS,
 	})
+
+	// Verify fanout actually happened: exactly 3 ActionExecutions under the fanout task.
+	fanoutTasks, _ := store.TaskExecutions().List(final.ID, "")
+	for _, te := range fanoutTasks {
+		if te.Name != "fanout" {
+			continue
+		}
+		actionExs, err := store.ActionExecutions().List(te.ID, "")
+		if err != nil {
+			t.Fatalf("list ActionExecutions for fanout: %v", err)
+		}
+		if len(actionExs) != 3 {
+			t.Fatalf("fanout ActionExecutions count = %d, want 3", len(actionExs))
+		}
+
+		indices := make(map[int]bool)
+		for _, ae := range actionExs {
+			t.Logf("  ae id=%s index=%v (type %T) state=%s", ae.ID, ae.RuntimeContext["index"], ae.RuntimeContext["index"], ae.State)
+			idxRaw := ae.RuntimeContext["index"]
+			var idx int
+			switch v := idxRaw.(type) {
+			case int:
+				idx = v
+			case float64:
+				idx = int(v)
+			}
+			indices[idx] = true
+			if ae.State != states.SUCCESS {
+				t.Errorf("ActionExecution idx=%d state=%s, want SUCCESS", idx, ae.State)
+			}
+		}
+		if !indices[0] || !indices[1] || !indices[2] {
+			t.Errorf("fanout indices = %v, want {0,1,2}", indices)
+		}
+		t.Logf("  fanout indices verified: %v", indices)
+	}
+
 	if final.Output != nil {
 		for k, v := range final.Output {
 			if s, ok := v.(string); ok && containsAny(s, "<%", "{{") {
