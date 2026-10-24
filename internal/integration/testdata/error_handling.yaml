@@ -1,0 +1,16 @@
+version: "2.0"
+name: error_handling
+description: A task that fails; on-error routes control to a recovery task
+
+tasks:
+  risky:
+    action: std.fail
+    input:
+      error_msg: "simulated failure"
+    on-error:
+      - recover
+
+  recover:
+    action: std.echo
+    input:
+      output: "recovered"

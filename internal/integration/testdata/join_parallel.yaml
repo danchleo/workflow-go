@@ -1,0 +1,23 @@
+version: "2.0"
+name: join_parallel
+description: Two start tasks with on-success to the same target — controller join logic
+
+tasks:
+  top:
+    action: std.echo
+    input:
+      output: "top"
+    on-success:
+      - join_me
+
+  bottom:
+    action: std.echo
+    input:
+      output: "bottom"
+    on-success:
+      - join_me
+
+  join_me:
+    action: std.echo
+    input:
+      output: "after-join"

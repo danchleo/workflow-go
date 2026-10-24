@@ -1,0 +1,27 @@
+version: "2.0"
+name: reverse_requires
+description: Reverse workflow — tasks declare requires, controller auto-pulls them
+
+tasks:
+  step1:
+    action: std.echo
+    input:
+      output: "step-1"
+
+  step2:
+    action: std.echo
+    input:
+      output: "step-2"
+    requires: [step1]
+
+  step3:
+    action: std.echo
+    input:
+      output: "step-3"
+    requires: [step2]
+
+  final:
+    action: std.echo
+    input:
+      output: "done"
+    requires: [step3]

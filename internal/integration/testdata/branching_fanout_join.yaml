@@ -1,0 +1,31 @@
+version: "2.0"
+name: branching_fanout_join
+description: Task 1 fans out to 2, both fan in to task 3 (join logic)
+
+tasks:
+  first:
+    action: std.echo
+    input:
+      output: "first"
+    on-success:
+      - branch_a
+      - branch_b
+
+  branch_a:
+    action: std.echo
+    input:
+      output: "a"
+    on-success:
+      - last
+
+  branch_b:
+    action: std.echo
+    input:
+      output: "b"
+    on-success:
+      - last
+
+  last:
+    action: std.echo
+    input:
+      output: "joined"

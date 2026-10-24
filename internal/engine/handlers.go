@@ -409,10 +409,10 @@ func (e *DefaultEngine) startWithItemsTask(ctx context.Context, taskEx *db.TaskE
 		return e.store.TaskExecutions().Update(taskEx)
 	}
 
-	// Record iteration state in task runtime context.
-	doneMap := make(map[int]bool)
-	taskEx.RuntimeContext["with_items_size"] = minLen
-	taskEx.RuntimeContext["with_items_done"] = doneMap
+	// Record iteration state in task runtime context (use int counters —
+	// JSON persistence of map[int]bool would turn keys into strings).
+	taskEx.RuntimeContext["with_items_total"] = minLen
+	taskEx.RuntimeContext["with_items_done_count"] = 0
 	taskEx.RuntimeContext["with_items_values"] = withValues
 
 	// Create one ActionExecution per iteration.
@@ -535,24 +535,17 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 	}
 
 	// Handle with-items: defer task completion until all iterations finish.
-	if _, hasSize := taskEx.RuntimeContext["with_items_size"]; hasSize {
-		idx := 0
-		if actionEx != nil {
-			if i, ok := actionEx.RuntimeContext["index"].(int); ok {
-				idx = i
-			}
+	if _, hasSize := taskEx.RuntimeContext["with_items_total"]; hasSize {
+		total, _ := taskEx.RuntimeContext["with_items_total"].(int)
+		var doneCount int
+		if c, ok := taskEx.RuntimeContext["with_items_done_count"].(int); ok {
+			doneCount = c
 		}
-		doneMap, _ := taskEx.RuntimeContext["with_items_done"].(map[int]bool)
-		if doneMap == nil {
-			doneMap = make(map[int]bool)
-			taskEx.RuntimeContext["with_items_done"] = doneMap
-		}
-		doneMap[idx] = true
-
-		total, _ := taskEx.RuntimeContext["with_items_size"].(int)
-		if len(doneMap) < total {
-			// Not all iterations done — just persist the updated map and bail.
-			log.Printf("with-items task %s: %d/%d iterations done", taskEx.Name, len(doneMap), total)
+		doneCount++
+		taskEx.RuntimeContext["with_items_done_count"] = doneCount
+		if doneCount < total {
+			// Not all iterations done — just persist and bail.
+			log.Printf("with-items task %s: %d/%d iterations done", taskEx.Name, doneCount, total)
 			return e.store.TaskExecutions().Update(taskEx)
 		}
 		log.Printf("with-items task %s: all %d iterations done, completing", taskEx.Name, total)

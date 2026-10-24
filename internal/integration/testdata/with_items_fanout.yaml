@@ -1,0 +1,20 @@
+version: "2.0"
+name: with_items_fanout
+description: Fan-out with 3 with-items iterations — parallel, joins at the end
+
+input:
+  - items: ["alpha", "beta", "gamma"]
+
+tasks:
+  fanout:
+    action: std.echo
+    with-items: item in <% $.items %>
+    input:
+      output: "<% $.item %>"
+    on-success:
+      - sink
+
+  sink:
+    action: std.echo
+    input:
+      output: "fanout-done"

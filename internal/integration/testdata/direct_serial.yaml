@@ -1,0 +1,26 @@
+version: "2.0"
+name: direct_serial
+description: Two tasks in serial — basic direct workflow
+
+input:
+  - greeting: "Hi"
+  - name: "Integration"
+
+tasks:
+  greeting_task:
+    action: std.echo
+    input:
+      output: "<% $.greeting %>, <% $.name %>!"
+    publish:
+      greeting_result: "<% $.greeting_task.result %>"
+    on-success:
+      - farewell_task
+
+  farewell_task:
+    action: std.echo
+    input:
+      output: "Done <% $.greeting_result %>"
+
+output:
+  final_msg: "<% $.farewell_task.result %>"
+  greeting_was: "<% $.greeting_result %>"
