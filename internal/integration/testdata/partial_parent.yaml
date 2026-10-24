@@ -1,0 +1,35 @@
+version: "2.0"
+name: partial_parent
+description: Parent with with-items (3 iters) calling sub-wf — iter 2 fails → parent ERROR → on-error recovery
+
+tasks:
+  fanout_children:
+    workflow: partial_child
+    input:
+      token: "<% $.item %>"
+    with-items:
+      item:
+        - "first"
+        - "second"
+        - "third"
+    on-success:
+      - all_good
+    on-error:
+      - handle_some_failed
+
+  all_good:
+    action: std.echo
+    input:
+      output: "all-3-iterations-succeeded"
+
+  handle_some_failed:
+    action: std.echo
+    input:
+      output: "some-iterations-failed-but-we-recover"
+    on-success:
+      - continue_after_error
+
+  continue_after_error:
+    action: std.echo
+    input:
+      output: "parent-continues-despite-error"

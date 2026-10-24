@@ -1,0 +1,27 @@
+version: "2.0"
+name: sibling_join_parent
+description: Parent spawns two parallel sub-workflows that both fan into a join
+
+tasks:
+  start:
+    action: std.echo
+    input:
+      output: "kickoff"
+    on-success:
+      - spawn_a
+      - spawn_b
+
+  spawn_a:
+    workflow: sib_a
+    on-success:
+      - join_point
+
+  spawn_b:
+    workflow: sib_b
+    on-success:
+      - join_point
+
+  join_point:
+    action: std.echo
+    input:
+      output: "both-siblings-done"

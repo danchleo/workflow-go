@@ -450,11 +450,17 @@ func (e *DefaultEngine) startWithItemsTask(ctx context.Context, taskEx *db.TaskE
 	withValues := make(map[string][]interface{})
 	var minLen int = -1
 	for varName, rawExpr := range withItems {
-		exprStr, ok := rawExpr.(string)
-		if !ok {
-			return fmt.Errorf("with-items value for %q must be a string expression, got %T", varName, rawExpr)
+		var val interface{}
+		switch v := rawExpr.(type) {
+		case string:
+			// Expression form: "var in <% $.items %>" → evaluate against context.
+			val = expressions.EvaluateRecursively(v, ctxMap)
+		case []interface{}:
+			// Literal list form (Mistral YAML map syntax): with-items: {item: [a, b]}.
+			val = v
+		default:
+			return fmt.Errorf("with-items value for %q must be string expression or literal list, got %T", varName, rawExpr)
 		}
-		val := expressions.EvaluateRecursively(exprStr, ctxMap)
 		var items []interface{}
 		switch v := val.(type) {
 		case []interface{}:
@@ -659,16 +665,30 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 	}
 
 	// Handle with-items: defer task completion until all iterations finish.
+	// Mirror Python WithItemsTask._complete_actions (engine/tasks.py ~line 870):
+	// if any iter ERROR → task ERROR, else SUCCESS. We count failed iters
+	// alongside done_count so the final state is determined by aggregation.
 	if _, hasSize := taskEx.RuntimeContext["with_items_total"]; hasSize {
-		total := coerceInt(taskEx.RuntimeContext["with_items_total"])
-		doneCount := coerceInt(taskEx.RuntimeContext["with_items_done_count"])
+		total := db.CoerceInt(taskEx.RuntimeContext["with_items_total"])
+		doneCount := db.CoerceInt(taskEx.RuntimeContext["with_items_done_count"])
+		failedCount := db.CoerceInt(taskEx.RuntimeContext["with_items_failed_count"])
 		doneCount++
+		if states.IsFailed(newState) {
+			failedCount++
+		}
 		taskEx.RuntimeContext["with_items_done_count"] = doneCount
+		taskEx.RuntimeContext["with_items_failed_count"] = failedCount
 		if doneCount < total {
-			log.Printf("with-items task %s: %d/%d iterations done", taskEx.Name, doneCount, total)
+			log.Printf("with-items task %s: %d/%d iterations done (%d failed)", taskEx.Name, doneCount, total, failedCount)
 			return e.store.TaskExecutions().Update(taskEx)
 		}
-		log.Printf("with-items task %s: all %d iterations done, completing", taskEx.Name, total)
+		// Aggregate final state — Python WithItemsTask rule.
+		if failedCount > 0 {
+			newState = states.ERROR
+			stateInfo = fmt.Sprintf("%d of %d with-items iterations failed", failedCount, total)
+		}
+		log.Printf("with-items task %s: all %d iterations done (%d failed), final state=%s",
+			taskEx.Name, total, failedCount, newState)
 	}
 
 	// Complete the task.
@@ -818,23 +838,6 @@ func (e *DefaultEngine) checkAndCompleteWorkflow(wfEx *db.WorkflowExecution, ctr
 	}
 
 	return nil
-}
-
-// coerceInt safely converts a value that survived JSON round-trip (int → float64)
-// back to a Go int. Needed because SQLStore blob pattern serializes RuntimeContext
-// as JSON, turning Go ints into float64 on unmarshal.
-func coerceInt(v interface{}) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
-	case float32:
-		return int(n)
-	}
-	return 0
 }
 
 // evaluateTaskInput evaluates a task's input dictionary against context.

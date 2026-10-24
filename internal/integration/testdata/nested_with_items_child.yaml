@@ -1,0 +1,15 @@
+version: "2.0"
+name: nw_child
+description: Sub-workflow that itself uses with-items (inner fanout)
+
+tasks:
+  inner_fanout:
+    action: std.echo
+    input:
+      output: "inner-<% $.sub %>-<% $.item %>"
+    with-items: item in <% $.inner_items %>
+    on-success:
+      inner_done:
+        action: std.echo
+        input:
+          output: "inner-all-done"

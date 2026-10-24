@@ -1,0 +1,14 @@
+version: "2.0"
+name: deep_D
+description: Innermost workflow (leaf) — D
+
+tasks:
+  d_step1:
+    action: std.echo
+    input:
+      output: "D-step1"
+    on-success:
+      d_final:
+        action: std.echo
+        input:
+          output: "D-final"

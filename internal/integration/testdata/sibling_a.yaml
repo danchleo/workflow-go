@@ -1,0 +1,14 @@
+version: "2.0"
+name: sib_a
+description: Sub-workflow A for sibling parallel join test
+
+tasks:
+  step_a1:
+    action: std.echo
+    input:
+      output: "a1-done"
+    on-success:
+      step_a2:
+        action: std.echo
+        input:
+          output: "a2-done"

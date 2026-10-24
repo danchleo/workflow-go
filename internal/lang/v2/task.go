@@ -13,20 +13,20 @@ const (
 // TaskSpec represents a single task in a workflow.
 // Ported from mistral-master/mistral/lang/v2/tasks.py
 type TaskSpec struct {
-	name        string
-	description string
-	action      string
-	workflow    string
-	tags        []string
-	input       map[string]interface{}
-	withItems   map[string]interface{}
-	publish     map[string]interface{}
+	name           string
+	description    string
+	action         string
+	workflow       string
+	tags           []string
+	input          map[string]interface{}
+	withItems      map[string]interface{}
+	publish        map[string]interface{}
 	publishOnError map[string]interface{}
 	publishOnSkip  map[string]interface{}
-	policies    *PoliciesSpec
-	target      interface{}
-	keepResult  interface{}
-	safeRerun   interface{}
+	policies       *PoliciesSpec
+	target         interface{}
+	keepResult     interface{}
+	safeRerun      interface{}
 
 	// Direct workflow specific.
 	join       interface{}
@@ -169,61 +169,131 @@ func NewTaskSpec(name string, data map[string]interface{}, taskType string) *Tas
 }
 
 // parseWithItems parses the 'with-items' expression.
-// Format: var1 in <% $.array1 %>, var2 in [item1, item2, ...]
+// Three formats supported (mirror Python mistral/lang/v2/tasks.py _parse_with_items):
+//  1. String:      "var1 in <% $.array1 %>, var2 in <% $.array2 %>"   (multi-var)
+//  2. List of strs: ["var1 in <% $.array1 %>", "var2 in <% $.array2 %>"]
+//  3. Map:         {item: [a, b, c]}  — var → literal item list
 func parseWithItems(data interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 
-	var rawItems []interface{}
 	switch v := data.(type) {
-	case string:
-		rawItems = []interface{}{v}
-	case []interface{}:
-		rawItems = v
-	default:
-		return result
-	}
-
-	for _, item := range rawItems {
-		itemStr, ok := item.(string)
-		if !ok {
-			continue
+	case map[string]interface{}:
+		// Format 3: with-items: {var: [item1, item2]} or {var: "<% $.expr %>"}
+		for varName, items := range v {
+			result[varName] = items
 		}
-		// Parse "var in expression" format.
-		// Find " in " separator.
-		sepIdx := -1
-		for i := 0; i < len(itemStr)-3; i++ {
-			if itemStr[i:i+4] == " in " {
-				sepIdx = i
-				break
+		return result
+	case string:
+		// Wrap single string form into the iteration below.
+		parts := splitTopLevel(v, ',')
+		for _, p := range parts {
+			sepIdx := -1
+			for i := 0; i < len(p)-3; i++ {
+				if p[i:i+4] == " in " {
+					sepIdx = i
+					break
+				}
+			}
+			if sepIdx < 0 {
+				continue
+			}
+			varName := p[:sepIdx]
+			expr := p[sepIdx+4:]
+			result[varName] = expr
+		}
+	case []interface{}:
+		for _, item := range v {
+			if itemStr, ok := item.(string); ok {
+				parts := splitTopLevel(itemStr, ',')
+				for _, p := range parts {
+					sepIdx := -1
+					for i := 0; i < len(p)-3; i++ {
+						if p[i:i+4] == " in " {
+							sepIdx = i
+							break
+						}
+					}
+					if sepIdx < 0 {
+						continue
+					}
+					varName := p[:sepIdx]
+					expr := p[sepIdx+4:]
+					result[varName] = expr
+				}
 			}
 		}
-		if sepIdx < 0 {
-			continue
-		}
-		varName := itemStr[:sepIdx]
-		expr := itemStr[sepIdx+4:]
-		result[varName] = expr
+	default:
+		return result
 	}
 
 	return result
 }
 
+// splitTopLevel splits s by sep but respects nested expression
+// delimiters (<% %>, {{ }}, [ ], { }).
+func splitTopLevel(s string, sep byte) []string {
+	var parts []string
+	depthAngular, depthBrace, depthBracket := 0, 0, 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '<':
+			if i+1 < len(s) && s[i+1] == '%' {
+				depthAngular++
+				i++
+			} else if i+1 < len(s) && s[i+1] == '{' {
+				depthBrace++
+				i++
+			}
+		case '%':
+			if i+1 < len(s) && s[i+1] == '>' {
+				depthAngular--
+				i++
+			}
+		case '}':
+			if depthBrace > 0 {
+				depthBrace--
+			}
+		case '[':
+			depthBracket++
+		case ']':
+			if depthBracket > 0 {
+				depthBracket--
+			}
+		case '{':
+			if depthBrace > 0 || depthAngular > 0 {
+				depthBrace++
+			}
+		case sep:
+			if depthAngular == 0 && depthBrace == 0 && depthBracket == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	if start < len(s) {
+		parts = append(parts, s[start:])
+	}
+	return parts
+}
+
 // Accessor methods.
 
-func (s *TaskSpec) GetName() string         { return s.name }
-func (s *TaskSpec) GetDescription() string  { return s.description }
-func (s *TaskSpec) GetActionName() string   { return s.action }
-func (s *TaskSpec) GetWorkflowName() string { return s.workflow }
-func (s *TaskSpec) GetTags() []string       { return s.tags }
-func (s *TaskSpec) GetInput() map[string]interface{} { return s.input }
-func (s *TaskSpec) GetWithItems() map[string]interface{} { return s.withItems }
-func (s *TaskSpec) GetPublish() map[string]interface{}  { return s.publish }
+func (s *TaskSpec) GetName() string                           { return s.name }
+func (s *TaskSpec) GetDescription() string                    { return s.description }
+func (s *TaskSpec) GetActionName() string                     { return s.action }
+func (s *TaskSpec) GetWorkflowName() string                   { return s.workflow }
+func (s *TaskSpec) GetTags() []string                         { return s.tags }
+func (s *TaskSpec) GetInput() map[string]interface{}          { return s.input }
+func (s *TaskSpec) GetWithItems() map[string]interface{}      { return s.withItems }
+func (s *TaskSpec) GetPublish() map[string]interface{}        { return s.publish }
 func (s *TaskSpec) GetPublishOnError() map[string]interface{} { return s.publishOnError }
-func (s *TaskSpec) GetPublishOnSkip() map[string]interface{} { return s.publishOnSkip }
-func (s *TaskSpec) GetPolicies() *PoliciesSpec { return s.policies }
-func (s *TaskSpec) GetTarget() interface{}    { return s.target }
-func (s *TaskSpec) GetKeepResult() interface{} { return s.keepResult }
-func (s *TaskSpec) GetSafeRerun() interface{}  { return s.safeRerun }
+func (s *TaskSpec) GetPublishOnSkip() map[string]interface{}  { return s.publishOnSkip }
+func (s *TaskSpec) GetPolicies() *PoliciesSpec                { return s.policies }
+func (s *TaskSpec) GetTarget() interface{}                    { return s.target }
+func (s *TaskSpec) GetKeepResult() interface{}                { return s.keepResult }
+func (s *TaskSpec) GetSafeRerun() interface{}                 { return s.safeRerun }
 func (s *TaskSpec) GetType() string {
 	if s.workflow != "" {
 		return WorkflowTaskType
@@ -232,7 +302,7 @@ func (s *TaskSpec) GetType() string {
 }
 
 // Direct workflow specific.
-func (s *TaskSpec) GetJoin() interface{}      { return s.join }
+func (s *TaskSpec) GetJoin() interface{}         { return s.join }
 func (s *TaskSpec) GetOnComplete() *OnClauseSpec { return s.onComplete }
 func (s *TaskSpec) GetOnSuccess() *OnClauseSpec  { return s.onSuccess }
 func (s *TaskSpec) GetOnError() *OnClauseSpec    { return s.onError }

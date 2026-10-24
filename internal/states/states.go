@@ -4,15 +4,15 @@ package states
 
 // Valid states for tasks, actions, and workflows.
 const (
-	IDLE           = "IDLE"           // Task is not started yet.
-	WAITING        = "WAITING"        // Preconditions not met, ready when satisfied.
-	RUNNING        = "RUNNING"        // Currently being executed.
-	RUNNING_DELAYED = "DELAYED"       // Running but temporarily delayed.
-	PAUSED         = "PAUSED"         // Paused.
-	SUCCESS        = "SUCCESS"        // Finished successfully.
-	CANCELLED      = "CANCELLED"      // Cancelled.
-	ERROR          = "ERROR"          // Finished with an error.
-	SKIPPED        = "SKIPPED"        // Skipped.
+	IDLE            = "IDLE"      // Task is not started yet.
+	WAITING         = "WAITING"   // Preconditions not met, ready when satisfied.
+	RUNNING         = "RUNNING"   // Currently being executed.
+	RUNNING_DELAYED = "DELAYED"   // Running but temporarily delayed.
+	PAUSED          = "PAUSED"    // Paused.
+	SUCCESS         = "SUCCESS"   // Finished successfully.
+	CANCELLED       = "CANCELLED" // Cancelled.
+	ERROR           = "ERROR"     // Finished with an error.
+	SKIPPED         = "SKIPPED"   // Skipped.
 )
 
 // All known states.
@@ -29,14 +29,14 @@ var TerminalStates = map[string]bool{
 
 // Valid state transitions: from_state -> list of allowed to_states.
 var validTransitions = map[string][]string{
-	IDLE:           {RUNNING, ERROR, CANCELLED},
-	WAITING:        {RUNNING},
-	RUNNING:        {PAUSED, RUNNING_DELAYED, SUCCESS, ERROR, CANCELLED},
+	IDLE:            {RUNNING, ERROR, CANCELLED},
+	WAITING:         {RUNNING},
+	RUNNING:         {PAUSED, RUNNING_DELAYED, SUCCESS, ERROR, CANCELLED},
 	RUNNING_DELAYED: {RUNNING, ERROR, CANCELLED},
-	PAUSED:         {RUNNING, ERROR, CANCELLED},
-	SUCCESS:        {},
-	CANCELLED:      {RUNNING},
-	ERROR:          {RUNNING, SKIPPED},
+	PAUSED:          {RUNNING, ERROR, CANCELLED},
+	SUCCESS:         {},
+	CANCELLED:       {RUNNING},
+	ERROR:           {RUNNING, SKIPPED},
 }
 
 // IsValid reports whether state is a known state.
@@ -57,6 +57,18 @@ func IsInvalid(state string) bool {
 // IsCompleted reports whether state is terminal (SUCCESS, ERROR, CANCELLED, SKIPPED).
 func IsCompleted(state string) bool {
 	return state == SUCCESS || state == ERROR || state == CANCELLED || state == SKIPPED
+}
+
+// IsError reports whether state is ERROR.
+func IsError(state string) bool {
+	return state == ERROR
+}
+
+// IsFailed reports whether state represents a failure that should block
+// downstream transitions. Maps to ERROR and CANCELLED (mirrors Python
+// mistral.workflow.states.is_invalid_transition — failed terminal states).
+func IsFailed(state string) bool {
+	return state == ERROR || state == CANCELLED
 }
 
 // IsCancelled reports whether state is CANCELLED.

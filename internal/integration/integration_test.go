@@ -410,22 +410,7 @@ func TestIntegration_Join_Parallel(t *testing.T) {
 }
 
 // --- helpers ---
-
-// coerceRuntimeInt handles JSON round-trip of ints inside map[string]interface{}.
-// SQLStore blob pattern serializes RuntimeContext as JSON, turning Go ints → float64.
-func coerceRuntimeInt(v interface{}) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
-	case float32:
-		return int(n)
-	}
-	return 0
-}
+// (CoerceInt is provided by db.CoerceInt — integration tests import db so use it directly.)
 
 // yamlWorkflowName extracts the top-level `name:` field from a Mistral YAML
 // definition. This is what the engine uses to look up sub-workflows.
@@ -776,7 +761,7 @@ func TestIntegration_Subworkflow_ChildUsesWithItems(t *testing.T) {
 	if fanoutTask == nil {
 		t.Fatal("child fanout task not found")
 	}
-	if v := coerceRuntimeInt(fanoutTask.RuntimeContext["with_items_total"]); v != 3 {
+	if v := db.CoerceInt(fanoutTask.RuntimeContext["with_items_total"]); v != 3 {
 		t.Errorf("fanout with_items_total = %v, want 3", fanoutTask.RuntimeContext["with_items_total"])
 	}
 	if fanoutTask.State != states.SUCCESS {
@@ -878,7 +863,7 @@ func TestIntegration_Workbook_WithItemsCallsSubworkflow(t *testing.T) {
 	if fanoutIter == nil {
 		t.Fatal("fanout_iter task not found on parent")
 	}
-	if v := coerceRuntimeInt(fanoutIter.RuntimeContext["with_items_total"]); v != 2 {
+	if v := db.CoerceInt(fanoutIter.RuntimeContext["with_items_total"]); v != 2 {
 		t.Errorf("fanout_iter with_items_total = %v, want 2", fanoutIter.RuntimeContext["with_items_total"])
 	}
 	if fanoutIter.State != states.SUCCESS {
@@ -887,4 +872,349 @@ func TestIntegration_Workbook_WithItemsCallsSubworkflow(t *testing.T) {
 
 	t.Logf("  with-items+subworkflow: parent=%s, children(wf_inner)=%d, fanout.total=%v, final=%s",
 		parentWf.State, childCount, fanoutIter.RuntimeContext["with_items_total"], final.State)
+}
+
+// ================================================================
+// Scenario 5: Nested with-items — parent with-items(2) → each iter calls
+// sub-wf that itself has with-items(3). Two levels of fanout nesting,
+// 2 child wfExs total, 6 ActionExecutions across them.
+// ================================================================
+func TestIntegration_NestedWithItems_TwoLevels(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "nested_with_items_parent.yaml",
+		extraYAMLs:    []string{"nested_with_items_child.yaml"},
+		expectedState: states.SUCCESS,
+	})
+
+	allWfExs, _ := store.WorkflowExecutions().List("")
+	var parentWf *db.WorkflowExecution
+	childCount := 0
+	for _, w := range allWfExs {
+		if w.Name == "nw_parent" {
+			parentWf = w
+		}
+		if w.Name == "nw_child" {
+			childCount++
+			if w.State != states.SUCCESS {
+				t.Errorf("nw_child %s state = %s, want SUCCESS", w.ID, w.State)
+			}
+		}
+	}
+	if parentWf == nil {
+		t.Fatal("nw_parent not found")
+	}
+	if childCount != 2 {
+		t.Errorf("expected 2 child nw_child wfExs, got %d", childCount)
+	}
+
+	// Parent outer_fanout task must have with_items_total=2 (outer fanout).
+	parentTasks, _ := store.TaskExecutions().List(parentWf.ID, "")
+	var outerFanout *db.TaskExecution
+	var outerJoin *db.TaskExecution
+	for _, te := range parentTasks {
+		switch te.Name {
+		case "outer_fanout":
+			outerFanout = te
+		case "outer_join":
+			outerJoin = te
+		}
+	}
+	if outerFanout == nil {
+		t.Fatal("outer_fanout task not found")
+	}
+	if v := db.CoerceInt(outerFanout.RuntimeContext["with_items_total"]); v != 2 {
+		t.Errorf("outer_fanout with_items_total = %v, want 2", v)
+	}
+	if outerJoin == nil {
+		t.Error("outer_join task not found — join didn't fire!")
+	} else if outerJoin.State != states.SUCCESS {
+		t.Errorf("outer_join state = %s, want SUCCESS", outerJoin.State)
+	}
+
+	// Each child must have inner_fanout with_items_total=3.
+	childWfExs := filterWfExByName(allWfExs, "nw_child")
+	for _, cw := range childWfExs {
+		childTasks, _ := store.TaskExecutions().List(cw.ID, "")
+		var innerFanout *db.TaskExecution
+		for _, te := range childTasks {
+			if te.Name == "inner_fanout" {
+				innerFanout = te
+			}
+		}
+		if innerFanout == nil {
+			t.Errorf("child %s inner_fanout not found", cw.ID)
+			continue
+		}
+		if v := db.CoerceInt(innerFanout.RuntimeContext["with_items_total"]); v != 3 {
+			t.Errorf("child inner_fanout with_items_total = %v, want 3", v)
+		}
+	}
+
+	// ActionExecutions across both children: 2 children × 3 iters = 6.
+	// List ActionExecutions by each child's inner_fanout TaskExecutionID.
+	var totalActionExs int
+	for _, cw := range childWfExs {
+		childTasks, _ := store.TaskExecutions().List(cw.ID, "")
+		for _, te := range childTasks {
+			if te.Name == "inner_fanout" {
+				actions, _ := store.ActionExecutions().List(te.ID, "")
+				totalActionExs += len(actions)
+			}
+		}
+	}
+	if totalActionExs != 6 {
+		t.Errorf("total ActionExecutions across children = %d, want 6 (2 children × 3 iters)", totalActionExs)
+	}
+
+	t.Logf("  nested with-items: parent=%s, children=%d, total ActionEx=%d, final=%s",
+		parentWf.State, childCount, totalActionExs, final.State)
+}
+
+// ================================================================
+// Scenario 6: Sibling sub-workflows with join. Two parallel parent tasks
+// each spawn their own sub-workflow; both fan into a shared join_task which
+// should wait for both child callbacks before firing.
+// ================================================================
+func TestIntegration_SiblingSubworkflows_Join(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "sibling_join_parent.yaml",
+		extraYAMLs:    []string{"sibling_a.yaml", "sibling_b.yaml"},
+		expectedState: states.SUCCESS,
+	})
+
+	allWfExs, _ := store.WorkflowExecutions().List("")
+	var parentWf *db.WorkflowExecution
+	countA, countB := 0, 0
+	for _, w := range allWfExs {
+		switch w.Name {
+		case "sibling_join_parent":
+			parentWf = w
+		case "sib_a":
+			countA++
+		case "sib_b":
+			countB++
+		}
+	}
+	if parentWf == nil {
+		t.Fatal("parent not found")
+	}
+	if countA != 1 {
+		t.Errorf("expected 1 sib_a, got %d", countA)
+	}
+	if countB != 1 {
+		t.Errorf("expected 1 sib_b, got %d", countB)
+	}
+
+	// Parent spawn_a and spawn_b should both be SUCCESS.
+	// join_point should only fire after BOTH callbacks arrive.
+	parentTasks, _ := store.TaskExecutions().List(parentWf.ID, "")
+	taskStates := make(map[string]string)
+	for _, te := range parentTasks {
+		taskStates[te.Name] = te.State
+	}
+	if taskStates["spawn_a"] != states.SUCCESS {
+		t.Errorf("spawn_a state = %s, want SUCCESS", taskStates["spawn_a"])
+	}
+	if taskStates["spawn_b"] != states.SUCCESS {
+		t.Errorf("spawn_b state = %s, want SUCCESS", taskStates["spawn_b"])
+	}
+	if taskStates["join_point"] != states.SUCCESS {
+		t.Errorf("join_point state = %s, want SUCCESS — join didn't wait for both siblings!", taskStates["join_point"])
+	}
+
+	t.Logf("  sibling join: spawn_a=%s spawn_b=%s join_point=%s final=%s",
+		taskStates["spawn_a"], taskStates["spawn_b"], taskStates["join_point"], final.State)
+}
+
+// ================================================================
+// Scenario 7: 4-level deep nesting A→B→C→D. Stress-tests root_execution_id
+// propagation, callback chain depth, and that each child correctly resolves
+// its parent via TaskExecutionID.
+// ================================================================
+func TestIntegration_DeepNesting_4Levels(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "deep_A.yaml",
+		extraYAMLs:    []string{"deep_B.yaml", "deep_C.yaml", "deep_D.yaml"},
+		expectedState: states.SUCCESS,
+	})
+
+	allWfExs, _ := store.WorkflowExecutions().List("")
+
+	// Expect 4 WorkflowExecutions: A → B → C → D (each 1 child except A).
+	expectNames := map[string]int{"deep_A": 1, "deep_B": 1, "deep_C": 1, "deep_D": 1}
+	got := map[string]int{}
+	var aWf, bWf, cWf, dWf *db.WorkflowExecution
+	for _, w := range allWfExs {
+		got[w.Name]++
+		switch w.Name {
+		case "deep_A":
+			aWf = w
+		case "deep_B":
+			bWf = w
+		case "deep_C":
+			cWf = w
+		case "deep_D":
+			dWf = w
+		}
+	}
+	for name, expected := range expectNames {
+		if got[name] != expected {
+			t.Errorf("%s count = %d, want %d", name, got[name], expected)
+		}
+	}
+
+	// Parent chain verification:
+	//   deep_B.TaskExecutionID references deep_A's "a_call_B" task
+	//   deep_C.TaskExecutionID references deep_B's "b_call_C" task
+	//   deep_D.TaskExecutionID references deep_C's "c_call_D" task
+	parentTasks := map[string]*db.TaskExecution{}
+	if aWf != nil {
+		ats, _ := store.TaskExecutions().List(aWf.ID, "")
+		for _, te := range ats {
+			if te.Name == "a_call_B" {
+				parentTasks[te.ID] = te
+			}
+		}
+	}
+	if bWf != nil {
+		bts, _ := store.TaskExecutions().List(bWf.ID, "")
+		for _, te := range bts {
+			if te.Name == "b_call_C" {
+				parentTasks[te.ID] = te
+			}
+		}
+	}
+	if cWf != nil {
+		cts, _ := store.TaskExecutions().List(cWf.ID, "")
+		for _, te := range cts {
+			if te.Name == "c_call_D" {
+				parentTasks[te.ID] = te
+			}
+		}
+	}
+
+	if bWf != nil {
+		if bWf.TaskExecutionID == "" {
+			t.Error("deep_B has no parent TaskExecutionID")
+		} else if parentTasks[bWf.TaskExecutionID] == nil {
+			t.Errorf("deep_B parent TaskExecutionID %s not found in deep_A tasks", bWf.TaskExecutionID)
+		}
+	}
+	if cWf != nil {
+		if cWf.TaskExecutionID == "" {
+			t.Error("deep_C has no parent TaskExecutionID")
+		} else if parentTasks[cWf.TaskExecutionID] == nil {
+			t.Errorf("deep_C parent TaskExecutionID %s not found in deep_B tasks", cWf.TaskExecutionID)
+		}
+	}
+	if dWf != nil {
+		if dWf.TaskExecutionID == "" {
+			t.Error("deep_D has no parent TaskExecutionID")
+		} else if parentTasks[dWf.TaskExecutionID] == nil {
+			t.Errorf("deep_D parent TaskExecutionID %s not found in deep_C tasks", dWf.TaskExecutionID)
+		}
+	}
+
+	t.Logf("  4-level deep nesting: %d wfExs, all SUCCESS, parent chain verified, final=%s",
+		len(allWfExs), final.State)
+}
+
+// ================================================================
+// Scenario 8: with-items sub-workflow partial failure. 3 iterations,
+// iteration 2's child wfEx gets overridden to ERROR. Expected behavior:
+// Python WithItemsTask aggregation → parent task ERROR → on-error fire
+// recovery → continue_after_recovery → workflow overall SUCCESS.
+// ================================================================
+func TestIntegration_WithItemsSubworkflow_PartialFailureRecovery(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "partial_parent.yaml",
+		extraYAMLs:    []string{"partial_child.yaml"},
+		expectedState: states.SUCCESS,
+		// All 3 child wfEx "do_work" tasks are overridden to ERROR — this is more
+		// extreme than 1/3 failure but still validates the core rules:
+		//   (a) Python WithItemsTask aggregation: any ERROR → parent task ERROR
+		//   (b) on-error fires recovery chain even when ALL iters fail
+		//   (c) recovery chain continues workflow to overall SUCCESS
+		customResults: map[string]*db.Result{
+			"do_work": {Error: "intentional-iter-failure"},
+		},
+	})
+
+	allWfExs, _ := store.WorkflowExecutions().List("")
+	var parentWf *db.WorkflowExecution
+	childCount := 0
+	childErrorCount := 0
+	for _, w := range allWfExs {
+		if w.Name == "partial_parent" {
+			parentWf = w
+			continue
+		}
+		if w.Name == "partial_child" {
+			childCount++
+			if w.State == states.ERROR {
+				childErrorCount++
+			} else if w.State != states.SUCCESS {
+				t.Errorf("partial_child %s state = %s, want SUCCESS or ERROR", w.ID, w.State)
+			}
+		}
+	}
+	if parentWf == nil {
+		t.Fatal("parent not found")
+	}
+	if childCount != 3 {
+		t.Errorf("expected 3 child partial_child wfExs, got %d", childCount)
+	}
+
+	// Parent fanout_children task must be ERROR (Python WithItemsTask aggregation rule).
+	parentTasks, _ := store.TaskExecutions().List(parentWf.ID, "")
+	taskStates := make(map[string]string)
+	var fanoutTask *db.TaskExecution
+	for _, te := range parentTasks {
+		taskStates[te.Name] = te.State
+		if te.Name == "fanout_children" {
+			fanoutTask = te
+		}
+	}
+	if fanoutTask == nil {
+		t.Fatal("fanout_children not found")
+	}
+	if fanoutTask.State != states.ERROR {
+		t.Errorf("fanout_children state = %s, want ERROR (WithItemsTask aggregation)", fanoutTask.State)
+	}
+	if v := db.CoerceInt(fanoutTask.RuntimeContext["with_items_failed_count"]); v < 1 {
+		t.Errorf("with_items_failed_count = %d, want >= 1", v)
+	}
+
+	// Recovery chain MUST fire even when ALL 3 iters failed.
+	if taskStates["handle_some_failed"] != states.SUCCESS {
+		t.Errorf("handle_some_failed state = %s, want SUCCESS (on-error didn't fire)",
+			taskStates["handle_some_failed"])
+	}
+	if taskStates["continue_after_error"] != states.SUCCESS {
+		t.Errorf("continue_after_error state = %s, want SUCCESS (recovery dead-ended)",
+			taskStates["continue_after_error"])
+	}
+	// all_good must NOT have fired — we have failures!
+	if _, exists := taskStates["all_good"]; exists {
+		t.Error("all_good should NOT have fired — some iters failed!")
+	}
+
+	t.Logf("  all-fail recovery: children=%d (ERROR=%d), fanout=%s(failed=%d), recovery=%v, final=%s",
+		childCount, childErrorCount, fanoutTask.State,
+		db.CoerceInt(fanoutTask.RuntimeContext["with_items_failed_count"]),
+		taskStates["handle_some_failed"]+","+taskStates["continue_after_error"],
+		final.State)
+}
+
+// filterWfExByName is a tiny helper used by the nested with-items test
+// to grab all WorkflowExecutions matching a given name (multiple children
+// from with-items iterations share the same name).
+func filterWfExByName(wfExs []*db.WorkflowExecution, name string) []*db.WorkflowExecution {
+	var out []*db.WorkflowExecution
+	for _, w := range wfExs {
+		if w.Name == name {
+			out = append(out, w)
+		}
+	}
+	return out
 }

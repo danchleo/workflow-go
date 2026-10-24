@@ -1,0 +1,12 @@
+version: "2.0"
+name: deep_B
+description: B — calls C
+
+tasks:
+  b_call_C:
+    workflow: deep_C
+    on-success:
+      b_wrapup:
+        action: std.echo
+        input:
+          output: "B-wrapup"

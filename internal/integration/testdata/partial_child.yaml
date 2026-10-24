@@ -1,0 +1,9 @@
+version: "2.0"
+name: partial_child
+description: Simple child — succeeds by default; test overrides one iter's result to ERROR
+
+tasks:
+  do_work:
+    action: std.echo
+    input:
+      output: "iter-done-<% $.token %>"

@@ -1,0 +1,24 @@
+version: "2.0"
+name: nw_parent
+description: Parent with with-items (2 iters) — each iter calls child that itself fans out 3x
+
+tasks:
+  outer_fanout:
+    workflow: nw_child
+    input:
+      sub: "<% $.item %>"
+      inner_items:
+        - "x"
+        - "y"
+        - "z"
+    with-items:
+      item:
+        - "alpha"
+        - "beta"
+    on-success:
+      - outer_join
+
+  outer_join:
+    action: std.echo
+    input:
+      output: "all-outer-done"
