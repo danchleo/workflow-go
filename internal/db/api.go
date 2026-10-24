@@ -63,6 +63,24 @@ type EnvironmentStore interface {
 	Delete(id string) error
 }
 
+// ScheduledJobStore defines CRUD + job-store-ops for persistent delayed jobs.
+// Mirrors Python's db_api.create_scheduled_job / get_scheduled_jobs_to_start /
+// update_scheduled_job / delete_scheduled_job.
+type ScheduledJobStore interface {
+	Create(j *ScheduledJob) error
+	Get(id string) (*ScheduledJob, error)
+	List() ([]*ScheduledJob, error)
+	// GetDueJobs returns all jobs where execute_at <= now that are NOT captured
+	// (captured_at IS NULL) OR whose captured_at is older than captureTimeout
+	// (stuck captures, e.g. previous scheduler crash). batchSize = 0 means all.
+	GetDueJobs(now time.Time, captureTimeout time.Duration, batchSize int) ([]*ScheduledJob, error)
+	// Capture marks a job as captured for execution. Uses optimistic lock:
+	// UPDATE ... SET captured_at = NOW() WHERE id = ? AND captured_at = oldCapturedAt.
+	// Returns true if this call captured the job (affected rows == 1).
+	Capture(id string, oldCapturedAt *time.Time, now time.Time) (bool, error)
+	Delete(id string) error
+}
+
 // CronTriggerStore defines CRUD for cron trigger definitions.
 type CronTriggerStore interface {
 	Create(ct *CronTrigger) error
@@ -81,6 +99,7 @@ type Store interface {
 	TaskExecutions() TaskExecutionStore
 	ActionExecutions() ActionExecutionStore
 	Environments() EnvironmentStore
+	ScheduledJobs() ScheduledJobStore
 	CronTriggers() CronTriggerStore
 
 	// Lock management (named locks for concurrency control).

@@ -13,13 +13,14 @@ import (
 type InMemoryStore struct {
 	mu sync.RWMutex
 
-	workflowDefs map[string]*WorkflowDefinition
-	actionDefs   map[string]*ActionDefinition
-	wfExecs      map[string]*WorkflowExecution
-	taskExecs    map[string]*TaskExecution
-	actionExecs  map[string]*ActionExecution
-	environments map[string]*Environment
-	cronTriggers map[string]*CronTrigger
+	workflowDefs  map[string]*WorkflowDefinition
+	actionDefs    map[string]*ActionDefinition
+	wfExecs       map[string]*WorkflowExecution
+	taskExecs     map[string]*TaskExecution
+	actionExecs   map[string]*ActionExecution
+	environments  map[string]*Environment
+	scheduledJobs map[string]*ScheduledJob
+	cronTriggers  map[string]*CronTrigger
 
 	// Locks: map of lock name -> channel used for simple mutex semantics.
 	locks map[string]chan struct{}
@@ -28,14 +29,15 @@ type InMemoryStore struct {
 // NewInMemoryStore creates a new in-memory store.
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
-		workflowDefs: make(map[string]*WorkflowDefinition),
-		actionDefs:   make(map[string]*ActionDefinition),
-		wfExecs:      make(map[string]*WorkflowExecution),
-		taskExecs:    make(map[string]*TaskExecution),
-		actionExecs:  make(map[string]*ActionExecution),
-		environments: make(map[string]*Environment),
-		cronTriggers: make(map[string]*CronTrigger),
-		locks:        make(map[string]chan struct{}),
+		workflowDefs:  make(map[string]*WorkflowDefinition),
+		actionDefs:    make(map[string]*ActionDefinition),
+		wfExecs:       make(map[string]*WorkflowExecution),
+		taskExecs:     make(map[string]*TaskExecution),
+		actionExecs:   make(map[string]*ActionExecution),
+		environments:  make(map[string]*Environment),
+		scheduledJobs: make(map[string]*ScheduledJob),
+		cronTriggers:  make(map[string]*CronTrigger),
+		locks:         make(map[string]chan struct{}),
 	}
 }
 
@@ -45,6 +47,7 @@ func (s *InMemoryStore) WorkflowExecutions() WorkflowExecutionStore   { return &
 func (s *InMemoryStore) TaskExecutions() TaskExecutionStore           { return &tmExecStore{s} }
 func (s *InMemoryStore) ActionExecutions() ActionExecutionStore       { return &amExecStore{s} }
 func (s *InMemoryStore) Environments() EnvironmentStore               { return &envStore{s} }
+func (s *InMemoryStore) ScheduledJobs() ScheduledJobStore             { return &memScheduledJobStore{s} }
 func (s *InMemoryStore) CronTriggers() CronTriggerStore               { return &memCronTriggerStore{s} }
 
 func (s *InMemoryStore) AcquireLock(name string) error {
@@ -669,6 +672,79 @@ func (m *memCronTriggerStore) Delete(id string) error {
 	m.s.mu.Lock()
 	defer m.s.mu.Unlock()
 	delete(m.s.cronTriggers, id)
+	return nil
+}
+
+// --- memScheduledJobStore ---
+
+type memScheduledJobStore struct{ s *InMemoryStore }
+
+func (m *memScheduledJobStore) Create(j *ScheduledJob) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	if j.CreatedAt.IsZero() {
+		j.CreatedAt = Now()
+	}
+	m.s.scheduledJobs[j.ID] = j
+	return nil
+}
+func (m *memScheduledJobStore) Get(id string) (*ScheduledJob, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	j, ok := m.s.scheduledJobs[id]
+	if !ok {
+		return nil, &NotFoundError{Entity: "ScheduledJob", ID: id}
+	}
+	return j, nil
+}
+func (m *memScheduledJobStore) List() ([]*ScheduledJob, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	result := make([]*ScheduledJob, 0, len(m.s.scheduledJobs))
+	for _, j := range m.s.scheduledJobs {
+		result = append(result, j)
+	}
+	return result, nil
+}
+func (m *memScheduledJobStore) GetDueJobs(now time.Time, captureTimeout time.Duration, batchSize int) ([]*ScheduledJob, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	timeoutBoundary := now.Add(-captureTimeout)
+	var out []*ScheduledJob
+	for _, j := range m.s.scheduledJobs {
+		if j.ExecuteAt.After(now) {
+			continue
+		}
+		if j.CapturedAt != nil && !j.CapturedAt.Before(timeoutBoundary) {
+			continue // still captured by someone else
+		}
+		out = append(out, j)
+	}
+	if batchSize > 0 && len(out) > batchSize {
+		out = out[:batchSize]
+	}
+	return out, nil
+}
+func (m *memScheduledJobStore) Capture(id string, oldCapturedAt *time.Time, now time.Time) (bool, error) {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	j, ok := m.s.scheduledJobs[id]
+	if !ok {
+		return false, nil
+	}
+	if j.CapturedAt != nil && oldCapturedAt != nil && !j.CapturedAt.Equal(*oldCapturedAt) {
+		return false, nil // someone else captured it
+	}
+	if j.CapturedAt != nil && oldCapturedAt == nil {
+		return false, nil // already captured
+	}
+	j.CapturedAt = &now
+	return true, nil
+}
+func (m *memScheduledJobStore) Delete(id string) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	delete(m.s.scheduledJobs, id)
 	return nil
 }
 

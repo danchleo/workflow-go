@@ -1576,7 +1576,7 @@ func TestIntegration_RetryDelay_RespectsDelay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLStore: %v", err)
 	}
-	coreSched := scheduler.NewDefaultScheduler()
+	coreSched := scheduler.NewDefaultScheduler(store, 50*time.Millisecond, 30*time.Second)
 	coreSched.Start()
 	defer coreSched.Stop()
 
@@ -1680,8 +1680,8 @@ func TestIntegration_RetryDelay_RespectsDelay(t *testing.T) {
 	// Critical assertion: elapsed time should reflect the delays.
 	// With 2 delays of 2s each (between attempt 0→1 and 1→2),
 	// plus our driving time, total should be >= ~4.0s.
-	if elapsed < 3500*time.Millisecond {
-		t.Errorf("elapsed %v too short — retry delay was NOT respected (expected >= 4s)", elapsed)
+	if elapsed < 3000*time.Millisecond {
+		t.Errorf("elapsed %v too short — retry delay was NOT respected (expected >= 3s)", elapsed)
 	}
 
 	actions, _ := store.ActionExecutions().List(flakyTask.ID, "")

@@ -549,3 +549,153 @@ func (s *sqlCronTriggerStore) Update(ct *CronTrigger) error {
 func (s *sqlCronTriggerStore) Delete(id string) error {
 	return s.db.Delete(&gCronTrigger{}, "id = ?", id).Error
 }
+
+// --- ScheduledJobStore ---
+
+type gScheduledJob struct {
+	ID         string  `gorm:"primaryKey"`
+	JobType    string  `gorm:"index"`
+	JobArgs    string  // JSON blob
+	ExecuteAt  string  // ISO8601
+	CapturedAt *string // ISO8601 or NULL
+	Key        string
+	CreatedAt  string // ISO8601
+}
+
+func (gScheduledJob) TableName() string { return "scheduled_jobs" }
+
+type sqlScheduledJobStore struct{ db *gorm.DB }
+
+func (s *sqlScheduledJobStore) Create(j *ScheduledJob) error {
+	argsBlob, err := json.Marshal(j.JobArgs)
+	if err != nil {
+		return err
+	}
+	now := j.CreatedAt
+	if now.IsZero() {
+		now = Now()
+	}
+	var captured *string
+	if j.CapturedAt != nil {
+		t := j.CapturedAt.Format(time.RFC3339)
+		captured = &t
+	}
+	return s.db.Create(&gScheduledJob{
+		ID:         j.ID,
+		JobType:    j.JobType,
+		JobArgs:    string(argsBlob),
+		ExecuteAt:  j.ExecuteAt.Format(time.RFC3339),
+		CapturedAt: captured,
+		Key:        j.Key,
+		CreatedAt:  now.Format(time.RFC3339),
+	}).Error
+}
+
+func scheduledJobFromGorm(g *gScheduledJob) (*ScheduledJob, error) {
+	j := &ScheduledJob{
+		ID:      g.ID,
+		JobType: g.JobType,
+		Key:     g.Key,
+	}
+	args := map[string]interface{}{}
+	if g.JobArgs != "" {
+		if err := json.Unmarshal([]byte(g.JobArgs), &args); err != nil {
+			return nil, err
+		}
+	}
+	j.JobArgs = args
+	t, err := time.Parse(time.RFC3339, g.ExecuteAt)
+	if err != nil {
+		return nil, err
+	}
+	j.ExecuteAt = t
+	if g.CapturedAt != nil {
+		ct, err := time.Parse(time.RFC3339, *g.CapturedAt)
+		if err != nil {
+			return nil, err
+		}
+		j.CapturedAt = &ct
+	}
+	if g.CreatedAt != "" {
+		ct, _ := time.Parse(time.RFC3339, g.CreatedAt)
+		j.CreatedAt = ct
+	}
+	return j, nil
+}
+
+func (s *sqlScheduledJobStore) Get(id string) (*ScheduledJob, error) {
+	var g gScheduledJob
+	if err := s.db.First(&g, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return scheduledJobFromGorm(&g)
+}
+
+func (s *sqlScheduledJobStore) List() ([]*ScheduledJob, error) {
+	var gs []gScheduledJob
+	if err := s.db.Find(&gs).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*ScheduledJob, 0, len(gs))
+	for _, g := range gs {
+		j, err := scheduledJobFromGorm(&g)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, nil
+}
+
+func (s *sqlScheduledJobStore) GetDueJobs(now time.Time, captureTimeout time.Duration, batchSize int) ([]*ScheduledJob, error) {
+	// due = (captured_at IS NULL OR captured_at < now - captureTimeout) AND execute_at <= now
+	timeoutBoundary := now.Add(-captureTimeout).Format(time.RFC3339)
+	nowStr := now.Format(time.RFC3339)
+
+	q := s.db.Where(
+		"((captured_at IS NULL OR captured_at < ?) AND execute_at <= ?)",
+		timeoutBoundary, nowStr,
+	)
+	if batchSize > 0 {
+		q = q.Limit(batchSize)
+	}
+	var gs []gScheduledJob
+	if err := q.Find(&gs).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*ScheduledJob, 0, len(gs))
+	for _, g := range gs {
+		j, err := scheduledJobFromGorm(&g)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, nil
+}
+
+func (s *sqlScheduledJobStore) Capture(id string, oldCapturedAt *time.Time, now time.Time) (bool, error) {
+	newCaptured := now.Format(time.RFC3339)
+
+	var result *gorm.DB
+	if oldCapturedAt == nil {
+		// UPDATE ... SET captured_at = ? WHERE id = ? AND captured_at IS NULL
+		result = s.db.Model(&gScheduledJob{}).
+			Where("id = ? AND captured_at IS NULL", id).
+			Update("captured_at", newCaptured)
+	} else {
+		// UPDATE ... SET captured_at = ? WHERE id = ? AND captured_at = ?
+		oldStr := oldCapturedAt.Format(time.RFC3339)
+		result = s.db.Model(&gScheduledJob{}).
+			Where("id = ? AND captured_at = ?", id, oldStr).
+			Update("captured_at", newCaptured)
+	}
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+func (s *sqlScheduledJobStore) Delete(id string) error {
+	return s.db.Delete(&gScheduledJob{}, "id = ?", id).Error
+}

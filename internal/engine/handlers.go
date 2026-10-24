@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/mistral/workflow/internal/commands"
@@ -35,9 +36,106 @@ func NewDefaultEngine(store db.Store) *DefaultEngine {
 
 // WithScheduler wires a generic delayed-job scheduler into the engine.
 // Policies like retry-delay, wait-before, wait-after and timeout need it.
+// This also registers engine handlers in the scheduler's JobHandler registry
+// (idempotent — registers once).
 func (e *DefaultEngine) WithScheduler(s scheduler.Scheduler) *DefaultEngine {
 	e.sched = s
+	registerEngineJobHandlers(e)
 	return e
+}
+
+var engineHandlersOnce sync.Once
+
+// registerEngineJobHandler registers engine-specific handlers for JobType
+// values. Called once by WithScheduler — idempotent via sync.Once.
+func registerEngineJobHandlers(e *DefaultEngine) {
+	engineHandlersOnce.Do(func() {
+		// fail_if_incomplete: scheduler fires → engine forces ActionExecution ERROR.
+		scheduler.RegisterJobHandler(scheduler.JobFailIfIncomplete, func(args map[string]interface{}) {
+			actionExID, _ := args["action_ex_id"].(string)
+			timeoutSec := db.CoerceInt(args["timeout_sec"])
+			e.failIfIncomplete(actionExID, timeoutSec)
+		})
+
+		// continue_task: generic deferred re-entry to StartTask.
+		//   wait-before  → just re-start the task (sets RUNNING_DELAYED → RUNNING).
+		//   retry delay  → re-set retry_attempts on taskEx BEFORE re-entering StartTask
+		//                  so the new ActionExecution carries the right attempt count.
+		scheduler.RegisterJobHandler(scheduler.JobContinueTask, func(args map[string]interface{}) {
+			taskExID, _ := args["task_ex_id"].(string)
+			if taskExID == "" {
+				return
+			}
+
+			if stashed, ok := args["stashed_retry_attempts"]; ok {
+				attempt := db.CoerceInt(stashed)
+				retryLimit := db.CoerceInt(args["retry_limit"])
+				te, _ := e.store.TaskExecutions().Get(taskExID)
+				if te != nil {
+					wfDef, _ := e.store.WorkflowDefinitions().Get(te.WorkflowID)
+					if wfDef != nil {
+						wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
+						taskSpec := wfSpec.GetTask(te.Name)
+						if taskSpec != nil {
+							input, _ := te.RuntimeContext["retry_action_input"].(map[string]interface{})
+							actionName, _ := te.RuntimeContext["retry_action_name"].(string)
+							idx := db.CoerceInt(te.RuntimeContext["retry_action_index"])
+							sync2 := true
+							newActionEx := &db.ActionExecution{
+								Name:              actionName,
+								State:             states.RUNNING,
+								Input:             input,
+								RuntimeContext:    map[string]interface{}{"index": idx, "safe_rerun": true, "retry_attempts": attempt},
+								WorkflowNamespace: te.WorkflowNamespace,
+								TaskExecutionID:   te.ID,
+								WorkflowName:      te.WorkflowName,
+								WorkflowID:        te.WorkflowID,
+								ProjectID:         te.ProjectID,
+								IsSync:            &sync2,
+							}
+							if err := e.store.ActionExecutions().Create(newActionEx); err == nil {
+								e.scheduleTaskTimeout(newActionEx, te, taskSpec)
+								log.Printf("scheduler: retry [delayed] attempt %d/%d fired → action_ex=%s",
+									attempt, retryLimit, newActionEx.ID)
+							}
+						}
+					}
+					te.State = states.RUNNING
+					te.StateInfo = ""
+					_ = e.store.TaskExecutions().Update(te)
+				}
+				return
+			}
+
+			if err := e.StartTask(context.Background(), taskExID, false, false, nil, false, false); err != nil {
+				log.Printf("scheduler: JobContinueTask StartTask(%s) failed: %v", taskExID, err)
+			}
+		})
+
+		// complete_task: wait-after deferred final state change + advanceWorkflow.
+		scheduler.RegisterJobHandler("complete_task", func(args map[string]interface{}) {
+			wfExID, _ := args["wf_ex_id"].(string)
+			taskExID, _ := args["task_ex_id"].(string)
+			endState, _ := args["end_state"].(string)
+			endInfo, _ := args["end_info"].(string)
+
+			if wfExID == "" || taskExID == "" {
+				return
+			}
+			te, _ := e.store.TaskExecutions().Get(taskExID)
+			if te == nil {
+				return
+			}
+			te.State = endState
+			te.StateInfo = endInfo
+			te.Processed = true
+			if err := e.store.TaskExecutions().Update(te); err != nil {
+				log.Printf("scheduler: JobCompleteTask finalize failed: %v", err)
+				return
+			}
+			e.advanceWorkflow(wfExID, taskExID)
+		})
+	})
 }
 
 // scheduleTaskTimeout checks the task's timeout policy and, if set, fires
@@ -69,14 +167,19 @@ func (e *DefaultEngine) scheduleTaskTimeout(actionEx *db.ActionExecution, taskEx
 		return
 	}
 	delay := time.Duration(timeoutSec) * time.Second
-	fn := func() {
-		e.failIfIncomplete(actionEx.ID, timeoutSec)
-	}
 	if e.sched != nil {
-		e.sched.Schedule(delay, fn)
+		args := map[string]interface{}{
+			"action_ex_id": actionEx.ID,
+			"timeout_sec":  timeoutSec,
+		}
+		if _, err := e.sched.Schedule(scheduler.JobFailIfIncomplete, args, delay); err != nil {
+			log.Printf("timeout: scheduler.Schedule failed: %v — falling back to time.AfterFunc", err)
+			time.AfterFunc(delay, func() { e.failIfIncomplete(actionEx.ID, timeoutSec) })
+		}
 	} else {
-		// Fallback when no scheduler is wired (compat for old callers).
-		time.AfterFunc(delay, fn)
+		time.AfterFunc(delay, func() {
+			e.failIfIncomplete(actionEx.ID, timeoutSec)
+		})
 	}
 }
 
@@ -442,16 +545,13 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 					delay := time.Duration(wbSec) * time.Second
 					taskEx.State = states.RUNNING_DELAYED
 					taskEx.StateInfo = fmt.Sprintf("Delayed by 'wait-before' policy [delay=%ds]", wbSec)
-					// Stash skip flag so the deferred StartTask doesn't re-enter this block.
 					taskEx.RuntimeContext["wait_before_done"] = true
 					if err := e.store.TaskExecutions().Update(taskEx); err != nil {
 						log.Printf("wait-before: update taskEx to RUNNING_DELAYED failed: %v", err)
 					}
-					e.sched.Schedule(delay, func() {
-						if err := e.StartTask(context.Background(), taskExID, false, waiting, triggeredBy, rerun, reset); err != nil {
-							log.Printf("wait-before: deferred StartTask failed: %v", err)
-						}
-					})
+					e.sched.Schedule(scheduler.JobContinueTask, map[string]interface{}{
+						"task_ex_id": taskExID,
+					}, delay)
 					log.Printf("wait-before: task %s delayed %ds → RUNNING_DELAYED", taskEx.Name, wbSec)
 					return nil
 				}
@@ -933,8 +1033,6 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 							waSec = v
 						}
 						if waSec > 0 {
-							endState := newState
-							endInfo := stateInfo
 							delay := time.Duration(waSec) * time.Second
 							taskEx.State = states.RUNNING_DELAYED
 							taskEx.StateInfo = fmt.Sprintf("Delayed by 'wait-after' policy [delay=%ds]", waSec)
@@ -942,24 +1040,14 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 							if err := e.store.TaskExecutions().Update(taskEx); err != nil {
 								log.Printf("wait-after: update taskEx to RUNNING_DELAYED failed: %v", err)
 							}
-							wfExID := wfEx.ID
-							taskExID := taskEx.ID
-							e.sched.Schedule(delay, func() {
-								te, _ := e.store.TaskExecutions().Get(taskExID)
-								if te == nil {
-									return
-								}
-								te.State = endState
-								te.StateInfo = endInfo
-								te.Processed = true
-								if err := e.store.TaskExecutions().Update(te); err != nil {
-									log.Printf("wait-after: finalize task state failed: %v", err)
-									return
-								}
-								e.advanceWorkflow(wfExID, taskExID)
-							})
+							e.sched.Schedule("complete_task", map[string]interface{}{
+								"wf_ex_id":   wfEx.ID,
+								"task_ex_id": taskEx.ID,
+								"end_state":  newState,
+								"end_info":   stateInfo,
+							}, delay)
 							log.Printf("wait-after: task %s completion delayed %ds → RUNNING_DELAYED (will finish as %s)",
-								taskEx.Name, waSec, endState)
+								taskEx.Name, waSec, newState)
 							return nil
 						}
 					}
@@ -1129,58 +1217,23 @@ func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExec
 	if retryDelaySeconds > 0 && e.sched != nil {
 		delay := time.Duration(retryDelaySeconds) * time.Second
 
-		// Move task to RUNNING_DELAYED (mirrors Python RetryPolicy.after_task_complete:
-		// task.set_state(RUNNING_DELAYED, "Delayed by 'retry' policy [delay=%d]"))
 		taskEx.State = states.RUNNING_DELAYED
 		taskEx.StateInfo = fmt.Sprintf("Delayed by 'retry' policy [delay=%ds]", retryDelaySeconds)
+		// Stash the retry ActionEx creation parameters in taskEx.RuntimeContext
+		// so the JobContinueTask handler (fired by scheduler) can re-build them.
+		taskEx.RuntimeContext["retry_attempts"] = attempt
+		taskEx.RuntimeContext["retry_action_input"] = actionEx.Input
+		taskEx.RuntimeContext["retry_action_name"] = actionEx.Name
+		taskEx.RuntimeContext["retry_action_index"] = db.CoerceInt(actionEx.RuntimeContext["index"])
 		if err := e.store.TaskExecutions().Update(taskEx); err != nil {
 			log.Printf("retry: update taskEx to RUNNING_DELAYED failed: %v", err)
 		}
 
-		// Capture attempt in closure scope.
-		nextAttempt := attempt
-		e.sched.Schedule(delay, func() {
-			// 1. Create new ActionExecution (mirrors task._schedule_actions).
-			sync2 := true
-			newActionEx := &db.ActionExecution{
-				Name:  taskSpec.GetActionName(),
-				State: states.RUNNING,
-				Input: actionEx.Input,
-				RuntimeContext: map[string]interface{}{
-					"index":          db.CoerceInt(actionEx.RuntimeContext["index"]),
-					"safe_rerun":     true,
-					"retry_attempts": nextAttempt,
-				},
-				WorkflowNamespace: actionEx.WorkflowNamespace,
-				TaskExecutionID:   taskEx.ID,
-				WorkflowName:      actionEx.WorkflowName,
-				WorkflowID:        actionEx.WorkflowID,
-				ProjectID:         actionEx.ProjectID,
-				IsSync:            &sync2,
-			}
-			if err := e.store.ActionExecutions().Create(newActionEx); err != nil {
-				log.Printf("retry [delayed]: create ActionExecution failed: %v", err)
-				return
-			}
-			e.scheduleTaskTimeout(newActionEx, taskEx, taskSpec)
-			log.Printf("retry [delayed]: attempt %d/%d fired → action_ex=%s",
-				nextAttempt, retryCount, newActionEx.ID)
-
-			// 2. Restore task → RUNNING (mirrors Python _continue_task).
-			te, _ := e.store.TaskExecutions().Get(taskEx.ID)
-			if te == nil {
-				return
-			}
-			te.State = states.RUNNING
-			te.StateInfo = ""
-			if err := e.store.TaskExecutions().Update(te); err != nil {
-				log.Printf("retry [delayed]: restore task to RUNNING failed: %v", err)
-			}
-			// NOTE: We do NOT call StartTask here — that would create a second
-			// ActionExecution (StartTask's normal flow auto-creates one). Instead
-			// the driver loop picks up the RUNNING task + the RUNNING ActionExecution
-			// we just created.
-		})
+		e.sched.Schedule(scheduler.JobContinueTask, map[string]interface{}{
+			"task_ex_id":             taskEx.ID,
+			"stashed_retry_attempts": attempt,
+			"retry_limit":            retryCount,
+		}, delay)
 
 		log.Printf("retry: ActionExecution %s scheduled DELAYED retry attempt %d/%d (delay=%ds)",
 			actionEx.ID, attempt, retryCount, retryDelaySeconds)

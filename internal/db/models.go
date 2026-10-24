@@ -187,6 +187,26 @@ type ActionExecution struct {
 	UpdatedAt         time.Time              `json:"updated_at"`
 }
 
+// ScheduledJob is a persistent delayed-job record — the Go equivalent of
+// Python's scheduled_jobs_v2 table (mistral/db/v2/sqlalchemy/models.py).
+// On Schedule() we persist to DB first, then push to in-memory heap.
+// On Start() we recover from DB. On crash, jobs survive to be picked up
+// by jobStoreChecker on next start.
+//
+// Key fields that enable multi-process safety:
+//
+//	captured_at — optimistic lock. UPDATE ... WHERE captured_at = <old>.
+//	If another scheduler already captured it, UPDATE affects 0 rows → skip.
+type ScheduledJob struct {
+	ID         string                 `json:"id"`
+	JobType    string                 `json:"job_type"` // e.g. "fail_if_incomplete", "retry_create"
+	JobArgs    map[string]interface{} `json:"job_args"`
+	ExecuteAt  time.Time              `json:"execute_at"`
+	CapturedAt *time.Time             `json:"captured_at,omitempty"` // nil = not yet captured
+	Key        string                 `json:"key"`
+	CreatedAt  time.Time              `json:"created_at"`
+}
+
 // CronTrigger stores cron trigger definitions.
 type CronTrigger struct {
 	ID                  string                 `json:"id"`
