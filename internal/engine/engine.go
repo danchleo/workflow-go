@@ -12,6 +12,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -22,23 +23,24 @@ import (
 	"github.com/mistral/workflow/internal/states"
 )
 
-// Engine is the main entry point for workflow execution.
+// Engine is the main entry point for workflow execution. All operations accept
+// a context.Context so callers can cancel or time out long-running flows.
 type Engine interface {
 	// StartWorkflow creates a new workflow execution and begins processing.
-	StartWorkflow(wfDefID, wfNamespace, wfExID string, wfInput map[string]interface{}, description string, params map[string]interface{}) (*db.WorkflowExecution, error)
+	StartWorkflow(ctx context.Context, wfDefID, wfNamespace, wfExID string, wfInput map[string]interface{}, description string, params map[string]interface{}) (*db.WorkflowExecution, error)
 	// PauseWorkflow pauses a running workflow.
-	PauseWorkflow(wfExID string) error
+	PauseWorkflow(ctx context.Context, wfExID string) error
 	// ResumeWorkflow resumes a paused workflow.
-	ResumeWorkflow(wfExID string, env map[string]interface{}) error
+	ResumeWorkflow(ctx context.Context, wfExID string, env map[string]interface{}) error
 	// StopWorkflow sets a workflow to a terminal state (SUCCESS, ERROR, CANCELLED).
-	StopWorkflow(wfExID string, state string, message string) error
+	StopWorkflow(ctx context.Context, wfExID string, state string, message string) error
 	// RerunWorkflow reruns a workflow from a specific task execution.
-	RerunWorkflow(taskExID string, reset bool, skip bool, env map[string]interface{}) error
+	RerunWorkflow(ctx context.Context, taskExID string, reset bool, skip bool, env map[string]interface{}) error
 
 	// StartTask starts processing a task execution.
-	StartTask(taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool, reset bool) error
+	StartTask(ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool, reset bool) error
 	// OnActionComplete handles action completion events.
-	OnActionComplete(actionExID string, result *db.Result, wfAction bool) error
+	OnActionComplete(ctx context.Context, actionExID string, result *db.Result, wfAction bool) error
 }
 
 // --- PostTxQueue ---

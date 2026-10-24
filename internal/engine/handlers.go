@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -35,8 +36,12 @@ func (e *DefaultEngine) Store() db.Store { return e.store }
 func (e *DefaultEngine) Dispatcher() *Dispatcher { return e.dispatcher }
 
 // StartWorkflow creates a new workflow execution and starts processing.
-func (e *DefaultEngine) StartWorkflow(wfDefID, wfNamespace, wfExID string, wfInput map[string]interface{}, description string, params map[string]interface{}) (*db.WorkflowExecution, error) {
-	wfDefs := e.store.WorkflowDefinitions()
+func (e *DefaultEngine) StartWorkflow(ctx context.Context, wfDefID, wfNamespace, wfExID string, wfInput map[string]interface{}, description string, params map[string]interface{}) (*db.WorkflowExecution, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	var wfDefs = e.store.WorkflowDefinitions()
 	wfDef, err := wfDefs.Get(wfDefID)
 	if err != nil {
 		return nil, fmt.Errorf("workflow definition not found: %w", err)
@@ -120,7 +125,11 @@ func (e *DefaultEngine) StartWorkflow(wfDefID, wfNamespace, wfExID string, wfInp
 }
 
 // PauseWorkflow pauses a running workflow.
-func (e *DefaultEngine) PauseWorkflow(wfExID string) error {
+func (e *DefaultEngine) PauseWorkflow(ctx context.Context, wfExID string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	wfEx, err := e.store.WorkflowExecutions().Get(wfExID)
 	if err != nil {
 		return err
@@ -133,7 +142,11 @@ func (e *DefaultEngine) PauseWorkflow(wfExID string) error {
 }
 
 // ResumeWorkflow resumes a paused workflow.
-func (e *DefaultEngine) ResumeWorkflow(wfExID string, env map[string]interface{}) error {
+func (e *DefaultEngine) ResumeWorkflow(ctx context.Context, wfExID string, env map[string]interface{}) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	wfEx, err := e.store.WorkflowExecutions().Get(wfExID)
 	if err != nil {
 		return err
@@ -168,7 +181,11 @@ func (e *DefaultEngine) ResumeWorkflow(wfExID string, env map[string]interface{}
 }
 
 // StopWorkflow sets a workflow to a terminal state.
-func (e *DefaultEngine) StopWorkflow(wfExID string, state string, message string) error {
+func (e *DefaultEngine) StopWorkflow(ctx context.Context, wfExID string, state string, message string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	wfEx, err := e.store.WorkflowExecutions().Get(wfExID)
 	if err != nil {
 		return err
@@ -209,7 +226,11 @@ func (e *DefaultEngine) StopWorkflow(wfExID string, state string, message string
 }
 
 // RerunWorkflow reruns a workflow from a specific task execution.
-func (e *DefaultEngine) RerunWorkflow(taskExID string, reset bool, skip bool, env map[string]interface{}) error {
+func (e *DefaultEngine) RerunWorkflow(ctx context.Context, taskExID string, reset bool, skip bool, env map[string]interface{}) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	taskEx, err := e.store.TaskExecutions().Get(taskExID)
 	if err != nil {
 		return err
@@ -263,7 +284,11 @@ func (e *DefaultEngine) RerunWorkflow(taskExID string, reset bool, skip bool, en
 }
 
 // StartTask runs a task execution.
-func (e *DefaultEngine) StartTask(taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool, reset bool) error {
+func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool, reset bool) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	taskEx, err := e.store.TaskExecutions().Get(taskExID)
 	if err != nil {
 		return err
@@ -343,7 +368,11 @@ func (e *DefaultEngine) StartTask(taskExID string, firstRun bool, waiting bool, 
 }
 
 // OnActionComplete handles action completion events.
-func (e *DefaultEngine) OnActionComplete(actionExID string, result *db.Result, wfAction bool) error {
+func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string, result *db.Result, wfAction bool) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	var actionEx *db.ActionExecution
 	var wfEx *db.WorkflowExecution
 	var taskEx *db.TaskExecution

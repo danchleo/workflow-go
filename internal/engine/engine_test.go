@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"testing"
 
 	"github.com/mistral/workflow/internal/db"
@@ -78,7 +79,7 @@ func runToCompletion(t *testing.T, eng *DefaultEngine, store db.Store, wfExID st
 		if invokeID == "" {
 			invokeID = pending.ID // fallback
 		}
-		if err := eng.OnActionComplete(invokeID, result, false); err != nil {
+		if err := eng.OnActionComplete(context.Background(), invokeID, result, false); err != nil {
 			t.Fatalf("OnActionComplete(%s): %v", invokeID, err)
 		}
 	}
@@ -104,7 +105,7 @@ func TestEngine_DirectWorkflow_EndToEnd(t *testing.T) {
 	params := map[string]interface{}{"env": map[string]interface{}{}, "namespace": ""}
 	input := map[string]interface{}{"greeting": "Hi", "name": "Mistral"}
 
-	wfEx, err := eng.StartWorkflow(wfDef.ID, "", "", input, "test", params)
+	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", input, "test", params)
 	if err != nil {
 		t.Fatalf("start workflow: %v", err)
 	}
@@ -139,7 +140,7 @@ func TestEngine_ReverseWorkflow_EndToEnd(t *testing.T) {
 		t.Fatalf("create workflow: %v", err)
 	}
 
-	wfEx, err := eng.StartWorkflow(wfDef.ID, "", "", nil, "rev test", map[string]interface{}{
+	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "rev test", map[string]interface{}{
 		"env":       map[string]interface{}{},
 		"namespace": "",
 	})
@@ -169,12 +170,12 @@ func TestEngine_StopWorkflow_Error(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	wfEx, _ := eng.StartWorkflow(wfDef.ID, "", "", nil, "", map[string]interface{}{
+	wfEx, _ := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", map[string]interface{}{
 		"env":       map[string]interface{}{},
 		"namespace": "",
 	})
 
-	if err := eng.StopWorkflow(wfEx.ID, states.ERROR, "manual stop"); err != nil {
+	if err := eng.StopWorkflow(context.Background(), wfEx.ID, states.ERROR, "manual stop"); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 
@@ -193,12 +194,12 @@ func TestEngine_PauseAndResume(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	wfEx, _ := eng.StartWorkflow(wfDef.ID, "", "", nil, "", map[string]interface{}{
+	wfEx, _ := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", map[string]interface{}{
 		"env":       map[string]interface{}{},
 		"namespace": "",
 	})
 
-	if err := eng.PauseWorkflow(wfEx.ID); err != nil {
+	if err := eng.PauseWorkflow(context.Background(), wfEx.ID); err != nil {
 		t.Fatalf("pause: %v", err)
 	}
 	paused, _ := store.WorkflowExecutions().Get(wfEx.ID)
@@ -206,7 +207,7 @@ func TestEngine_PauseAndResume(t *testing.T) {
 		t.Errorf("after pause state = %s, want PAUSED", paused.State)
 	}
 
-	if err := eng.ResumeWorkflow(wfEx.ID, nil); err != nil {
+	if err := eng.ResumeWorkflow(context.Background(), wfEx.ID, nil); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	resumed, _ := store.WorkflowExecutions().Get(wfEx.ID)

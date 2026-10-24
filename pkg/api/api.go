@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -16,10 +17,10 @@ import (
 
 // Server is the Mistral API server.
 type Server struct {
-	store          db.Store
-	engine         engine.Engine
-	wfService      *services.WorkflowService
-	httpServer     *http.Server
+	store      db.Store
+	engine     engine.Engine
+	wfService  *services.WorkflowService
+	httpServer *http.Server
 }
 
 // NewServer creates a new API server.
@@ -62,6 +63,15 @@ func (s *Server) Start(addr string) error {
 	}
 	log.Printf("Mistral API server listening on %s", addr)
 	return s.httpServer.ListenAndServe()
+}
+
+// Stop gracefully shuts down the API server with the given context.
+func (s *Server) Stop(ctx context.Context) error {
+	if s.httpServer == nil {
+		return nil
+	}
+	log.Printf("Shutting down API server...")
+	return s.httpServer.Shutdown(ctx)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
@@ -157,7 +167,7 @@ func (s *Server) handleExecutions(w http.ResponseWriter, r *http.Request) {
 			params["env"] = make(map[string]interface{})
 		}
 
-		wfEx, err := s.engine.StartWorkflow(wfDef.ID, body.Namespace, "", body.Input, body.Description, params)
+		wfEx, err := s.engine.StartWorkflow(r.Context(), wfDef.ID, body.Namespace, "", body.Input, body.Description, params)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -198,7 +208,7 @@ func (s *Server) handleExecutionByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, fmt.Errorf("state required"))
 			return
 		}
-		if err := s.engine.StopWorkflow(id, body.State, body.Message); err != nil {
+		if err := s.engine.StopWorkflow(r.Context(), id, body.State, body.Message); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}

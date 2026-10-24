@@ -5,11 +5,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/mistral/workflow/internal/db"
@@ -39,9 +42,28 @@ func main() {
 		return
 	}
 
+	// Graceful shutdown on SIGINT / SIGTERM.
 	srv := api.NewServer(store, eng)
-	if err := srv.Start(*addr); err != nil {
-		log.Fatal(err)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Start(*addr)
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			log.Fatal(err)
+		}
+	case sig := <-sigCh:
+		log.Printf("Received signal %s, shutting down...", sig)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Stop(ctx); err != nil {
+			log.Printf("shutdown error: %v", err)
+		}
 	}
 }
 
@@ -80,7 +102,7 @@ func runDemoDirect(store db.Store, eng *engine.DefaultEngine) {
 		"name":     "Mistral",
 	}
 
-	wfEx, err := eng.StartWorkflow(wfDef.ID, "", "", input, "demo execution", params)
+	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", input, "demo execution", params)
 	if err != nil {
 		log.Fatalf("starting workflow: %v", err)
 	}
@@ -113,7 +135,7 @@ func runDemoDirect(store db.Store, eng *engine.DefaultEngine) {
 
 		// Simulate action run and completion.
 		result := &db.Result{Data: fmt.Sprintf("'%s' completed", t.Name)}
-		if err := eng.OnActionComplete(t.ID, result, false); err != nil {
+		if err := eng.OnActionComplete(context.Background(), t.ID, result, false); err != nil {
 			log.Printf("    OnActionComplete error: %v", err)
 		}
 
@@ -158,7 +180,7 @@ func runDemoReverse(store db.Store, eng *engine.DefaultEngine) {
 		"namespace": "",
 	}
 
-	wfEx, err := eng.StartWorkflow(wfDef.ID, "", "", nil, "reverse demo", params)
+	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "reverse demo", params)
 	if err != nil {
 		log.Fatalf("starting workflow: %v", err)
 	}
@@ -169,7 +191,7 @@ func runDemoReverse(store db.Store, eng *engine.DefaultEngine) {
 	for _, t := range tasks {
 		fmt.Printf("[3] Running task: %s (state=%s)\n", t.Name, t.State)
 		result := &db.Result{Data: t.Name + " done"}
-		if err := eng.OnActionComplete(t.ID, result, false); err != nil {
+		if err := eng.OnActionComplete(context.Background(), t.ID, result, false); err != nil {
 			log.Printf("    error: %v", err)
 		}
 	}
