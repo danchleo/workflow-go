@@ -1576,7 +1576,7 @@ func TestIntegration_RetryDelay_RespectsDelay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLStore: %v", err)
 	}
-	coreSched := scheduler.NewDefaultScheduler(store, 50*time.Millisecond, 0, 30*time.Second, 0)
+	coreSched := scheduler.NewDefaultScheduler(store, 50*time.Millisecond, 0, 30*time.Second, 0, 0)
 	coreSched.Start()
 	defer coreSched.Stop()
 

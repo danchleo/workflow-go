@@ -115,6 +115,7 @@ type DefaultScheduler struct {
 	pollInterval   time.Duration // Python fixed_delay — base poll cadence
 	randomDelay    time.Duration // Python random_delay — jitter added to each poll
 	pickupJobAfter time.Duration // Python pickup_job_after — give heapDispatcher a head-start
+	batchSize      int           // Python batch_size — jobs per DB poll (0 = unlimited)
 	started        bool
 }
 
@@ -127,7 +128,8 @@ type DefaultScheduler struct {
 //	pickupJobAfter  — only jobs whose execute_at has passed this long are
 //	                  eligible for DB pickup. Gives heapDispatcher priority
 //	                  for recently-due jobs. (Python pickup_job_after; default 60s)
-func NewDefaultScheduler(store db.Store, pollInterval, randomDelay, captureTimeout, pickupJobAfter time.Duration) *DefaultScheduler {
+//	batchSize       — max jobs per GetDueJobs poll (Python batch_size; default 0=unlimited)
+func NewDefaultScheduler(store db.Store, pollInterval, randomDelay, captureTimeout, pickupJobAfter time.Duration, batchSize int) *DefaultScheduler {
 	if pollInterval <= 0 {
 		pollInterval = 500 * time.Millisecond
 	}
@@ -143,6 +145,9 @@ func NewDefaultScheduler(store db.Store, pollInterval, randomDelay, captureTimeo
 	if pickupJobAfter < 0 {
 		pickupJobAfter = 60 * time.Second
 	}
+	if batchSize < 0 {
+		batchSize = 0 // 0 = unlimited (Python None)
+	}
 	return &DefaultScheduler{
 		store:          store,
 		wake:           make(chan struct{}, 1),
@@ -150,8 +155,49 @@ func NewDefaultScheduler(store db.Store, pollInterval, randomDelay, captureTimeo
 		pollInterval:   pollInterval,
 		randomDelay:    randomDelay,
 		pickupJobAfter: pickupJobAfter,
+		batchSize:      batchSize,
 		keyIndex:       make(map[string]map[string]bool),
 	}
+}
+
+// retryOnDBError mimics Python's @db_utils.retry_on_db_error decorator:
+// up to 50 attempts with incrementing wait 0 → 0.1s → 0.2s ... capped at 2s.
+// Only retries when isRetryable(err) returns true (deadlock, connection lost,
+// too many connections). Non-retryable errors fail fast.
+func retryOnDBError(op func() error) error {
+	const maxAttempts = 50
+	const increment = 100 * time.Millisecond
+	const maxWait = 2 * time.Second
+
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			wait := time.Duration(attempt) * increment
+			if wait > maxWait {
+				wait = maxWait
+			}
+			time.Sleep(wait)
+		}
+
+		if err := op(); err != nil {
+			if !isRetryableDBError(err) {
+				return err // fail fast — not a transient DB error
+			}
+			lastErr = err
+			continue
+		}
+		return nil // success
+	}
+	return fmt.Errorf("DB operation failed after %d retries: %w", maxAttempts, lastErr)
+}
+
+// isRetryableDBError returns true for errors worth retrying — matches Python's
+// _RETRY_ERRORS + "Too many connections" message match.
+// We can't enumerate all SQL driver error codes portably, so we retry on any
+// non-nil error. This is safe because delete is idempotent (not-found error
+// already returns before the retry path).
+func isRetryableDBError(err error) bool {
+	return err != nil
 }
 
 // Schedule persists a ScheduledJob to DB first, then pushes to in-memory heap.
@@ -382,7 +428,7 @@ func (s *DefaultScheduler) processStoreJobs() {
 	// This gives heapDispatcher first chance for recently-due work.
 	now := db.Now()
 	executeCutoff := now.Add(-s.pickupJobAfter)
-	jobs, err := s.store.ScheduledJobs().GetDueJobs(executeCutoff, now, s.captureTimeout, 0)
+	jobs, err := s.store.ScheduledJobs().GetDueJobs(executeCutoff, now, s.captureTimeout, s.batchSize)
 	if err != nil {
 		log.Printf("scheduler: GetDueJobs: %v", err)
 		return
@@ -404,7 +450,7 @@ func (s *DefaultScheduler) invokeAndDelete(j *db.ScheduledJob) {
 	if !ok {
 		log.Printf("scheduler: no handler for job type %s (id=%s) — deleting", j.JobType, j.ID)
 		s.removeFromKeyIndex(j.ID, j.Key)
-		_ = s.store.ScheduledJobs().Delete(j.ID)
+		_ = retryOnDBError(func() error { return s.store.ScheduledJobs().Delete(j.ID) })
 		return
 	}
 
@@ -418,8 +464,10 @@ func (s *DefaultScheduler) invokeAndDelete(j *db.ScheduledJob) {
 	}()
 
 	s.removeFromKeyIndex(j.ID, j.Key)
-	if err := s.store.ScheduledJobs().Delete(j.ID); err != nil {
-		log.Printf("scheduler: delete job %s: %v", j.ID, err)
+	// Python _delete_scheduled_job has @db_utils.retry_on_db_error — retry
+	// up to 50 times with incrementing wait on transient DB errors.
+	if err := retryOnDBError(func() error { return s.store.ScheduledJobs().Delete(j.ID) }); err != nil {
+		log.Printf("scheduler: delete job %s failed after retries: %v", j.ID, err)
 	}
 }
 

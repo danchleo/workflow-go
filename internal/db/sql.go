@@ -18,11 +18,30 @@ import (
 // NewSQLStore creates a GORM-backed Store using SQLite (file or :memory:).
 // Example: NewSQLStore("/tmp/mistral.db") or NewSQLStore(":memory:")
 func NewSQLStore(dsn string) (Store, error) {
-	gormDB, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite: %w", err)
+	var gormDB *gorm.DB
+	var err error
+
+	if dsn == ":memory:" {
+		// SQLite :memory: opens a fresh empty DB per connection.
+		// Force a single connection pool so AutoMigrate tables are visible
+		// to all queries. file::memory:?cache=shared also works but requires
+		// the URI form which some drivers handle inconsistently.
+		gormDB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
+			Logger: logger.Default.LogMode(logger.Warn),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("open sqlite :memory:: %w", err)
+		}
+		sqlDB, _ := gormDB.DB()
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
+	} else {
+		gormDB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
+			Logger: logger.Default.LogMode(logger.Warn),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("open sqlite %s: %w", dsn, err)
+		}
 	}
 	if err := gormDB.AutoMigrate(
 		&gWorkflowDef{}, &gActionDef{}, &gWfEx{}, &gTaskEx{}, &gActEx{}, &gEnv{}, &gCronTrigger{}, &gScheduledJob{},
