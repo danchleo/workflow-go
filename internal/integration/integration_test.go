@@ -1676,6 +1676,240 @@ func TestIntegration_TimeoutPolicy_ForcesError(t *testing.T) {
 }
 
 // ================================================================
+// Scenario: Timeout + Retry — attempt 0 times out → retry gate
+// catches the ERROR → creates attempt 1 → we drive attempt 1 to
+// SUCCESS (faster than timeout) → on-success: done fires → wf SUCCESS.
+// This verifies timeout and retry policies are piped correctly through
+// the normal OnActionComplete flow.
+// ================================================================
+func TestIntegration_TimeoutRetry_RetryRecoversFromTimeout(t *testing.T) {
+	t.Helper()
+
+	store, err := db.NewSQLStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	eng := engine.NewDefaultEngine(store)
+	svc := services.NewWorkflowService(store)
+
+	data, err := os.ReadFile("testdata/timeout_retry.yaml")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	wfDef, err := svc.CreateWorkflow("timeout_retry_demo", string(data), "integration-test", "")
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	params := map[string]interface{}{
+		"env":       make(map[string]interface{}),
+		"namespace": "",
+	}
+	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", params)
+	if err != nil {
+		t.Fatalf("StartWorkflow: %v", err)
+	}
+	t.Logf("  started: wfEx=%s", wfEx.ID)
+
+	// Wait for attempt 0 to timeout (1s timeout).
+	time.Sleep(1500 * time.Millisecond)
+
+	// Now drive the RUNNING retry attempt 1 (timeout must have spawned it).
+	const maxIter = 30
+	var timeoutTask, doneTask *db.TaskExecution
+	for iter := 0; iter < maxIter; iter++ {
+		tasks, _ := store.TaskExecutions().List(wfEx.ID, "")
+		var pendingTe *db.TaskExecution
+		var pendingAe *db.ActionExecution
+		for _, te := range tasks {
+			if te.State != states.RUNNING {
+				continue
+			}
+			actionExs, _ := store.ActionExecutions().List(te.ID, "")
+			for _, ae := range actionExs {
+				if ae.State == states.RUNNING {
+					pendingTe = te
+					pendingAe = ae
+					break
+				}
+			}
+			if pendingTe != nil {
+				break
+			}
+		}
+		if pendingTe == nil {
+			break
+		}
+		t.Logf("  iter %d: driving %s attempt=%d", iter, pendingTe.Name,
+			db.CoerceInt(pendingAe.RuntimeContext["retry_attempts"]))
+		if pendingTe.Name == "flaky_hungry" {
+			// Attempt 1: we drive it to SUCCESS (faster than its own 1s timeout).
+			res := &db.Result{Data: "retry-finally-worked"}
+			if err := eng.OnActionComplete(context.Background(), pendingAe.ID, res, false); err != nil {
+				t.Fatalf("OnActionComplete (%s): %v", pendingTe.Name, err)
+			}
+		} else {
+			// "done" task: complete normally.
+			res := &db.Result{Data: "all-ok"}
+			if err := eng.OnActionComplete(context.Background(), pendingAe.ID, res, false); err != nil {
+				t.Fatalf("OnActionComplete (%s): %v", pendingTe.Name, err)
+			}
+		}
+	}
+
+	final, _ := store.WorkflowExecutions().Get(wfEx.ID)
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	for _, te := range tasks {
+		switch te.Name {
+		case "flaky_hungry":
+			timeoutTask = te
+		case "done":
+			doneTask = te
+		}
+	}
+
+	// Assertions.
+	if timeoutTask == nil {
+		t.Fatal("flaky_hungry task not found")
+	}
+	if timeoutTask.State != states.SUCCESS {
+		t.Errorf("flaky_hungry state = %s, want SUCCESS (retry recovered from timeout)", timeoutTask.State)
+	}
+	if doneTask == nil {
+		t.Fatal("done task not found — on-success didn't fire")
+	}
+	if doneTask.State != states.SUCCESS {
+		t.Errorf("done state = %s, want SUCCESS", doneTask.State)
+	}
+	if final.State != states.SUCCESS {
+		t.Errorf("final wf = %s (info=%v), want SUCCESS", final.State, final.StateInfo)
+	}
+
+	// Check ActionExecution chain: attempt 0 (timeout ERROR) + attempt 1 (SUCCESS).
+	actions, _ := store.ActionExecutions().List(timeoutTask.ID, "")
+	if len(actions) != 2 {
+		t.Errorf("actions = %d, want 2 (attempt 0 timed out + attempt 1 succeeded)", len(actions))
+	}
+
+	t.Logf("  timeout→retry→success: flaky_hungry=%s, done=%s, actions=%d, final=%s ✅",
+		timeoutTask.State, doneTask.State, len(actions), final.State)
+}
+
+// ================================================================
+// Scenario: Timeout + Retry exhaustion. Every attempt (0, 1, 2) gets
+// killed by its own timeout. Retry gate keeps creating fresh attempts
+// (each with its own 1s timer). After all 3 attempts time out and
+// retry budget (count=2) is exhausted, task becomes ERROR → on-error:
+// recovered fires. This verifies retry-created ActionExecutions also
+// get timeout timers, and the pipeline propagates correctly.
+// ================================================================
+func TestIntegration_TimeoutRetry_AllTimeout(t *testing.T) {
+	t.Helper()
+
+	store, err := db.NewSQLStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	eng := engine.NewDefaultEngine(store)
+	svc := services.NewWorkflowService(store)
+
+	data, err := os.ReadFile("testdata/timeout_retry_exhausted.yaml")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	wfDef, err := svc.CreateWorkflow("timeout_retry_exhausted", string(data), "integration-test", "")
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	params := map[string]interface{}{
+		"env":       make(map[string]interface{}),
+		"namespace": "",
+	}
+	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", params)
+	if err != nil {
+		t.Fatalf("StartWorkflow: %v", err)
+	}
+	t.Logf("  started: wfEx=%s", wfEx.ID)
+
+	// Don't drive anything! Let timeout kill all 3 attempts:
+	//   t=0 attempt 0 starts (timeout 1s)
+	//   t=1 timeout kills → retry creates attempt 1 (timeout 1s)
+	//   t=2 timeout kills → retry creates attempt 2 (timeout 1s)
+	//   t=3 timeout kills → retry exhausted → task ERROR → on-error: recovered
+	time.Sleep(3500 * time.Millisecond)
+
+	// Now only "recovered" should be RUNNING — drive it to complete.
+	const maxIter = 10
+	for iter := 0; iter < maxIter; iter++ {
+		tasks, _ := store.TaskExecutions().List(wfEx.ID, "")
+		var pendingTe *db.TaskExecution
+		var pendingAe *db.ActionExecution
+		for _, te := range tasks {
+			if te.State != states.RUNNING {
+				continue
+			}
+			actionExs, _ := store.ActionExecutions().List(te.ID, "")
+			for _, ae := range actionExs {
+				if ae.State == states.RUNNING {
+					pendingTe = te
+					pendingAe = ae
+					break
+				}
+			}
+			if pendingTe != nil {
+				break
+			}
+		}
+		if pendingTe == nil {
+			break
+		}
+		res := &db.Result{Data: "recovered-ok"}
+		if err := eng.OnActionComplete(context.Background(), pendingAe.ID, res, false); err != nil {
+			t.Fatalf("OnActionComplete (%s): %v", pendingTe.Name, err)
+		}
+		t.Logf("  iter %d: drove %s → SUCCESS", iter, pendingTe.Name)
+	}
+
+	final, _ := store.WorkflowExecutions().Get(wfEx.ID)
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	var flakyTask, recoveredTask *db.TaskExecution
+	for _, te := range tasks {
+		switch te.Name {
+		case "flaky_hungry":
+			flakyTask = te
+		case "recovered":
+			recoveredTask = te
+		}
+	}
+
+	if flakyTask == nil {
+		t.Fatal("flaky_hungry task not found")
+	}
+	if flakyTask.State != states.ERROR {
+		t.Errorf("flaky_hungry = %s, want ERROR (all attempts timed out + retry exhausted)", flakyTask.State)
+	}
+	if recoveredTask == nil {
+		t.Fatal("recovered task not found — on-error didn't fire")
+	}
+	if recoveredTask.State != states.SUCCESS {
+		t.Errorf("recovered = %s, want SUCCESS", recoveredTask.State)
+	}
+	if final.State != states.SUCCESS {
+		t.Errorf("final wf = %s (info=%v), want SUCCESS", final.State, final.StateInfo)
+	}
+
+	// Verify we have exactly 3 ActionExecutions (attempt 0, 1, 2 — all ERROR).
+	actions, _ := store.ActionExecutions().List(flakyTask.ID, "")
+	if len(actions) != 3 {
+		t.Errorf("actions = %d, want 3 (3 attempts all timed out)", len(actions))
+	}
+
+	t.Logf("  timeout×retry exhaustion: flaky=%s(actions=%d), recovered=%s, final=%s ✅",
+		flakyTask.State, len(actions), recoveredTask.State, final.State)
+}
+
+// ================================================================
 // Scenario: Cron Trigger / Scheduler. Register a CronTrigger with
 // interval=1s, remaining=2. Manually call scheduler.RunOnce() twice
 // at t=0 and t=1s+ to fire the trigger. Verify exactly 2 WorkflowExecutions

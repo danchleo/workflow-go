@@ -1,0 +1,21 @@
+version: "2.0"
+name: timeout_retry_demo
+description: timeout kills attempt 0, retry creates attempt 1 which we drive to SUCCESS.
+
+tasks:
+  flaky_hungry:
+    action: std.echo
+    input:
+      output: "this-will-hang-on-first-attempt"
+    policies:
+      timeout: 1
+      retry:
+        count: 2
+        delay: 0
+    on-success:
+      - done
+
+  done:
+    action: std.echo
+    input:
+      output: "eventually-succeeded"

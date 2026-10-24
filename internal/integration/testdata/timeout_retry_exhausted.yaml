@@ -1,0 +1,21 @@
+version: "2.0"
+name: timeout_retry_exhausted
+description: timeout kills every attempt, retry never helps → ERROR → on-error recovery.
+
+tasks:
+  flaky_hungry:
+    action: std.echo
+    input:
+      output: "this-always-hangs"
+    policies:
+      timeout: 1
+      retry:
+        count: 2
+        delay: 0
+    on-error:
+      - recovered
+
+  recovered:
+    action: std.echo
+    input:
+      output: "all-attempts-timed-out"
