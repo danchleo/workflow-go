@@ -304,3 +304,32 @@ func TestEngine_WithItems_EndToEnd(t *testing.T) {
 		t.Errorf("fanout distinct indices = %d, want 3", len(indices))
 	}
 }
+
+func TestEngine_SQLStore_EndToEnd(t *testing.T) {
+	store, err := db.NewSQLStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	eng := NewDefaultEngine(store)
+	svc := services.NewWorkflowService(store)
+
+	wfDef, err := svc.CreateWorkflow("e2e_test", directWFYAML, "p", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", map[string]interface{}{
+		"env":       map[string]interface{}{},
+		"namespace": "",
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	runToCompletion(t, eng, store, wfEx.ID)
+
+	final, _ := store.WorkflowExecutions().Get(wfEx.ID)
+	if final.State != states.SUCCESS {
+		t.Fatalf("final state = %s (info=%v), want SUCCESS", final.State, final.StateInfo)
+	}
+}
