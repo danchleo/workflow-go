@@ -45,7 +45,9 @@ tasks:
     requires: [y]
 `
 
-// runToCompletion drives all pending tasks to completion.
+// runToCompletion drives all pending tasks to completion. Uses the real
+// ActionExecution ID from Task.RuntimeContext["action_ex_id"] when available,
+// falling back to direct TaskExecution ID for backwards compatibility.
 func runToCompletion(t *testing.T, eng *DefaultEngine, store db.Store, wfExID string) {
 	t.Helper()
 	const maxIter = 30
@@ -70,8 +72,14 @@ func runToCompletion(t *testing.T, eng *DefaultEngine, store db.Store, wfExID st
 		}
 
 		result := &db.Result{Data: pending.Name + "-done"}
-		if err := eng.OnActionComplete(pending.ID, result, false); err != nil {
-			t.Fatalf("OnActionComplete(%s): %v", pending.ID, err)
+		// Prefer real ActionExecution ID for the proper chain.
+		actionExID, _ := pending.RuntimeContext["action_ex_id"].(string)
+		invokeID := actionExID
+		if invokeID == "" {
+			invokeID = pending.ID // fallback
+		}
+		if err := eng.OnActionComplete(invokeID, result, false); err != nil {
+			t.Fatalf("OnActionComplete(%s): %v", invokeID, err)
 		}
 	}
 	t.Fatalf("runToCompletion hit max iterations")

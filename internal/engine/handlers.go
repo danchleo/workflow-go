@@ -311,11 +311,33 @@ func (e *DefaultEngine) StartTask(taskExID string, firstRun bool, waiting bool, 
 	inputDict := evaluateTaskInput(taskSpec, taskEx.InContext, wfEx.Input, wfEx.Context)
 	taskEx.RuntimeContext["resolved_input"] = inputDict
 
+	// Create ActionExecution so that OnActionComplete flows correctly through
+	// ActionExecution → TaskExecution → WorkflowExecution chain (port of Python
+	// mistral/engine/actions.py:RegularAction.schedule).
+	sync := true
+	actionEx := &db.ActionExecution{
+		Name:              taskSpec.GetActionName(),
+		State:             states.RUNNING,
+		Input:             inputDict,
+		RuntimeContext:    map[string]interface{}{"index": 0, "safe_rerun": true},
+		WorkflowNamespace: wfEx.WorkflowNamespace,
+		TaskExecutionID:   taskEx.ID,
+		WorkflowName:      wfEx.WorkflowName,
+		WorkflowID:        wfEx.WorkflowID,
+		ProjectID:         wfEx.ProjectID,
+		IsSync:            &sync,
+	}
+	if err := e.store.ActionExecutions().Create(actionEx); err != nil {
+		return fmt.Errorf("creating action execution: %w", err)
+	}
+	// Stash actionEx ID in runtime context for demo/tests convenience.
+	taskEx.RuntimeContext["action_ex_id"] = actionEx.ID
+
 	if err := e.store.TaskExecutions().Update(taskEx); err != nil {
 		return err
 	}
 
-	log.Printf("task %s (id=%s) started with input: %v", taskEx.Name, taskEx.ID, inputDict)
+	log.Printf("task %s (id=%s) started with input: %v (action_ex=%s)", taskEx.Name, taskEx.ID, inputDict, actionEx.ID)
 
 	return nil
 }
