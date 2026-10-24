@@ -337,6 +337,49 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 	inputDict := evaluateTaskInput(taskSpec, taskEx.InContext, wfEx.Input, wfEx.Context)
 	taskEx.RuntimeContext["resolved_input"] = inputDict
 
+	// Check for sub-workflow (nesting). Mirror of Python RegularTask._build_action
+	// → WorkflowAction.schedule(): start a child WorkflowExecution with
+	// parent's task_execution_id stashed in params so that when the child
+	// completes it can propagate its result back via OnActionComplete(wfAction=true).
+	if subWfName := taskSpec.GetWorkflowName(); subWfName != "" {
+		wfDef, err := e.store.WorkflowDefinitions().GetByName(subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID)
+		if err != nil {
+			return fmt.Errorf("sub-workflow %q not found: %w", subWfName, err)
+		}
+
+		childInput := map[string]interface{}{}
+		if len(inputDict) > 0 {
+			childInput = inputDict
+		} else {
+			childInput = wfEx.Input
+		}
+
+		rootExID := wfEx.RootExecutionID
+		if rootExID == "" {
+			rootExID = wfEx.ID
+		}
+
+		childParams := map[string]interface{}{
+			"env":               wfEx.Params["env"],
+			"namespace":         wfEx.WorkflowNamespace,
+			"task_execution_id": taskEx.ID,
+			"root_execution_id": rootExID,
+			"index":             0,
+		}
+
+		childEx, err := e.StartWorkflow(ctx, wfDef.ID, wfEx.WorkflowNamespace, "", childInput,
+			fmt.Sprintf("nested from %s/%s", wfEx.ID, taskEx.Name), childParams)
+		if err != nil {
+			return fmt.Errorf("start sub-workflow %q: %w", subWfName, err)
+		}
+		log.Printf("  sub-workflow %s started: childEx=%s (parent task=%s)", subWfName, childEx.ID, taskEx.ID)
+
+		// Unlike RegularAction which creates an ActionExecution, a WorkflowAction
+		// leaves no ActionExecution record — the child WorkflowExecution *is*
+		// the "action" completion that will be fed back via wfAction=true.
+		return e.store.TaskExecutions().Update(taskEx)
+	}
+
 	// Check for with-items (parallel iterations).
 	withItems := taskSpec.GetWithItems()
 	if len(withItems) > 0 {
@@ -462,19 +505,28 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 
 	var actionEx *db.ActionExecution
 	var wfEx *db.WorkflowExecution
+	var childWfEx *db.WorkflowExecution // only set when wfAction=true — the nested WorkflowExecution that just completed
 	var taskEx *db.TaskExecution
 	var err error
 
 	if wfAction {
-		wfEx, err = e.store.WorkflowExecutions().Get(actionExID)
+		// actionExID here IS the child WorkflowExecution's ID (Python: wf_action=True).
+		childWfEx, err = e.store.WorkflowExecutions().Get(actionExID)
 		if err != nil {
 			return err
 		}
-		if wfEx.TaskExecutionID != "" {
-			taskEx, err = e.store.TaskExecutions().Get(wfEx.TaskExecutionID)
-			if err != nil {
-				return err
-			}
+		if childWfEx.TaskExecutionID == "" {
+			return fmt.Errorf("wfAction=True but child wfEx %s has no TaskExecutionID", childWfEx.ID)
+		}
+		taskEx, err = e.store.TaskExecutions().Get(childWfEx.TaskExecutionID)
+		if err != nil {
+			return err
+		}
+		// wfEx must be the PARENT workflow execution — the one that owns taskEx —
+		// because the controller and dispatcher run against it, not the child.
+		wfEx, err = e.store.WorkflowExecutions().Get(taskEx.WorkflowExecutionID)
+		if err != nil {
+			return err
 		}
 	} else {
 		// First try to find as ActionExecution.
@@ -510,15 +562,26 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 	}
 
 	// Determine new state.
-	newState := states.SUCCESS
+	var newState string
 	var stateInfo string
-	if result != nil {
-		if result.IsCancel() {
-			newState = states.CANCELLED
-			stateInfo = fmt.Sprintf("%v", result.Error)
-		} else if result.Error != nil {
-			newState = states.ERROR
-			stateInfo = fmt.Sprintf("%v", result.Error)
+	if wfAction && childWfEx != nil {
+		// Sub-workflow completion: use the child WorkflowExecution's terminal state
+		// directly, mirroring Python RegularTask.on_action_complete which reads
+		// action_ex.state (where action_ex can be a WorkflowExecution).
+		newState = childWfEx.State
+		if info, ok := childWfEx.StateInfo.(string); ok {
+			stateInfo = info
+		}
+	} else {
+		newState = states.SUCCESS
+		if result != nil {
+			if result.IsCancel() {
+				newState = states.CANCELLED
+				stateInfo = fmt.Sprintf("%v", result.Error)
+			} else if result.Error != nil {
+				newState = states.ERROR
+				stateInfo = fmt.Sprintf("%v", result.Error)
+			}
 		}
 	}
 
@@ -556,7 +619,19 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 	taskEx.StateInfo = stateInfo
 	taskEx.Processed = true
 
-	if result != nil && result.Data != nil {
+	if wfAction && childWfEx != nil {
+		// Sub-workflow completion: the child WorkflowExecution's output IS the
+		// "action output" that the parent task should see. Mirror Python where
+		// action_ex.output (of the WorkflowExecution) propagates as task result.
+		taskEx.Output = childWfEx.Output
+		if taskEx.Output == nil {
+			taskEx.Output = make(map[string]interface{})
+		}
+		// Also ensure a "result" key exists for easy dot-path expressions.
+		if _, ok := taskEx.Output["result"]; !ok {
+			taskEx.Output["result"] = childWfEx.State
+		}
+	} else if result != nil && result.Data != nil {
 		taskEx.Output = map[string]interface{}{"result": result.Data}
 	}
 
@@ -648,7 +723,44 @@ func (e *DefaultEngine) checkAndCompleteWorkflow(wfEx *db.WorkflowExecution, ctr
 	}
 
 	wfEx.Accepted = true
-	return e.store.WorkflowExecutions().Update(wfEx)
+	if err := e.store.WorkflowExecutions().Update(wfEx); err != nil {
+		return err
+	}
+
+	// If this workflow is a sub-workflow (has a parent task), send the result
+	// back so the parent task can complete. Mirror of Python Workflow._send_result_to_parent_workflow.
+	if wfEx.TaskExecutionID != "" {
+		var result *db.Result
+		switch wfEx.State {
+		case states.SUCCESS:
+			result = nil // Python: result=None
+		case states.ERROR:
+			errMsg := ""
+			if v, ok := wfEx.StateInfo.(string); ok {
+				errMsg = v
+			}
+			if errMsg == "" {
+				errMsg = fmt.Sprintf("Failed subworkflow [execution_id=%s]", wfEx.ID)
+			}
+			result = &db.Result{Error: errMsg}
+		case states.CANCELLED:
+			errMsg := ""
+			if v, ok := wfEx.StateInfo.(string); ok {
+				errMsg = v
+			}
+			if errMsg == "" {
+				errMsg = fmt.Sprintf("Cancelled subworkflow [execution_id=%s]", wfEx.ID)
+			}
+			result = &db.Result{Error: errMsg, Cancel: true}
+		}
+		if err := e.OnActionComplete(context.Background(), wfEx.ID, result, true); err != nil {
+			log.Printf("  sub-workflow result callback to parent failed: %v", err)
+		} else {
+			log.Printf("  sub-workflow %s (%s) result sent to parent task %s", wfEx.Name, wfEx.State, wfEx.TaskExecutionID)
+		}
+	}
+
+	return nil
 }
 
 // evaluateTaskInput evaluates a task's input dictionary against context.
