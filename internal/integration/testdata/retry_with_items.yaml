@@ -1,0 +1,27 @@
+version: "2.0"
+name: retry_with_items_demo
+description: 3 with-items iterations, each retries independently, then aggregates.
+
+tasks:
+  flaky_loop:
+    action: std.echo
+    with-items:
+      item: [0, 1, 2]
+    policies:
+      retry:
+        count: 2
+        delay: 0
+    on-success:
+      - all_ok
+    on-error:
+      - some_failed
+
+  all_ok:
+    action: std.echo
+    input:
+      output: "all-iterations-succeeded"
+
+  some_failed:
+    action: std.echo
+    input:
+      output: "some-iterations-failed-after-retry"

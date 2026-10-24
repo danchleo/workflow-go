@@ -1446,3 +1446,108 @@ func TestIntegration_RetryPolicy_ExhaustedRemainingERROR(t *testing.T) {
 	t.Logf("  retry exhausted: task=%s, actions=%d, final_wf=%s",
 		flakyTask.State, len(actions), final.State)
 }
+
+// ================================================================
+// Scenario: retry policy interacts with with-items. Each iteration
+// retries independently (per-ActionExecution granularity). When all
+// iterations eventually succeed after retries, with-items aggregation
+// reports SUCCESS → on-success: all_ok fires.
+// ================================================================
+func TestIntegration_RetryWithItems_AllRecover(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "retry_with_items.yaml",
+		expectedState: states.SUCCESS,
+		customResultsByAttempt: map[string]func(int) *db.Result{
+			// All 3 iterations fail twice then succeed on 3rd attempt.
+			"flaky_loop": func(attempt int) *db.Result {
+				if attempt < 2 {
+					return &db.Result{Error: fmt.Sprintf("iter-fail-attempt-%d", attempt)}
+				}
+				return &db.Result{Data: "finally-worked"}
+			},
+		},
+	})
+
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	var flakyTask, allOkTask *db.TaskExecution
+	for _, te := range tasks {
+		switch te.Name {
+		case "flaky_loop":
+			flakyTask = te
+		case "all_ok":
+			allOkTask = te
+		}
+	}
+	if flakyTask == nil {
+		t.Fatal("flaky_loop task not found")
+	}
+	if allOkTask == nil {
+		t.Fatal("all_ok task not found — on-success didn't fire after retry+with-items")
+	}
+	if flakyTask.State != states.SUCCESS {
+		t.Errorf("flaky_loop state = %s, want SUCCESS", flakyTask.State)
+	}
+	if allOkTask.State != states.SUCCESS {
+		t.Errorf("all_ok state = %s, want SUCCESS", allOkTask.State)
+	}
+
+	// 3 iterations × 3 attempts each (initial + 2 retries) = 9 ActionExecutions.
+	actions, _ := store.ActionExecutions().List(flakyTask.ID, "")
+	if len(actions) != 9 {
+		t.Errorf("flaky_loop ActionExecutions = %d, want 9 (3 iters × 3 attempts)", len(actions))
+	}
+
+	t.Logf("  retry+with-items recover: flaky_loop=%s, actions=%d, all_ok=%s, final=%s",
+		flakyTask.State, len(actions), allOkTask.State, final.State)
+}
+
+// ================================================================
+// Scenario: retry + with-items where every iteration exhausts its
+// retry budget. Per-iteration retries are independent — each gets
+// its own fresh ActionExecution chain. with-items aggregation → task
+// ERROR → on-error recovery handler fires → overall workflow SUCCESS.
+// ================================================================
+func TestIntegration_RetryWithItems_AllExhausted(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "retry_with_items.yaml",
+		expectedState: states.SUCCESS, // on-error recovery brings wf back to SUCCESS
+		customResultsByAttempt: map[string]func(int) *db.Result{
+			// All 3 iterations always fail — retry budget fully exhausted.
+			"flaky_loop": func(attempt int) *db.Result {
+				return &db.Result{Error: fmt.Sprintf("always-fail-attempt-%d", attempt)}
+			},
+		},
+	})
+
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	var flakyTask, someFailedTask *db.TaskExecution
+	for _, te := range tasks {
+		switch te.Name {
+		case "flaky_loop":
+			flakyTask = te
+		case "some_failed":
+			someFailedTask = te
+		}
+	}
+	if flakyTask == nil {
+		t.Fatal("flaky_loop task not found")
+	}
+	if someFailedTask == nil {
+		t.Fatal("some_failed task not found — on-error didn't fire after retry exhaustion")
+	}
+	if flakyTask.State != states.ERROR {
+		t.Errorf("flaky_loop state = %s, want ERROR (all retries exhausted)", flakyTask.State)
+	}
+	if someFailedTask.State != states.SUCCESS {
+		t.Errorf("some_failed state = %s, want SUCCESS", someFailedTask.State)
+	}
+
+	// 3 iterations × 3 attempts each (initial + 2 retries all ERROR) = 9 ActionExecutions.
+	actions, _ := store.ActionExecutions().List(flakyTask.ID, "")
+	if len(actions) != 9 {
+		t.Errorf("flaky_loop ActionExecutions = %d, want 9 (3 iters × 3 attempts exhausted)", len(actions))
+	}
+
+	t.Logf("  retry+with-items exhausted: flaky_loop=%s, actions=%d, some_failed=%s, final=%s",
+		flakyTask.State, len(actions), someFailedTask.State, final.State)
+}
