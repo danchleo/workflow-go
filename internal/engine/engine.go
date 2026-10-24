@@ -127,13 +127,20 @@ func WithPostTx(fn func() error) error {
 
 // Dispatcher turns workflow commands into actual task starts.
 // Ported from mistral-master/mistral/engine/dispatcher.py
+// TaskStarter is a subset of Engine that dispatcher needs to kick off tasks.
+type TaskStarter interface {
+	StartTask(ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool, reset bool) error
+}
+
+// Dispatcher creates task executions from workflow commands and kicks them off.
 type Dispatcher struct {
-	store db.Store
+	store   db.Store
+	starter TaskStarter
 }
 
 // NewDispatcher creates a Dispatcher.
-func NewDispatcher(store db.Store) *Dispatcher {
-	return &Dispatcher{store: store}
+func NewDispatcher(store db.Store, starter TaskStarter) *Dispatcher {
+	return &Dispatcher{store: store, starter: starter}
 }
 
 const backlogKey = "backlog_commands"
@@ -242,7 +249,13 @@ func (d *Dispatcher) processCommands(wfEx *db.WorkflowExecution, cmds []commands
 
 		switch c := cmd.(type) {
 		case *commands.RunTask:
-			if err := d.startNewTask(wfEx, c); err != nil {
+			taskExID, err := d.startNewTask(wfEx, c)
+			if err != nil {
+				return err
+			}
+			// Kick off the task immediately — this is where ActionExecution
+			// gets created for with-items and non-with-items tasks.
+			if err := d.starter.StartTask(context.Background(), taskExID, true, false, nil, false, false); err != nil {
 				return err
 			}
 		case *commands.RunExistingTask:
@@ -274,22 +287,23 @@ func (d *Dispatcher) saveToBacklog(wfEx *db.WorkflowExecution, cmd commands.Work
 	wfEx.RuntimeContext[backlogKey] = backlog
 }
 
-func (d *Dispatcher) startNewTask(wfEx *db.WorkflowExecution, cmd *commands.RunTask) error {
+// startNewTask creates a new task execution and returns its ID.
+func (d *Dispatcher) startNewTask(wfEx *db.WorkflowExecution, cmd *commands.RunTask) (string, error) {
 	// Load workflow spec.
 	wfDefs := d.store.WorkflowDefinitions()
 	wfDef, err := wfDefs.Get(wfEx.WorkflowID)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	wfSpec, err := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
 	if err != nil {
-		return fmt.Errorf("loading workflow spec: %w", err)
+		return "", fmt.Errorf("loading workflow spec: %w", err)
 	}
 
 	taskSpec := wfSpec.GetTask(cmd.TaskName())
 	if taskSpec == nil {
-		return fmt.Errorf("task spec not found: %s", cmd.TaskName())
+		return "", fmt.Errorf("task spec not found: %s", cmd.TaskName())
 	}
 
 	// Create task execution.
@@ -317,10 +331,10 @@ func (d *Dispatcher) startNewTask(wfEx *db.WorkflowExecution, cmd *commands.RunT
 	}
 
 	if err := d.store.TaskExecutions().Create(taskEx); err != nil {
-		return err
+		return "", err
 	}
 
-	return nil
+	return taskEx.ID, nil
 }
 
 func (d *Dispatcher) runExistingTask(cmd *commands.RunExistingTask) error {

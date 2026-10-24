@@ -2,9 +2,11 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/mistral/workflow/internal/db"
+	v2 "github.com/mistral/workflow/internal/lang/v2"
 	"github.com/mistral/workflow/internal/services"
 	"github.com/mistral/workflow/internal/states"
 )
@@ -46,6 +48,30 @@ tasks:
     requires: [y]
 `
 
+const withItemsWFYAML = `
+version: "2.0"
+name: with_items_test
+
+input:
+  - items: ["alpha", "beta", "gamma"]
+
+tasks:
+  fanout:
+    action: std.echo
+    with-items: item in <% $.input.items %>
+    input:
+      output: "<% $.item %>"
+    publish:
+      result: "<% $.fanout.result %>"
+    on-success:
+      - done
+
+  done:
+    action: std.echo
+    input:
+      output: "all-done"
+`
+
 // runToCompletion drives all pending tasks to completion. Uses the real
 // ActionExecution ID from Task.RuntimeContext["action_ex_id"] when available,
 // falling back to direct TaskExecution ID for backwards compatibility.
@@ -70,6 +96,18 @@ func runToCompletion(t *testing.T, eng *DefaultEngine, store db.Store, wfExID st
 		}
 		if allDone {
 			return
+		}
+
+		// Handle with-items: find ALL ActionExecutions for this task and complete each.
+		if _, hasSize := pending.RuntimeContext["with_items_size"]; hasSize {
+			actionExs, _ := store.ActionExecutions().List(pending.ID, "")
+			for _, ae := range actionExs {
+				result := &db.Result{Data: pending.Name + "-iter-" + fmt.Sprintf("%v", ae.RuntimeContext["index"])}
+				if err := eng.OnActionComplete(context.Background(), ae.ID, result, false); err != nil {
+					t.Fatalf("OnActionComplete(%s): %v", ae.ID, err)
+				}
+			}
+			continue
 		}
 
 		result := &db.Result{Data: pending.Name + "-done"}
@@ -213,5 +251,56 @@ func TestEngine_PauseAndResume(t *testing.T) {
 	resumed, _ := store.WorkflowExecutions().Get(wfEx.ID)
 	if resumed.State != states.RUNNING {
 		t.Errorf("after resume state = %s, want RUNNING", resumed.State)
+	}
+}
+
+func TestEngine_WithItems_EndToEnd(t *testing.T) {
+	eng, store := newEngine(t)
+	svc := services.NewWorkflowService(store)
+
+	wfDef, err := svc.CreateWorkflow("with_items_test", withItemsWFYAML, "p", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Check with-items parsing.
+	wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
+	fanoutSpec := wfSpec.GetTask("fanout")
+	t.Logf("fanoutSpec withItems: %v (len=%d)", fanoutSpec.GetWithItems(), len(fanoutSpec.GetWithItems()))
+
+	input := map[string]interface{}{"items": []interface{}{"alpha", "beta", "gamma"}}
+	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", input, "with-items test", map[string]interface{}{
+		"env":       map[string]interface{}{},
+		"namespace": "",
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	runToCompletion(t, eng, store, wfEx.ID)
+
+	final, _ := store.WorkflowExecutions().Get(wfEx.ID)
+	if final.State != states.SUCCESS {
+		t.Fatalf("final state = %s (info=%v), want SUCCESS", final.State, final.StateInfo)
+	}
+
+	// Verify 3 ActionExecutions were created with distinct indices under the fanout task.
+	tasks, _ := store.TaskExecutions().List(wfEx.ID, "")
+	var fanoutTaskExID string
+	for _, te := range tasks {
+		if _, ok := te.RuntimeContext["with_items_size"]; ok {
+			fanoutTaskExID = te.ID
+		}
+	}
+	fanoutActionExs, _ := store.ActionExecutions().List(fanoutTaskExID, "")
+	indices := make(map[int]bool)
+	for _, ae := range fanoutActionExs {
+		if idx, ok := ae.RuntimeContext["index"].(int); ok {
+			indices[idx] = true
+		}
+	}
+	t.Logf("fanout action executions: %d, distinct indices: %v", len(fanoutActionExs), indices)
+	if len(indices) != 3 {
+		t.Errorf("fanout distinct indices = %d, want 3", len(indices))
 	}
 }

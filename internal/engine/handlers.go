@@ -23,10 +23,11 @@ type DefaultEngine struct {
 
 // NewDefaultEngine creates a DefaultEngine with the given store.
 func NewDefaultEngine(store db.Store) *DefaultEngine {
-	return &DefaultEngine{
-		store:      store,
-		dispatcher: NewDispatcher(store),
+	eng := &DefaultEngine{
+		store: store,
 	}
+	eng.dispatcher = NewDispatcher(store, eng)
+	return eng
 }
 
 // Store returns the underlying data store.
@@ -336,6 +337,12 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 	inputDict := evaluateTaskInput(taskSpec, taskEx.InContext, wfEx.Input, wfEx.Context)
 	taskEx.RuntimeContext["resolved_input"] = inputDict
 
+	// Check for with-items (parallel iterations).
+	withItems := taskSpec.GetWithItems()
+	if len(withItems) > 0 {
+		return e.startWithItemsTask(ctx, taskEx, taskSpec, wfEx, withItems, inputDict)
+	}
+
 	// Create ActionExecution so that OnActionComplete flows correctly through
 	// ActionExecution → TaskExecution → WorkflowExecution chain (port of Python
 	// mistral/engine/actions.py:RegularAction.schedule).
@@ -364,6 +371,86 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 
 	log.Printf("task %s (id=%s) started with input: %v (action_ex=%s)", taskEx.Name, taskEx.ID, inputDict, actionEx.ID)
 
+	return nil
+}
+
+// startWithItemsTask launches parallel ActionExecutions for a task with with-items.
+// Port of Python mistral/engine/actions.py:WithItemsAction.schedule.
+func (e *DefaultEngine) startWithItemsTask(ctx context.Context, taskEx *db.TaskExecution, taskSpec *v2.TaskSpec, wfEx *db.WorkflowExecution, withItems map[string]interface{}, baseInput map[string]interface{}) error {
+	// Evaluate each with-items expression to get the actual item lists.
+	ctxMap := workflow.BuildFullContext(wfEx, nil, nil)
+	withValues := make(map[string][]interface{})
+	var minLen int = -1
+	for varName, rawExpr := range withItems {
+		exprStr, ok := rawExpr.(string)
+		if !ok {
+			return fmt.Errorf("with-items value for %q must be a string expression, got %T", varName, rawExpr)
+		}
+		val := expressions.EvaluateRecursively(exprStr, ctxMap)
+		var items []interface{}
+		switch v := val.(type) {
+		case []interface{}:
+			items = v
+		case string:
+			items = []interface{}{v}
+		default:
+			items = []interface{}{v}
+		}
+		withValues[varName] = items
+		if minLen < 0 || len(items) < minLen {
+			minLen = len(items)
+		}
+	}
+
+	if minLen <= 0 {
+		// Empty with-items — skip the task.
+		taskEx.State = states.SUCCESS
+		taskEx.Processed = true
+		return e.store.TaskExecutions().Update(taskEx)
+	}
+
+	// Record iteration state in task runtime context.
+	doneMap := make(map[int]bool)
+	taskEx.RuntimeContext["with_items_size"] = minLen
+	taskEx.RuntimeContext["with_items_done"] = doneMap
+	taskEx.RuntimeContext["with_items_values"] = withValues
+
+	// Create one ActionExecution per iteration.
+	sync := true
+	for i := 0; i < minLen; i++ {
+		// Build per-iteration input by injecting with-item variables.
+		iterInput := make(map[string]interface{})
+		for k, v := range baseInput {
+			iterInput[k] = v
+		}
+		for varName, items := range withValues {
+			if i < len(items) {
+				iterInput[varName] = items[i]
+			}
+		}
+
+		actionEx := &db.ActionExecution{
+			Name:              taskSpec.GetActionName(),
+			State:             states.RUNNING,
+			Input:             iterInput,
+			RuntimeContext:    map[string]interface{}{"index": i, "safe_rerun": true},
+			WorkflowNamespace: wfEx.WorkflowNamespace,
+			TaskExecutionID:   taskEx.ID,
+			WorkflowName:      wfEx.WorkflowName,
+			WorkflowID:        wfEx.WorkflowID,
+			ProjectID:         wfEx.ProjectID,
+			IsSync:            &sync,
+		}
+		if err := e.store.ActionExecutions().Create(actionEx); err != nil {
+			return fmt.Errorf("creating with-items action execution %d: %w", i, err)
+		}
+		log.Printf("with-items iteration %d/%d created for task %s (action_ex=%s)", i+1, minLen, taskEx.Name, actionEx.ID)
+	}
+
+	if err := e.store.TaskExecutions().Update(taskEx); err != nil {
+		return err
+	}
+	log.Printf("with-items task %s started (%d parallel iterations)", taskEx.Name, minLen)
 	return nil
 }
 
@@ -445,6 +532,30 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 		if err := e.store.ActionExecutions().Update(actionEx); err != nil {
 			return err
 		}
+	}
+
+	// Handle with-items: defer task completion until all iterations finish.
+	if _, hasSize := taskEx.RuntimeContext["with_items_size"]; hasSize {
+		idx := 0
+		if actionEx != nil {
+			if i, ok := actionEx.RuntimeContext["index"].(int); ok {
+				idx = i
+			}
+		}
+		doneMap, _ := taskEx.RuntimeContext["with_items_done"].(map[int]bool)
+		if doneMap == nil {
+			doneMap = make(map[int]bool)
+			taskEx.RuntimeContext["with_items_done"] = doneMap
+		}
+		doneMap[idx] = true
+
+		total, _ := taskEx.RuntimeContext["with_items_size"].(int)
+		if len(doneMap) < total {
+			// Not all iterations done — just persist the updated map and bail.
+			log.Printf("with-items task %s: %d/%d iterations done", taskEx.Name, len(doneMap), total)
+			return e.store.TaskExecutions().Update(taskEx)
+		}
+		log.Printf("with-items task %s: all %d iterations done, completing", taskEx.Name, total)
 	}
 
 	// Complete the task.
