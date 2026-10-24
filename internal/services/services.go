@@ -8,6 +8,7 @@ import (
 	"github.com/mistral/workflow/internal/db"
 	"github.com/mistral/workflow/internal/lang/parser"
 	v2 "github.com/mistral/workflow/internal/lang/v2"
+	"gopkg.in/yaml.v3"
 )
 
 // WorkflowService handles workflow definition management.
@@ -103,7 +104,9 @@ func NewWorkbookService(store db.Store) *WorkbookService {
 }
 
 // CreateWorkbook parses and saves a workbook, creating all contained
-// workflow definitions as separate DB records.
+// workflow definitions as separate DB records. Mirrors Python
+// mistral.services.workbooks._create_or_update_workflows: each workflow
+// is registered as "<wb_name>.<wf_name>" with WorkbookName stamped.
 func (s *WorkbookService) CreateWorkbook(name string, definition string, projectID, namespace string) (*db.Workbook, error) {
 	data, err := parser.ParseYAML(definition)
 	if err != nil {
@@ -122,13 +125,40 @@ func (s *WorkbookService) CreateWorkbook(name string, definition string, project
 		ProjectID:  projectID,
 	}
 
-	// Create contained workflow definitions.
-	wfSvc := NewWorkflowService(s.store)
-	for wfName := range wbSpec.GetWorkflows() {
-		if _, err := wfSvc.CreateWorkflow(wfName, definition, projectID, namespace); err != nil {
-			return nil, fmt.Errorf("creating workflow '%s' in workbook: %w", wfName, err)
+	wbFlows := wbSpec.GetWorkflows()
+	for wfName, wfSpec := range wbFlows {
+		// Python版: wf_name = '%s.%s' % (wb_db.name, wf_spec.get_name())
+		fullName := name + "." + wfName
+
+		wfMap := wfSpec.ToMap()
+
+		wfDef := &db.WorkflowDefinition{
+			Name:         fullName,
+			Namespace:    namespace,
+			Definition:   serializeWf(wfMap),
+			Spec:         wfMap,
+			WorkbookName: name,
+			ProjectID:    projectID,
+		}
+
+		existing, _ := s.store.WorkflowDefinitions().GetByName(fullName, namespace, projectID)
+		if existing != nil {
+			continue
+		}
+		if err := s.store.WorkflowDefinitions().Create(wfDef); err != nil {
+			return nil, fmt.Errorf("creating workflow '%s' in workbook: %w", fullName, err)
 		}
 	}
 
 	return wb, nil
+}
+
+// serializeWf re-serializes a workflow spec map to YAML so that each stored
+// workflow definition is self-contained (Python stores extractable slices).
+func serializeWf(m map[string]interface{}) string {
+	if m == nil {
+		return ""
+	}
+	b, _ := yaml.Marshal(m)
+	return string(b)
 }

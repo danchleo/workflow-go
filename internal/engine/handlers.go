@@ -85,6 +85,15 @@ func (e *DefaultEngine) StartWorkflow(ctx context.Context, wfDefID, wfNamespace,
 		wfEx.ID = wfExID
 	}
 
+	// Python Workflow._create_execution: wf_def.workbook_name → runtime_context['wb_name'].
+	// This lets sub-workflow resolution stay scoped within the same workbook.
+	if wfDef.WorkbookName != "" {
+		wfEx.RuntimeContext["wb_name"] = wfDef.WorkbookName
+	}
+	if v, ok := params["wb_name"].(string); ok && v != "" {
+		wfEx.RuntimeContext["wb_name"] = v // explicit param overrides wfDef's
+	}
+
 	// Initialize context with workflow variables.
 	for k, v := range wfSpec.GetVars() {
 		wfEx.Context[k] = expressions.EvaluateRecursively(v, map[string]interface{}{
@@ -342,9 +351,20 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 	// parent's task_execution_id stashed in params so that when the child
 	// completes it can propagate its result back via OnActionComplete(wfAction=true).
 	if subWfName := taskSpec.GetWorkflowName(); subWfName != "" {
-		wfDef, err := e.store.WorkflowDefinitions().GetByName(subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID)
-		if err != nil {
-			return fmt.Errorf("sub-workflow %q not found: %w", subWfName, err)
+		// Python engine_utils.resolve_workflow_definition:
+		//   parent_wf_ex.runtime_context['wb_name'] → first try wb_name.subWfName
+		//   then fall back to bare subWfName
+		parentWbName, _ := wfEx.RuntimeContext["wb_name"].(string)
+		var wfDef *db.WorkflowDefinition
+		var err error
+		if parentWbName != "" {
+			wfDef, err = e.store.WorkflowDefinitions().GetByName(parentWbName+"."+subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID)
+		}
+		if wfDef == nil || err != nil {
+			wfDef, err = e.store.WorkflowDefinitions().GetByName(subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID)
+			if err != nil {
+				return fmt.Errorf("sub-workflow %q not found: %w", subWfName, err)
+			}
 		}
 
 		childInput := map[string]interface{}{}

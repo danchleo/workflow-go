@@ -29,6 +29,8 @@ type fixture struct {
 	customResults      map[string]*db.Result // per-task override: key=taskName, value=Result (nil = default success)
 	withItemsResult    *db.Result            // override for all with-items iterations of a task (applied via key in customResults)
 	extraYAMLs         []string              // other YAMLs to register as sub-workflow definitions
+	workbookPath       string                // workbook YAML; if set, register all its workflows + use entryWorkflow to start
+	entryWorkflow      string                // when workbookPath set, which workflow inside to start (by workbook-relative name)
 }
 
 // runWorkflowFromYAML is the single shared helper for all integration tests.
@@ -38,18 +40,7 @@ type fixture struct {
 func runWorkflowFromYAML(t *testing.T, f fixture) (*db.WorkflowExecution, db.Store) {
 	t.Helper()
 
-	// 1. Read fixture.
-	data, err := os.ReadFile("testdata/" + f.yamlPath)
-	if err != nil {
-		t.Fatalf("read fixture %s: %v", f.yamlPath, err)
-	}
-
-	// Sanity check YAML parses before we even touch the engine.
-	if _, err := parser.ParseYAML(string(data)); err != nil {
-		t.Fatalf("fixture %s YAML parse failed: %v", f.yamlPath, err)
-	}
-
-	// 2. Bring up SQL-backed store + engine.
+	// 1. Bring up SQL-backed store + engine.
 	store, err := db.NewSQLStore(":memory:")
 	if err != nil {
 		t.Fatalf("NewSQLStore: %v", err)
@@ -57,38 +48,77 @@ func runWorkflowFromYAML(t *testing.T, f fixture) (*db.WorkflowExecution, db.Sto
 	eng := engine.NewDefaultEngine(store)
 	svc := services.NewWorkflowService(store)
 
-	// 3. Register any extra sub-workflow definitions first (so parent can find them
-	//    when its StartTask triggers the sub-workflow). Use the YAML's own `name:`
-	//    field as the registration name — this is what engine.GetByName() looks up.
-	for _, extra := range f.extraYAMLs {
-		extraData, err := os.ReadFile("testdata/" + extra)
+	var wfDef *db.WorkflowDefinition
+
+	if f.workbookPath != "" {
+		// === WORKBOOK MODE ===
+		wbData, err := os.ReadFile("testdata/" + f.workbookPath)
 		if err != nil {
-			t.Fatalf("read extra fixture %s: %v", extra, err)
+			t.Fatalf("read workbook %s: %v", f.workbookPath, err)
 		}
-		if _, err := parser.ParseYAML(string(extraData)); err != nil {
-			t.Fatalf("extra fixture %s parse failed: %v", extra, err)
+		wbSvc := services.NewWorkbookService(store)
+		wbName := yamlWorkflowName(string(wbData))
+		if wbName == "" {
+			wbName = "integration-workbook"
 		}
-		regName := yamlWorkflowName(string(extraData))
+		wb, err := wbSvc.CreateWorkbook(wbName, string(wbData), "integration-test", "")
+		if err != nil {
+			t.Fatalf("CreateWorkbook %q: %v", wbName, err)
+		}
+		t.Logf("  registered workbook %q with %d workflows", wb.Name, 0) // count below
+
+		// The entry workflow inside the workbook. Python stores as "wb_name.wf_name".
+		entry := f.entryWorkflow
+		if entry == "" {
+			entry = "wf_main" // default convention
+		}
+		fullEntry := wbName + "." + entry
+		wfDef, err = store.WorkflowDefinitions().GetByName(fullEntry, "", "integration-test")
+		if err != nil {
+			t.Fatalf("workflow %s not found in workbook: %v", fullEntry, err)
+		}
+		t.Logf("  starting workbook entry %s (wfDef.name=%s)", fullEntry, wfDef.Name)
+	} else {
+		// === SINGLE WORKFLOW MODE ===
+		data, err := os.ReadFile("testdata/" + f.yamlPath)
+		if err != nil {
+			t.Fatalf("read fixture %s: %v", f.yamlPath, err)
+		}
+		if _, err := parser.ParseYAML(string(data)); err != nil {
+			t.Fatalf("fixture %s YAML parse failed: %v", f.yamlPath, err)
+		}
+
+		// 3. Register any extra sub-workflow definitions first.
+		for _, extra := range f.extraYAMLs {
+			extraData, err := os.ReadFile("testdata/" + extra)
+			if err != nil {
+				t.Fatalf("read extra fixture %s: %v", extra, err)
+			}
+			if _, err := parser.ParseYAML(string(extraData)); err != nil {
+				t.Fatalf("extra fixture %s parse failed: %v", extra, err)
+			}
+			regName := yamlWorkflowName(string(extraData))
+			if regName == "" {
+				regName = "integration-" + extra
+			}
+			if _, err := svc.CreateWorkflow(regName, string(extraData), "integration-test", ""); err != nil {
+				t.Fatalf("CreateWorkflow for %s (name=%s): %v", extra, regName, err)
+			}
+			t.Logf("  registered sub-workflow %q (name=%s)", extra, regName)
+		}
+
+		// Persist the primary workflow definition.
+		regName := yamlWorkflowName(string(data))
 		if regName == "" {
-			regName = "integration-" + extra
+			regName = "integration-" + f.yamlPath
 		}
-		if _, err := svc.CreateWorkflow(regName, string(extraData), "integration-test", ""); err != nil {
-			t.Fatalf("CreateWorkflow for %s (name=%s): %v", extra, regName, err)
+		wfDef, err = svc.CreateWorkflow(regName, string(data), "integration-test", "")
+		if err != nil {
+			t.Fatalf("CreateWorkflow (name=%s): %v", regName, err)
 		}
-		t.Logf("  registered sub-workflow %q (name=%s)", extra, regName)
 	}
 
-	// 4. Persist the primary workflow definition — again, use YAML's real name.
-	regName := yamlWorkflowName(string(data))
-	if regName == "" {
-		regName = "integration-" + f.yamlPath
-	}
-	wfDef, err := svc.CreateWorkflow(regName, string(data), "integration-test", "")
-	if err != nil {
-		t.Fatalf("CreateWorkflow (name=%s): %v", regName, err)
-	}
-
-	// 4. Start execution.
+	// 5. Start execution.
 	params := map[string]interface{}{
 		"env":       make(map[string]interface{}),
 		"namespace": "",
@@ -635,4 +665,65 @@ func TestIntegration_Subworkflow_SimpleNesting(t *testing.T) {
 			break
 		}
 	}
+}
+
+// ============ Workbook tests ============
+
+func TestIntegration_Workbook_ChainedNestedWorkflows(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		workbookPath:  "workbook_chained.yaml",
+		entryWorkflow: "wf_main",
+		expectedState: states.SUCCESS,
+	})
+
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	if len(tasks) == 0 {
+		t.Fatalf("main wfEx %s has zero tasks", final.ID)
+	}
+	t.Logf("  main workflow tasks: %d", len(tasks))
+
+	// Count all WorkflowExecutions — there should be 3 (main + 2 nested).
+	// Note: Go stores WorkflowExecution.Name = WorkflowDefinition.Name,
+	// which in workbook mode is "wb_name.wf_name" (Python does the same).
+	allWfExs, _ := store.WorkflowExecutions().List("")
+	var mainWf, processWf, sumWf *db.WorkflowExecution
+	for _, w := range allWfExs {
+		switch w.Name {
+		case "math_pipeline.wf_main":
+			mainWf = w
+		case "math_pipeline.wf_process":
+			processWf = w
+		case "math_pipeline.wf_sum":
+			sumWf = w
+		}
+	}
+	if mainWf == nil {
+		t.Error("math_pipeline.wf_main not found")
+	} else {
+		if mainWf.RuntimeContext["wb_name"] != "math_pipeline" {
+			t.Errorf("main wb_name = %v, want math_pipeline", mainWf.RuntimeContext["wb_name"])
+		}
+	}
+	if processWf == nil {
+		t.Error("math_pipeline.wf_process not found — workbook scoping may be broken")
+	} else {
+		if processWf.TaskExecutionID == "" {
+			t.Error("process has no parent TaskExecutionID")
+		}
+		if processWf.RuntimeContext["wb_name"] != "math_pipeline" {
+			t.Errorf("process wb_name = %v, want math_pipeline", processWf.RuntimeContext["wb_name"])
+		}
+		if processWf.State != states.SUCCESS {
+			t.Errorf("process state = %s, want SUCCESS", processWf.State)
+		}
+	}
+	if sumWf == nil {
+		t.Error("math_pipeline.wf_sum not found")
+	} else {
+		if sumWf.State != states.SUCCESS {
+			t.Errorf("sum state = %s, want SUCCESS", sumWf.State)
+		}
+	}
+	t.Logf("  3-level workbook chain: main=%v process=%v sum=%v all SUCCESS=%v",
+		mainWf != nil, processWf != nil, sumWf != nil, final.State)
 }

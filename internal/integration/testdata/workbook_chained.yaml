@@ -1,0 +1,59 @@
+version: "2.0"
+name: math_pipeline
+description: A workbook with 3 chained workflows — wf_main calls wf_process calls wf_sum
+
+workflows:
+  wf_main:
+    tasks:
+      start:
+        action: std.echo
+        input:
+          output: "main-start"
+        on-success:
+          - step_chain
+
+      step_chain:
+        workflow: wf_process
+        on-success:
+          - final_main
+
+      final_main:
+        action: std.echo
+        input:
+          output: "main-final"
+
+  wf_process:
+    tasks:
+      process_start:
+        action: std.echo
+        input:
+          output: "process-start"
+        on-success:
+          - sum_delegate
+
+      sum_delegate:
+        workflow: wf_sum
+        on-success:
+          - process_end
+
+      process_end:
+        action: std.echo
+        input:
+          output: "process-end"
+
+  wf_sum:
+    tasks:
+      add_one:
+        action: std.echo
+        input:
+          output: "1"
+        on-success:
+          - add_two
+
+      add_two:
+        action: std.echo
+        input:
+          output: "2"
+
+output:
+  root_workflow: wf_main
