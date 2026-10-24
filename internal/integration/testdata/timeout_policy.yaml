@@ -1,0 +1,18 @@
+version: "2.0"
+name: timeout_demo
+description: task that never completes on its own — timeout policy forces it to ERROR.
+
+tasks:
+  hanging:
+    action: std.echo
+    input:
+      output: "this-never-gets-driven"
+    policies:
+      timeout: 1
+    on-error:
+      - recovered
+
+  recovered:
+    action: std.echo
+    input:
+      output: "timeout-triggered-error-recovery"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/mistral/workflow/internal/commands"
 	"github.com/mistral/workflow/internal/db"
@@ -28,6 +29,65 @@ func NewDefaultEngine(store db.Store) *DefaultEngine {
 	}
 	eng.dispatcher = NewDispatcher(store, eng)
 	return eng
+}
+
+// scheduleTaskTimeout checks the task's timeout policy and, if set, fires
+// a goroutine that will fail the ActionExecution after `timeoutSec` seconds
+// if it's still not completed. Mirrors Python TimeoutPolicy.before_task_start
+// (mistral/engine/policies.py ~line 412) which schedules _fail_if_incomplete
+// via the system scheduler.
+func (e *DefaultEngine) scheduleTaskTimeout(actionEx *db.ActionExecution, taskEx *db.TaskExecution, taskSpec *v2.TaskSpec) {
+	if taskSpec == nil {
+		return
+	}
+	policies := taskSpec.GetPolicies()
+	if policies == nil {
+		return
+	}
+	timeoutRaw := policies.GetTimeout()
+	if timeoutRaw == nil {
+		return
+	}
+	timeoutSec := -1
+	switch t := timeoutRaw.(type) {
+	case float64:
+		timeoutSec = int(t)
+	case int:
+		timeoutSec = t
+	}
+	if timeoutSec <= 0 {
+		return
+	}
+	delay := time.Duration(timeoutSec) * time.Second
+	// Schedule the timeout failure. Runs in its own goroutine via time.AfterFunc.
+	time.AfterFunc(delay, func() {
+		e.failIfIncomplete(actionEx.ID, timeoutSec)
+	})
+}
+
+// failIfIncomplete is the Go equivalent of Python's
+// policies._fail_task_if_incomplete (mistral/engine/policies.py ~line 545).
+// If the action is still not completed after the timeout, call
+// OnActionComplete with an error Result so retry/with-items/on-error
+// policies run correctly through the normal pipeline.
+func (e *DefaultEngine) failIfIncomplete(actionExID string, timeoutSec int) {
+	actionEx, err := e.store.ActionExecutions().Get(actionExID)
+	if err != nil || actionEx == nil {
+		return
+	}
+	if states.IsCompleted(actionEx.State) {
+		return // already finished, nothing to do
+	}
+
+	msg := fmt.Sprintf("Task timed out [timeout(s)=%d].", timeoutSec)
+	log.Printf("timeout: actionEx %s timed out after %ds, forcing ERROR", actionExID, timeoutSec)
+
+	// Feed into the normal completion pipeline with an error Result.
+	// OnActionComplete will derive state=ERROR from result.Error != nil.
+	result := &db.Result{Error: msg}
+	if err := e.OnActionComplete(context.Background(), actionExID, result, false); err != nil {
+		log.Printf("timeout: OnActionComplete for %s failed: %v", actionExID, err)
+	}
 }
 
 // Store returns the underlying data store.
@@ -432,6 +492,9 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 	// Stash actionEx ID in runtime context for demo/tests convenience.
 	taskEx.RuntimeContext["action_ex_id"] = actionEx.ID
 
+	// Timeout policy — schedule forced failure if action doesn't complete in time.
+	e.scheduleTaskTimeout(actionEx, taskEx, taskSpec)
+
 	if err := e.store.TaskExecutions().Update(taskEx); err != nil {
 		return err
 	}
@@ -587,6 +650,8 @@ func (e *DefaultEngine) startWithItemsIter(ctx context.Context, i, total int, ta
 			return fmt.Errorf("creating with-items action execution %d: %w", i, err)
 		}
 		log.Printf("with-items iter %d/%d action created for task %s (action_ex=%s)", i+1, total, taskEx.Name, actionEx.ID)
+		// Timeout policy — each with-items iteration gets its own timer.
+		e.scheduleTaskTimeout(actionEx, taskEx, taskSpec)
 	}
 	return nil
 }
@@ -937,6 +1002,9 @@ func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExec
 	if err := e.store.ActionExecutions().Create(newActionEx); err != nil {
 		return false, fmt.Errorf("retry creating ActionExecution: %w", err)
 	}
+
+	// Retried execution also gets its own timeout timer.
+	e.scheduleTaskTimeout(newActionEx, taskEx, taskSpec)
 
 	// Retry scheduled — caller (OnActionComplete) returns early without
 	// advancing task state or with-items counters. The driver loop or

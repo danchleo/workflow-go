@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/mistral/workflow/internal/db"
 	"github.com/mistral/workflow/internal/engine"
@@ -1550,4 +1551,125 @@ func TestIntegration_RetryWithItems_AllExhausted(t *testing.T) {
 
 	t.Logf("  retry+with-items exhausted: flaky_loop=%s, actions=%d, some_failed=%s, final=%s",
 		flakyTask.State, len(actions), someFailedTask.State, final.State)
+}
+
+// ================================================================
+// Scenario: Timeout policy. A task hangs forever (we never drive its
+// ActionExecution). Timeout fires after 1 second → forces ERROR →
+// retry gate runs (none configured) → with-items gate (none) →
+// ContinueWorkflow finds on-error: recovered → workflow recovers.
+// ================================================================
+func TestIntegration_TimeoutPolicy_ForcesError(t *testing.T) {
+	t.Helper()
+
+	store, err := db.NewSQLStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	eng := engine.NewDefaultEngine(store)
+	svc := services.NewWorkflowService(store)
+
+	data, err := os.ReadFile("testdata/timeout_policy.yaml")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	wfDef, err := svc.CreateWorkflow("timeout_demo", string(data), "integration-test", "")
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	params := map[string]interface{}{
+		"env":       make(map[string]interface{}),
+		"namespace": "",
+	}
+	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", params)
+	if err != nil {
+		t.Fatalf("StartWorkflow: %v", err)
+	}
+	t.Logf("  started: wfEx=%s state=%s", wfEx.ID, wfEx.State)
+
+	// Let the timeout goroutine fire (1s timeout → sleep 1500ms).
+	time.Sleep(1500 * time.Millisecond)
+
+	// Now drive any remaining RUNNING tasks (the "recovered" on-error handler
+	// needs us to complete it since we don't have a real executor running).
+	const maxIter = 30
+	for iter := 0; iter < maxIter; iter++ {
+		allWfExs, _ := store.WorkflowExecutions().List("")
+		var pendingTask *db.TaskExecution
+		var pendingAction *db.ActionExecution
+		for _, w := range allWfExs {
+			if states.IsCompleted(w.State) {
+				continue
+			}
+			tasks, _ := store.TaskExecutions().List(w.ID, "")
+			for _, te := range tasks {
+				if te.State != states.RUNNING {
+					continue
+				}
+				actionExs, _ := store.ActionExecutions().List(te.ID, "")
+				for _, ae := range actionExs {
+					if ae.State == states.RUNNING {
+						pendingTask = te
+						pendingAction = ae
+						break
+					}
+				}
+				if pendingTask != nil {
+					break
+				}
+			}
+			if pendingTask != nil {
+				break
+			}
+		}
+		if pendingTask == nil {
+			break // nothing RUNNING — done or stuck
+		}
+		t.Logf("  post-timeout iter %d: driving %s", iter, pendingTask.Name)
+		res := &db.Result{Data: fmt.Sprintf("%s-result", pendingTask.Name)}
+		if err := eng.OnActionComplete(context.Background(), pendingAction.ID, res, false); err != nil {
+			t.Fatalf("OnActionComplete (%s): %v", pendingTask.Name, err)
+		}
+	}
+
+	final, err := store.WorkflowExecutions().Get(wfEx.ID)
+	if err != nil {
+		t.Fatalf("get final wfEx: %v", err)
+	}
+
+	// Assert the timeout effect.
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	var hangingTask, recoveredTask *db.TaskExecution
+	for _, te := range tasks {
+		switch te.Name {
+		case "hanging":
+			hangingTask = te
+		case "recovered":
+			recoveredTask = te
+		}
+	}
+
+	if hangingTask == nil {
+		t.Fatal("hanging task not found")
+	}
+	// Timeout should have forced it to ERROR.
+	if hangingTask.State != states.ERROR {
+		t.Errorf("hanging state = %s, want ERROR (timeout should have fired)", hangingTask.State)
+	}
+
+	if recoveredTask != nil {
+		if recoveredTask.State != states.SUCCESS {
+			t.Errorf("recovered state = %s, want SUCCESS", recoveredTask.State)
+		}
+	} else {
+		t.Error("recovered task not found — on-error didn't fire after timeout")
+	}
+
+	if final.State != states.SUCCESS {
+		t.Errorf("final wf state = %s (info=%v), want SUCCESS", final.State, final.StateInfo)
+	}
+
+	t.Logf("  timeout: hanging=%s, recovered=%v, final=%s",
+		hangingTask.State, recoveredTask != nil, final.State)
 }
