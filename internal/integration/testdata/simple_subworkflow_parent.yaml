@@ -1,0 +1,25 @@
+version: "2.0"
+name: simple_subworkflow_parent
+description: Parent workflow that calls a sub-workflow via `workflow:` field
+
+tasks:
+  kickoff:
+    action: std.echo
+    input:
+      output: "parent-kickoff"
+    on-success:
+      - call_sub
+
+  call_sub:
+    workflow: simple_subworkflow_child
+    on-success:
+      - final
+
+  final:
+    action: std.echo
+    input:
+      output: "parent-final"
+
+output:
+  parent_msg: "parent done"
+  child_msg: "<% $.call_sub.result %>"

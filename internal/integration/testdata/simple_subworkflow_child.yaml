@@ -1,0 +1,22 @@
+version: "2.0"
+name: simple_subworkflow_child
+description: A tiny 2-task sub-workflow called from a parent
+
+tasks:
+  inner_start:
+    action: std.echo
+    input:
+      output: "sub-start"
+    publish:
+      sub_msg: "from-sub_<% $.inner_start.result %>"
+    on-success:
+      - inner_finish
+
+  inner_finish:
+    action: std.echo
+    input:
+      output: "sub-finish"
+
+output:
+  greeting: "child: <% $.inner_finish.result %>"
+  msg: "<% $.sub_msg %>"
