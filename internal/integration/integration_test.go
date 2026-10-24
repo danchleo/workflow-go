@@ -21,16 +21,17 @@ import (
 
 // fixture is what each YAML test case + its expectations look like.
 type fixture struct {
-	yamlPath           string // relative to testdata/
-	description        string
-	input              map[string]interface{}
-	expectedState      string                // e.g. states.SUCCESS
-	expectedSubstrings []string              // strings that MUST appear in the final workflow output
-	customResults      map[string]*db.Result // per-task override: key=taskName, value=Result (nil = default success)
-	withItemsResult    *db.Result            // override for all with-items iterations of a task (applied via key in customResults)
-	extraYAMLs         []string              // other YAMLs to register as sub-workflow definitions
-	workbookPath       string                // workbook YAML; if set, register all its workflows + use entryWorkflow to start
-	entryWorkflow      string                // when workbookPath set, which workflow inside to start (by workbook-relative name)
+	yamlPath               string // relative to testdata/
+	description            string
+	input                  map[string]interface{}
+	expectedState          string                          // e.g. states.SUCCESS
+	expectedSubstrings     []string                        // strings that MUST appear in the final workflow output
+	customResults          map[string]*db.Result           // per-task override: key=taskName, value=Result (nil = default success)
+	customResultsByAttempt map[string]func(int) *db.Result // per-task, per-retry-attempt: attempts 0,1,2,...
+	withItemsResult        *db.Result                      // override for all with-items iterations of a task (applied via key in customResults)
+	extraYAMLs             []string                        // other YAMLs to register as sub-workflow definitions
+	workbookPath           string                          // workbook YAML; if set, register all its workflows + use entryWorkflow to start
+	entryWorkflow          string                          // when workbookPath set, which workflow inside to start (by workbook-relative name)
 }
 
 // runWorkflowFromYAML is the single shared helper for all integration tests.
@@ -152,6 +153,7 @@ func runWorkflowFromYAML(t *testing.T, f fixture) (*db.WorkflowExecution, db.Sto
 				if states.IsCompleted(te.State) {
 					continue
 				}
+				t.Logf("  iter %d scan: wfEx=%s task=%s state=%s", iter, w.Name, te.Name, te.State)
 				// Skip sub-workflow tasks: they have no ActionExecution of their
 				// own — the child WorkflowExecution IS their "action" and will
 				// call back automatically via OnActionComplete(wfAction=true).
@@ -178,13 +180,24 @@ func runWorkflowFromYAML(t *testing.T, f fixture) (*db.WorkflowExecution, db.Sto
 		t.Logf("  iter %d: driving task %s (wfEx=%s state=%s)", iter, pending.Name, pendingWfEx.Name, pendingWfEx.State)
 
 		// With-items: one TaskExecution, N ActionExecutions.
+		// Only drive RUNNING actionExs — already-finished ones (ERROR/SUCCESS)
+		// have been processed and may have spawned retry siblings.
 		if _, ok := pending.RuntimeContext["with_items_total"]; ok {
 			actionExs, _ := store.ActionExecutions().List(pending.ID, "")
+			drivenAny := false
 			for _, ae := range actionExs {
-				res := defaultResult(pending.Name, f.customResults, fmt.Sprintf("iter-%v-done", ae.RuntimeContext["index"]))
+				if ae.State != states.RUNNING {
+					continue // already processed in a previous iter
+				}
+				attempt := db.CoerceInt(ae.RuntimeContext["retry_attempts"])
+				res := defaultResultWithAttempt(pending.Name, ae.Name, attempt, f.customResults, f.customResultsByAttempt, fmt.Sprintf("iter-%v-done", ae.RuntimeContext["index"]))
 				if err := eng.OnActionComplete(context.Background(), ae.ID, res, false); err != nil {
 					t.Fatalf("OnActionComplete with-items iter: %v", err)
 				}
+				drivenAny = true
+			}
+			if drivenAny {
+				continue // loop — OnActionComplete may have created retry siblings
 			}
 			continue
 		}
@@ -192,10 +205,39 @@ func runWorkflowFromYAML(t *testing.T, f fixture) (*db.WorkflowExecution, db.Sto
 		// Single-action task: find real ActionExecution via runtime context,
 		// fall back to taskEx ID for early tasks created before dispatcher integration.
 		invokeID, _ := pending.RuntimeContext["action_ex_id"].(string)
-		if invokeID == "" {
-			invokeID = pending.ID
+		var actionEx *db.ActionExecution
+		if invokeID != "" {
+			all, _ := store.ActionExecutions().List(pending.ID, "")
+			for _, ae := range all {
+				if ae.ID == invokeID {
+					actionEx = ae
+					break
+				}
+			}
+			if actionEx == nil {
+				actionExID := invokeID
+				_ = actionExID
+			}
 		}
+
+		// If actionEx finished (non-RUNNING) due to a previous iter's retry spawn,
+		// pick the most-recently-created RUNNING one instead.
+		if actionEx == nil || actionEx.State != states.RUNNING {
+			all, _ := store.ActionExecutions().List(pending.ID, "")
+			for _, ae := range all {
+				if ae.State == states.RUNNING {
+					actionEx = ae
+					break
+				}
+			}
+		}
+
 		res := defaultResult(pending.Name, f.customResults, fmt.Sprintf("result-of-%s", pending.Name))
+		if actionEx != nil {
+			attempt := db.CoerceInt(actionEx.RuntimeContext["retry_attempts"])
+			res = defaultResultWithAttempt(pending.Name, actionEx.Name, attempt, f.customResults, f.customResultsByAttempt, fmt.Sprintf("result-of-%s", pending.Name))
+			invokeID = actionEx.ID
+		}
 		if err := eng.OnActionComplete(context.Background(), invokeID, res, false); err != nil {
 			t.Fatalf("OnActionComplete (%s): %v", pending.Name, err)
 		}
@@ -434,6 +476,25 @@ func defaultResult(taskName string, overrides map[string]*db.Result, defaultData
 		}
 	}
 	return &db.Result{Data: defaultData}
+}
+
+// defaultResultWithAttempt extends defaultResult with attempt-aware overrides.
+// Lookup order: byAttempt[taskName](attempt) → overrides[taskName] → default success.
+// attempt=0 means first (non-retry) execution. attempt=1 is first retry.
+func defaultResultWithAttempt(taskName, actionName string, attempt int, overrides map[string]*db.Result, byAttempt map[string]func(int) *db.Result, defaultData string) *db.Result {
+	if byAttempt != nil {
+		if fn, ok := byAttempt[taskName]; ok {
+			if r := fn(attempt); r != nil {
+				return r
+			}
+		}
+		if fn, ok := byAttempt[actionName]; ok {
+			if r := fn(attempt); r != nil {
+				return r
+			}
+		}
+	}
+	return defaultResult(taskName, overrides, defaultData)
 }
 
 func containsAny(s string, subs ...string) bool {
@@ -1268,4 +1329,120 @@ func TestIntegration_WithItemsConcurrency_Limited(t *testing.T) {
 
 	t.Logf("  concurrency limit: total=%d concurrency=%d started(final)=%d actions=%d",
 		total, concurrency, started, len(actions))
+}
+
+// ================================================================
+// Scenario 10: Retry policy — flaky task fails attempt 0 and 1, succeeds
+// on attempt 2 (retry:count=2 means max 2 retries after initial → 3 total).
+// Assert 3 ActionExecutions created, task ends SUCCESS.
+// ================================================================
+func TestIntegration_RetryPolicy_SucceedsOnRetry(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "retry_policy.yaml",
+		expectedState: states.SUCCESS,
+		customResultsByAttempt: map[string]func(int) *db.Result{
+			// attempt=0: initial execution → ERROR
+			// attempt=1: first retry → ERROR
+			// attempt=2: second retry → SUCCESS
+			"flaky": func(attempt int) *db.Result {
+				if attempt < 2 {
+					return &db.Result{Error: fmt.Sprintf("flaky-fail-attempt-%d", attempt)}
+				}
+				return &db.Result{Data: "finally-worked"}
+			},
+		},
+	})
+
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	var flakyTask *db.TaskExecution
+	var doneTask *db.TaskExecution
+	for _, te := range tasks {
+		switch te.Name {
+		case "flaky":
+			flakyTask = te
+		case "done":
+			doneTask = te
+		}
+	}
+	if flakyTask == nil {
+		t.Fatal("flaky task not found")
+	}
+
+	// flaky should reach SUCCESS after retry.
+	if flakyTask.State != states.SUCCESS {
+		t.Errorf("flaky state = %s, want SUCCESS", flakyTask.State)
+	}
+	if doneTask == nil {
+		t.Error("done task not found — on-success didn't fire after retry success!")
+	} else if doneTask.State != states.SUCCESS {
+		t.Errorf("done state = %s, want SUCCESS", doneTask.State)
+	}
+
+	// 3 ActionExecutions: initial + 2 retries.
+	actions, _ := store.ActionExecutions().List(flakyTask.ID, "")
+	if len(actions) != 3 {
+		t.Errorf("flaky ActionExecutions = %d, want 3 (initial + 2 retries)", len(actions))
+	}
+
+	// Verify retry_attempts values: first=0, second=1, third=2 (or 0-indexed).
+	var zeroAttempt, oneAttempt, twoAttempt bool
+	for _, ae := range actions {
+		a := db.CoerceInt(ae.RuntimeContext["retry_attempts"])
+		switch a {
+		case 0:
+			zeroAttempt = true
+		case 1:
+			oneAttempt = true
+		case 2:
+			twoAttempt = true
+		}
+	}
+	if !zeroAttempt || !oneAttempt || !twoAttempt {
+		t.Errorf("retry_attempts distribution wrong: got zero=%v one=%v two=%v, want all true",
+			zeroAttempt, oneAttempt, twoAttempt)
+	}
+
+	t.Logf("  retry success: task=%s, retries_done=%d, actions=%d",
+		flakyTask.State, db.CoerceInt(flakyTask.RuntimeContext["retry_attempts"]), len(actions))
+}
+
+// ================================================================
+// Scenario 11: Retry exhausted — task always fails, retries twice, then
+// reaches ERROR. Verify retry doesn't corrupt with-items aggregation
+// (future scenario — today single task only).
+// ================================================================
+func TestIntegration_RetryPolicy_ExhaustedRemainingERROR(t *testing.T) {
+	// Reuse retry_policy fixture but make all 3 attempts fail.
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "retry_policy.yaml",
+		expectedState: states.ERROR,
+		customResultsByAttempt: map[string]func(int) *db.Result{
+			"flaky": func(attempt int) *db.Result {
+				return &db.Result{Error: fmt.Sprintf("always-fail-attempt-%d", attempt)}
+			},
+		},
+	})
+
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	var flakyTask *db.TaskExecution
+	for _, te := range tasks {
+		if te.Name == "flaky" {
+			flakyTask = te
+		}
+	}
+	if flakyTask == nil {
+		t.Fatal("flaky task not found")
+	}
+
+	if flakyTask.State != states.ERROR {
+		t.Errorf("flaky state = %s, want ERROR after retry exhaustion", flakyTask.State)
+	}
+	// RetryPolicy has count=2 → initial attempt + 2 retries = 3 total ActionExecutions.
+	actions, _ := store.ActionExecutions().List(flakyTask.ID, "")
+	if len(actions) != 3 {
+		t.Errorf("flaky ActionExecutions = %d, want 3 (initial + 2 retries exhausted)", len(actions))
+	}
+
+	t.Logf("  retry exhausted: task=%s, actions=%d, final_wf=%s",
+		flakyTask.State, len(actions), final.State)
 }

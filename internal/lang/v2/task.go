@@ -121,18 +121,27 @@ func NewTaskSpec(name string, data map[string]interface{}, taskType string) *Tas
 		s.publishOnSkip = v
 	}
 
-	// Policies - group policy fields.
+	// Policies - group policy fields. Two sources supported (mirrors Mistral):
+	//   1. Direct:  task.retry: {count: 3}              ← top-level key
+	//   2. Block:   task.policies: {retry: {count: 3}}  ← grouped under policies:
 	policyFields := []string{"retry", "wait-before", "wait-after", "timeout", "pause-before", "concurrency", "fail-on"}
 	policyMap := make(map[string]interface{})
+	// Source 1: top-level keys.
 	for _, f := range policyFields {
 		if v, ok := data[f]; ok {
 			policyMap[f] = v
 		}
 	}
+	// Source 2: policies: block (overrides top-level for the same field).
+	if v, ok := data["policies"].(map[string]interface{}); ok {
+		for _, f := range policyFields {
+			if fv, fok := v[f]; fok {
+				policyMap[f] = fv
+			}
+		}
+	}
 	if len(policyMap) > 0 {
 		s.policies = NewPoliciesSpec(policyMap)
-	} else {
-		s.policies = NewPoliciesSpec(make(map[string]interface{}))
 	}
 
 	// Target.

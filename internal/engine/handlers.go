@@ -691,6 +691,23 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 		}
 	}
 
+	// ============================================================
+	// Retry Policy — Python engine/policies.py RetryPolicy.after_task_complete.
+	// Per-ActionExecution granularity: a failed individual iteration retries
+	// independently of other with-items siblings. This runs BEFORE the
+	// with-items aggregation gate so retries don't corrupt failed_count.
+	// ============================================================
+	if states.IsError(newState) && actionEx != nil {
+		retryRetried, retryErr := e.handleRetry(ctx, actionEx, taskEx, wfEx)
+		if retryErr != nil {
+			return retryErr
+		}
+		if retryRetried {
+			// Retry scheduled — do NOT advance task state or with-items counters.
+			return nil
+		}
+	}
+
 	// Handle with-items: defer task completion until all iterations finish.
 	// Mirror Python WithItemsTask._complete_actions (engine/tasks.py ~line 870):
 	// if any iter ERROR → task ERROR, else SUCCESS. We count failed iters
@@ -846,6 +863,88 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 	}
 
 	return nil
+}
+
+// handleRetry implements per-ActionExecution retry after a failure.
+// Mirrors Python engine/policies.py RetryPolicy.after_task_complete but
+// operates on individual ActionExecutions (finer granularity — sibling
+// with-items iterations retry independently).
+//
+// Returns (retried, error): retried=true means we created a new ActionExecution
+// and the caller should NOT advance task state or with-items counters.
+func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExecution, taskEx *db.TaskExecution, wfEx *db.WorkflowExecution) (bool, error) {
+	// Load taskSpec to find retry policy.
+	wfDef, _ := e.store.WorkflowDefinitions().Get(wfEx.WorkflowID)
+	if wfDef == nil {
+		return false, nil
+	}
+	wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
+	if wfSpec == nil {
+		return false, nil
+	}
+	taskSpec := wfSpec.GetTask(taskEx.Name)
+	if taskSpec == nil {
+		return false, nil
+	}
+	policies := taskSpec.GetPolicies()
+	if policies == nil {
+		return false, nil
+	}
+	retrySpec := policies.GetRetry()
+	if retrySpec == nil {
+		return false, nil
+	}
+
+	// Resolve retry count (support literal int; expression form can come later).
+	retryCount := -1
+	switch c := retrySpec.GetCount().(type) {
+	case float64:
+		retryCount = int(c)
+	case int:
+		retryCount = c
+	}
+	if retryCount <= 0 {
+		return false, nil
+	}
+
+	// Track retries on the ActionExecution itself (per-iteration granularity).
+	attempt := db.CoerceInt(actionEx.RuntimeContext["retry_attempts"])
+	if attempt >= retryCount {
+		log.Printf("retry: ActionExecution %s already attempted %d times (limit %d) — giving up",
+			actionEx.ID, attempt, retryCount)
+		return false, nil
+	}
+
+	// New attempt: create a fresh ActionExecution with same input, linked to same taskEx.
+	attempt++
+	sync := true
+	newActionEx := &db.ActionExecution{
+		Name:  actionEx.Name,
+		State: states.RUNNING,
+		Input: actionEx.Input, // same input
+		RuntimeContext: map[string]interface{}{
+			"index":          db.CoerceInt(actionEx.RuntimeContext["index"]),
+			"safe_rerun":     true,
+			"retry_attempts": attempt,
+		},
+		WorkflowNamespace: actionEx.WorkflowNamespace,
+		TaskExecutionID:   actionEx.TaskExecutionID,
+		WorkflowName:      actionEx.WorkflowName,
+		WorkflowID:        actionEx.WorkflowID,
+		ProjectID:         actionEx.ProjectID,
+		IsSync:            &sync,
+	}
+	if err := e.store.ActionExecutions().Create(newActionEx); err != nil {
+		return false, fmt.Errorf("retry creating ActionExecution: %w", err)
+	}
+
+	// Retry scheduled — caller (OnActionComplete) returns early without
+	// advancing task state or with-items counters. The driver loop or
+	// external executor will pick up the new RUNNING ActionExecution.
+	log.Printf("retry: ActionExecution %s scheduled retry attempt %d/%d → new action_ex=%s (state=RUNNING)",
+		actionEx.ID, attempt, retryCount, newActionEx.ID)
+
+	return true, nil
 }
 
 // checkAndCompleteWorkflow checks if all tasks are done and the workflow should complete.

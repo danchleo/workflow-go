@@ -8,7 +8,9 @@ tasks:
     input:
       output: "D-step1"
     on-success:
-      d_final:
-        action: std.echo
-        input:
-          output: "D-final"
+      - d_final
+
+  d_final:
+    action: std.echo
+    input:
+      output: "D-final"

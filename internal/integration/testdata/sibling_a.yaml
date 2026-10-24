@@ -8,7 +8,9 @@ tasks:
     input:
       output: "a1-done"
     on-success:
-      step_a2:
-        action: std.echo
-        input:
-          output: "a2-done"
+      - step_a2
+
+  step_a2:
+    action: std.echo
+    input:
+      output: "a2-done"

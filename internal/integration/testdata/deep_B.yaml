@@ -6,7 +6,9 @@ tasks:
   b_call_C:
     workflow: deep_C
     on-success:
-      b_wrapup:
-        action: std.echo
-        input:
-          output: "B-wrapup"
+      - b_wrapup
+
+  b_wrapup:
+    action: std.echo
+    input:
+      output: "B-wrapup"
