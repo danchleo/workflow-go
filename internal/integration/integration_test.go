@@ -411,6 +411,22 @@ func TestIntegration_Join_Parallel(t *testing.T) {
 
 // --- helpers ---
 
+// coerceRuntimeInt handles JSON round-trip of ints inside map[string]interface{}.
+// SQLStore blob pattern serializes RuntimeContext as JSON, turning Go ints → float64.
+func coerceRuntimeInt(v interface{}) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case float32:
+		return int(n)
+	}
+	return 0
+}
+
 // yamlWorkflowName extracts the top-level `name:` field from a Mistral YAML
 // definition. This is what the engine uses to look up sub-workflows.
 func yamlWorkflowName(yamlText string) string {
@@ -726,4 +742,149 @@ func TestIntegration_Workbook_ChainedNestedWorkflows(t *testing.T) {
 	}
 	t.Logf("  3-level workbook chain: main=%v process=%v sum=%v all SUCCESS=%v",
 		mainWf != nil, processWf != nil, sumWf != nil, final.State)
+}
+
+func TestIntegration_Subworkflow_ChildUsesWithItems(t *testing.T) {
+	// Scenario 1: parent calls sub-workflow, sub-workflow internally uses with-items.
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "sub_with_items_parent.yaml",
+		extraYAMLs:    []string{"sub_with_items_child.yaml"},
+		expectedState: states.SUCCESS,
+	})
+
+	// 2 WorkflowExecutions: parent + child.
+	allWfExs, _ := store.WorkflowExecutions().List("")
+	var childWfEx *db.WorkflowExecution
+	for _, w := range allWfExs {
+		t.Logf("  wfEx name=%q id=%s state=%s", w.Name, w.ID, w.State)
+		if w.Name == "sub_with_items_child" {
+			childWfEx = w
+		}
+	}
+	if childWfEx == nil {
+		t.Fatal("child wfEx not found")
+	}
+
+	// Child must have 3 ActionExecutions from its with-items (fanout task).
+	childTasks, _ := store.TaskExecutions().List(childWfEx.ID, "")
+	var fanoutTask *db.TaskExecution
+	for _, te := range childTasks {
+		if te.Name == "fanout" {
+			fanoutTask = te
+		}
+	}
+	if fanoutTask == nil {
+		t.Fatal("child fanout task not found")
+	}
+	if v := coerceRuntimeInt(fanoutTask.RuntimeContext["with_items_total"]); v != 3 {
+		t.Errorf("fanout with_items_total = %v, want 3", fanoutTask.RuntimeContext["with_items_total"])
+	}
+	if fanoutTask.State != states.SUCCESS {
+		t.Errorf("fanout state = %s, want SUCCESS", fanoutTask.State)
+	}
+
+	// Parent done.
+	parentTasks, _ := store.TaskExecutions().List(final.ID, "")
+	var delegateTask *db.TaskExecution
+	for _, te := range parentTasks {
+		if te.Name == "delegate_to_sub" {
+			delegateTask = te
+		}
+	}
+	if delegateTask == nil {
+		t.Fatal("parent delegate_to_sub task not found")
+	}
+	if delegateTask.State != states.SUCCESS {
+		t.Errorf("delegate_to_sub state = %s, want SUCCESS", delegateTask.State)
+	}
+
+	t.Logf("  parent=%s child=%s fanout.total=%v fanout.state=%s all SUCCESS=%v",
+		final.State, childWfEx.State, fanoutTask.RuntimeContext["with_items_total"], fanoutTask.State, final.State)
+}
+
+func TestIntegration_Subworkflow_ErrorRecovery_ContinuesDownstream(t *testing.T) {
+	// Scenario 2: child workflow fails → parent catches on-error → recover → continue.
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "parent_error_recovery.yaml",
+		extraYAMLs:    []string{"failing_child.yaml"},
+		expectedState: states.SUCCESS,
+		customResults: map[string]*db.Result{
+			// Child workflow's only task — always fail it so the child
+			// workflow reaches ERROR and OnSubWorkflowComplete propagates it
+			// back to the parent attempt task.
+			"doomed": {Error: "child-doomed-by-test"},
+		},
+	})
+
+	// Parent workflow overall SUCCESS because on-error recovery worked.
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	taskStates := make(map[string]string)
+	for _, te := range tasks {
+		taskStates[te.Name] = te.State
+	}
+
+	if taskStates["attempt"] != states.ERROR {
+		t.Errorf("attempt state = %s, want ERROR", taskStates["attempt"])
+	}
+	if taskStates["recovery"] != states.SUCCESS {
+		t.Errorf("recovery state = %s, want SUCCESS (on-error didn't fire)", taskStates["recovery"])
+	}
+	// Most important: recovery chains to continue_after_recovery.
+	if taskStates["continue_after_recovery"] != states.SUCCESS {
+		t.Errorf("continue_after_recovery state = %s, want SUCCESS (recovery dead-ended)",
+			taskStates["continue_after_recovery"])
+	}
+	t.Logf("  task states: %v", taskStates)
+}
+
+func TestIntegration_Workbook_WithItemsCallsSubworkflow(t *testing.T) {
+	// Scenario 3 (most complex!): Workbook wf_outer has a task that is BOTH
+	// with-items AND workflow — 2 iterations, each calling wf_inner.
+	final, store := runWorkflowFromYAML(t, fixture{
+		workbookPath:  "workbook_mixed.yaml",
+		entryWorkflow: "wf_outer",
+		expectedState: states.SUCCESS,
+	})
+
+	allWfExs, _ := store.WorkflowExecutions().List("")
+
+	// We expect 1 parent + 2 children = 3 WorkflowExecutions total.
+	var parentWf *db.WorkflowExecution
+	childCount := 0
+	for _, w := range allWfExs {
+		if w.Name == "mixed_wb.wf_outer" {
+			parentWf = w
+			continue
+		}
+		if w.Name == "mixed_wb.wf_inner" {
+			childCount++
+		}
+	}
+	if parentWf == nil {
+		t.Fatal("parent mixed_wb.wf_outer not found")
+	}
+	if childCount != 2 {
+		t.Errorf("wf_inner child count = %d, want 2 (one per with-items iteration)", childCount)
+	}
+
+	// Find the fanout_iter task on parent — it's the with-items+workflow task.
+	parentTasks, _ := store.TaskExecutions().List(parentWf.ID, "")
+	var fanoutIter *db.TaskExecution
+	for _, te := range parentTasks {
+		if te.Name == "fanout_iter" {
+			fanoutIter = te
+		}
+	}
+	if fanoutIter == nil {
+		t.Fatal("fanout_iter task not found on parent")
+	}
+	if v := coerceRuntimeInt(fanoutIter.RuntimeContext["with_items_total"]); v != 2 {
+		t.Errorf("fanout_iter with_items_total = %v, want 2", fanoutIter.RuntimeContext["with_items_total"])
+	}
+	if fanoutIter.State != states.SUCCESS {
+		t.Errorf("fanout_iter state = %s, want SUCCESS", fanoutIter.State)
+	}
+
+	t.Logf("  with-items+subworkflow: parent=%s, children(wf_inner)=%d, fanout.total=%v, final=%s",
+		parentWf.State, childCount, fanoutIter.RuntimeContext["with_items_total"], final.State)
 }

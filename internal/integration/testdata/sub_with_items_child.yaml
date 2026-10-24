@@ -1,0 +1,22 @@
+version: "2.0"
+name: sub_with_items_child
+description: Sub-workflow that uses with-items internally
+
+tasks:
+  fanout:
+    action: std.echo
+    input:
+      output: "item-<% $.item %>"
+    with-items: item in <% $.items %>
+    publish:
+      collected: "<% $.fanout.result %>"
+    on-success:
+      - sink
+
+  sink:
+    action: std.echo
+    input:
+      output: "fanout-complete"
+
+output:
+  summary: "child-done"

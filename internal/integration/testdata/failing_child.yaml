@@ -1,0 +1,9 @@
+version: "2.0"
+name: failing_child
+description: A sub-workflow that always fails (to test parent error handling)
+
+tasks:
+  doomed:
+    action: std.fail
+    input:
+      error_msg: "child-doomed"

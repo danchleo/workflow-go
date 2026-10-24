@@ -1,0 +1,34 @@
+version: "2.0"
+name: sub_with_items_parent
+description: Parent calls a sub-workflow that internally does with-items
+
+tasks:
+  prepare:
+    action: std.echo
+    input:
+      output: "preparing"
+    publish:
+      items:
+        - "a"
+        - "b"
+        - "c"
+    on-success:
+      - delegate_to_sub
+
+  delegate_to_sub:
+    workflow: sub_with_items_child
+    input:
+      items:
+        - "a"
+        - "b"
+        - "c"
+    on-success:
+      - final
+
+  final:
+    action: std.echo
+    input:
+      output: "all-iterations-done"
+
+output:
+  parent_summary: "done"

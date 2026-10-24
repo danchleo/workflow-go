@@ -346,6 +346,16 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 	inputDict := evaluateTaskInput(taskSpec, taskEx.InContext, wfEx.Input, wfEx.Context)
 	taskEx.RuntimeContext["resolved_input"] = inputDict
 
+	// Check for with-items FIRST (parallel iterations). This is the container that
+	// can hold either action or sub-workflow — Python WithItemsTask inherits RegularTask,
+	// so _build_action() per iteration can be WorkflowAction or RegularAction.
+	// When both `with-items:` and `workflow:` are present, with-items wins and
+	// startWithItemsTask handles the per-iteration dispatch.
+	withItems := taskSpec.GetWithItems()
+	if len(withItems) > 0 {
+		return e.startWithItemsTask(ctx, taskEx, taskSpec, wfEx, withItems, inputDict)
+	}
+
 	// Check for sub-workflow (nesting). Mirror of Python RegularTask._build_action
 	// → WorkflowAction.schedule(): start a child WorkflowExecution with
 	// parent's task_execution_id stashed in params so that when the child
@@ -400,12 +410,6 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 		return e.store.TaskExecutions().Update(taskEx)
 	}
 
-	// Check for with-items (parallel iterations).
-	withItems := taskSpec.GetWithItems()
-	if len(withItems) > 0 {
-		return e.startWithItemsTask(ctx, taskEx, taskSpec, wfEx, withItems, inputDict)
-	}
-
 	// Create ActionExecution so that OnActionComplete flows correctly through
 	// ActionExecution → TaskExecution → WorkflowExecution chain (port of Python
 	// mistral/engine/actions.py:RegularAction.schedule).
@@ -437,8 +441,9 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 	return nil
 }
 
-// startWithItemsTask launches parallel ActionExecutions for a task with with-items.
-// Port of Python mistral/engine/actions.py:WithItemsAction.schedule.
+// startWithItemsTask launches parallel iterations — either ActionExecutions or
+// nested WorkflowExecutions, depending on whether the task has `action:` or `workflow:`.
+// Port of Python WithItemsTask → N×_build_action() (RegularAction or WorkflowAction).
 func (e *DefaultEngine) startWithItemsTask(ctx context.Context, taskEx *db.TaskExecution, taskSpec *v2.TaskSpec, wfEx *db.WorkflowExecution, withItems map[string]interface{}, baseInput map[string]interface{}) error {
 	// Evaluate each with-items expression to get the actual item lists.
 	ctxMap := workflow.BuildFullContext(wfEx, nil, nil)
@@ -466,20 +471,33 @@ func (e *DefaultEngine) startWithItemsTask(ctx context.Context, taskEx *db.TaskE
 	}
 
 	if minLen <= 0 {
-		// Empty with-items — skip the task.
 		taskEx.State = states.SUCCESS
 		taskEx.Processed = true
 		return e.store.TaskExecutions().Update(taskEx)
 	}
 
-	// Record iteration state in task runtime context (use int counters —
-	// JSON persistence of map[int]bool would turn keys into strings).
 	taskEx.RuntimeContext["with_items_total"] = minLen
 	taskEx.RuntimeContext["with_items_done_count"] = 0
 	taskEx.RuntimeContext["with_items_values"] = withValues
 
-	// Create one ActionExecution per iteration.
-	sync := true
+	// Resolve once: is this with-items over actions or over sub-workflows?
+	subWfName := taskSpec.GetWorkflowName()
+	var subWfDef *db.WorkflowDefinition
+	if subWfName != "" {
+		// Scope-aware resolution (wb_name first, then global fallback).
+		parentWbName, _ := wfEx.RuntimeContext["wb_name"].(string)
+		var err error
+		if parentWbName != "" {
+			subWfDef, err = e.store.WorkflowDefinitions().GetByName(parentWbName+"."+subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID)
+		}
+		if subWfDef == nil || err != nil {
+			subWfDef, err = e.store.WorkflowDefinitions().GetByName(subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID)
+			if err != nil {
+				return fmt.Errorf("sub-workflow %q not found: %w", subWfName, err)
+			}
+		}
+	}
+
 	for i := 0; i < minLen; i++ {
 		// Build per-iteration input by injecting with-item variables.
 		iterInput := make(map[string]interface{})
@@ -492,22 +510,45 @@ func (e *DefaultEngine) startWithItemsTask(ctx context.Context, taskEx *db.TaskE
 			}
 		}
 
-		actionEx := &db.ActionExecution{
-			Name:              taskSpec.GetActionName(),
-			State:             states.RUNNING,
-			Input:             iterInput,
-			RuntimeContext:    map[string]interface{}{"index": i, "safe_rerun": true},
-			WorkflowNamespace: wfEx.WorkflowNamespace,
-			TaskExecutionID:   taskEx.ID,
-			WorkflowName:      wfEx.WorkflowName,
-			WorkflowID:        wfEx.WorkflowID,
-			ProjectID:         wfEx.ProjectID,
-			IsSync:            &sync,
+		if subWfDef != nil {
+			// Each iteration is a child WorkflowExecution — Python WorkflowAction per iteration.
+			rootExID := wfEx.RootExecutionID
+			if rootExID == "" {
+				rootExID = wfEx.ID
+			}
+			iterParams := map[string]interface{}{
+				"env":               wfEx.Params["env"],
+				"namespace":         wfEx.WorkflowNamespace,
+				"task_execution_id": taskEx.ID,
+				"root_execution_id": rootExID,
+				"index":             i,
+			}
+			childEx, err := e.StartWorkflow(ctx, subWfDef.ID, wfEx.WorkflowNamespace, "", iterInput,
+				fmt.Sprintf("with-items iter %d/%d of %s", i+1, minLen, taskEx.Name), iterParams)
+			if err != nil {
+				return fmt.Errorf("with-items iter %d sub-workflow: %w", i, err)
+			}
+			log.Printf("with-items iter %d/%d sub-workflow %s started: childEx=%s", i+1, minLen, subWfName, childEx.ID)
+		} else {
+			// Standard ActionExecution iteration.
+			sync := true
+			actionEx := &db.ActionExecution{
+				Name:              taskSpec.GetActionName(),
+				State:             states.RUNNING,
+				Input:             iterInput,
+				RuntimeContext:    map[string]interface{}{"index": i, "safe_rerun": true},
+				WorkflowNamespace: wfEx.WorkflowNamespace,
+				TaskExecutionID:   taskEx.ID,
+				WorkflowName:      wfEx.WorkflowName,
+				WorkflowID:        wfEx.WorkflowID,
+				ProjectID:         wfEx.ProjectID,
+				IsSync:            &sync,
+			}
+			if err := e.store.ActionExecutions().Create(actionEx); err != nil {
+				return fmt.Errorf("creating with-items action execution %d: %w", i, err)
+			}
+			log.Printf("with-items iter %d/%d action created for task %s (action_ex=%s)", i+1, minLen, taskEx.Name, actionEx.ID)
 		}
-		if err := e.store.ActionExecutions().Create(actionEx); err != nil {
-			return fmt.Errorf("creating with-items action execution %d: %w", i, err)
-		}
-		log.Printf("with-items iteration %d/%d created for task %s (action_ex=%s)", i+1, minLen, taskEx.Name, actionEx.ID)
 	}
 
 	if err := e.store.TaskExecutions().Update(taskEx); err != nil {
@@ -619,15 +660,11 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 
 	// Handle with-items: defer task completion until all iterations finish.
 	if _, hasSize := taskEx.RuntimeContext["with_items_total"]; hasSize {
-		total, _ := taskEx.RuntimeContext["with_items_total"].(int)
-		var doneCount int
-		if c, ok := taskEx.RuntimeContext["with_items_done_count"].(int); ok {
-			doneCount = c
-		}
+		total := coerceInt(taskEx.RuntimeContext["with_items_total"])
+		doneCount := coerceInt(taskEx.RuntimeContext["with_items_done_count"])
 		doneCount++
 		taskEx.RuntimeContext["with_items_done_count"] = doneCount
 		if doneCount < total {
-			// Not all iterations done — just persist and bail.
 			log.Printf("with-items task %s: %d/%d iterations done", taskEx.Name, doneCount, total)
 			return e.store.TaskExecutions().Update(taskEx)
 		}
@@ -781,6 +818,23 @@ func (e *DefaultEngine) checkAndCompleteWorkflow(wfEx *db.WorkflowExecution, ctr
 	}
 
 	return nil
+}
+
+// coerceInt safely converts a value that survived JSON round-trip (int → float64)
+// back to a Go int. Needed because SQLStore blob pattern serializes RuntimeContext
+// as JSON, turning Go ints into float64 on unmarshal.
+func coerceInt(v interface{}) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case float32:
+		return int(n)
+	}
+	return 0
 }
 
 // evaluateTaskInput evaluates a task's input dictionary against context.

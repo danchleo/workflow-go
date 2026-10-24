@@ -1,0 +1,48 @@
+version: "2.0"
+name: mixed_wb
+description: Workbook where outer uses with-items and each iteration calls a sub-workflow
+
+workflows:
+  wf_inner:
+    tasks:
+      inner_start:
+        action: std.echo
+        input:
+          output: "inner-<% $.token %>"
+        on-success:
+          - inner_end
+
+      inner_end:
+        action: std.echo
+        input:
+          output: "inner-done-<% $.token %>"
+
+  wf_outer:
+    vars:
+      tokens:
+        - "alpha"
+        - "beta"
+
+    tasks:
+      setup:
+        action: std.echo
+        input:
+          output: "setup"
+        on-success:
+          - fanout_iter
+
+      fanout_iter:
+        workflow: wf_inner
+        input:
+          token: "<% $.item %>"
+        with-items: item in <% $.tokens %>
+        on-success:
+          - outer_join
+
+      outer_join:
+        action: std.echo
+        input:
+          output: "all-iterated"
+
+output:
+  mixed_done: true
