@@ -165,9 +165,12 @@ type gWorkflowExecution struct {
 	Output            string // JSON
 	Params            string // JSON
 	Context           string // JSON
-	ProjectID         string
+	ProjectID         string `gorm:"index"`
+	Scope             string `gorm:"index"`
+	RootExecutionID   string
+	TaskExecutionID   string
 	CreatedAt         string
-	UpdatedAt         string
+	UpdatedAt         string `gorm:"index"`
 }
 
 func (gWorkflowExecution) TableName() string { return "workflow_executions" }
@@ -180,6 +183,7 @@ type gTaskExecution struct {
 	WorkflowNamespace   string
 	WorkflowID          string `gorm:"index"`
 	Spec                string // JSON
+	ActionSpec          string // JSON — Python action_spec (action inline spec)
 	State               string `gorm:"index"`
 	StateInfo           string
 	InContext           string // JSON
@@ -187,12 +191,18 @@ type gTaskExecution struct {
 	Output              string // JSON
 	Published           string // JSON
 	RuntimeContext      string // JSON
-	UniqueKey           string `gorm:"index"`
+	UniqueKey           string `gorm:"uniqueIndex"` // Python UniqueConstraint('unique_key')
 	Type                string
 	Processed           bool
-	ProjectID           string
+	HasNextTasks        bool
+	NextTasks           string // JSON list [(task_name, event)]
+	ErrorHandled        bool
+	StartedAt           string // ISO8601 nullable
+	FinishedAt          string // ISO8601 nullable
+	ProjectID           string `gorm:"index"`
+	Scope               string `gorm:"index"`
 	CreatedAt           string
-	UpdatedAt           string
+	UpdatedAt           string `gorm:"index"`
 }
 
 func (gTaskExecution) TableName() string { return "task_executions" }
