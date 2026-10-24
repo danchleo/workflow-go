@@ -1,0 +1,35 @@
+version: "2.0"
+name: with_items_then_branch
+description: with-items fanout → then two sequential branches → both fan-in
+
+tasks:
+  fanout:
+    action: std.echo
+    input:
+      output: "<% $.item %>"
+    with-items: item in <% $.items %>
+    on-success:
+      - branch_a
+      - branch_b
+
+  branch_a:
+    action: std.echo
+    input:
+      output: "a-ok"
+    on-success:
+      - final_join
+
+  branch_b:
+    action: std.echo
+    input:
+      output: "b-ok"
+    on-success:
+      - final_join
+
+  final_join:
+    action: std.echo
+    input:
+      output: "all-done"
+
+output:
+  mixed_flow: true

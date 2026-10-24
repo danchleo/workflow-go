@@ -1,0 +1,23 @@
+version: "2.0"
+name: error_recovery_chain
+description: Error recovery doesn't dead-end — recover task has its own on-success chain
+
+tasks:
+  risky:
+    action: std.fail
+    input:
+      error_msg: "boom"
+    on-error:
+      - recover_task
+
+  recover_task:
+    action: std.echo
+    input:
+      output: "recovered"
+    on-success:
+      - continue_after_error
+
+  continue_after_error:
+    action: std.echo
+    input:
+      output: "continued"

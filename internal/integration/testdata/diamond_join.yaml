@@ -1,0 +1,34 @@
+version: "2.0"
+name: diamond_join
+description: Classic diamond dependency — A fans out to B and C, both fan in to D (join)
+
+tasks:
+  start:
+    action: std.echo
+    input:
+      output: "start"
+    on-success:
+      - left
+      - right
+
+  left:
+    action: std.echo
+    input:
+      output: "left"
+    on-success:
+      - join_here
+
+  right:
+    action: std.echo
+    input:
+      output: "right"
+    on-success:
+      - join_here
+
+  join_here:
+    action: std.echo
+    input:
+      output: "both-left-and-right-done"
+
+output:
+  done_by: "diamond"

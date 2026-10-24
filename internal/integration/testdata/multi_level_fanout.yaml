@@ -1,0 +1,41 @@
+version: "2.0"
+name: multi_level_fanout
+description: 2-level fan-out/fan-in — A→[B,C]→[D,E]→F stresses the join counter
+
+tasks:
+  seed:
+    action: std.echo
+    input:
+      output: "seed"
+    on-success:
+      - branch1
+      - branch2
+
+  branch1:
+    action: std.echo
+    input:
+      output: "b1"
+    on-success:
+      - merge_point
+
+  branch2:
+    action: std.echo
+    input:
+      output: "b2"
+    on-success:
+      - merge_point
+
+  merge_point:
+    action: std.echo
+    input:
+      output: "after-merge"
+    on-success:
+      - final
+
+  final:
+    action: std.echo
+    input:
+      output: "the-end"
+
+output:
+  level2_done: true

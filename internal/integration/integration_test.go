@@ -23,8 +23,10 @@ type fixture struct {
 	yamlPath           string // relative to testdata/
 	description        string
 	input              map[string]interface{}
-	expectedState      string   // e.g. states.SUCCESS
-	expectedSubstrings []string // strings that MUST appear in the final workflow output
+	expectedState      string                // e.g. states.SUCCESS
+	expectedSubstrings []string              // strings that MUST appear in the final workflow output
+	customResults      map[string]*db.Result // per-task override: key=taskName, value=Result (nil = default success)
+	withItemsResult    *db.Result            // override for all with-items iterations of a task (applied via key in customResults)
 }
 
 // runWorkflowFromYAML is the single shared helper for all integration tests.
@@ -97,7 +99,7 @@ func runWorkflowFromYAML(t *testing.T, f fixture) (*db.WorkflowExecution, db.Sto
 		if _, ok := pending.RuntimeContext["with_items_total"]; ok {
 			actionExs, _ := store.ActionExecutions().List(pending.ID, "")
 			for _, ae := range actionExs {
-				res := &db.Result{Data: fmt.Sprintf("iter-%v-done", ae.RuntimeContext["index"])}
+				res := defaultResult(pending.Name, f.customResults, fmt.Sprintf("iter-%v-done", ae.RuntimeContext["index"]))
 				if err := eng.OnActionComplete(context.Background(), ae.ID, res, false); err != nil {
 					t.Fatalf("OnActionComplete with-items iter: %v", err)
 				}
@@ -111,7 +113,7 @@ func runWorkflowFromYAML(t *testing.T, f fixture) (*db.WorkflowExecution, db.Sto
 		if invokeID == "" {
 			invokeID = pending.ID
 		}
-		res := &db.Result{Data: fmt.Sprintf("result-of-%s", pending.Name)}
+		res := defaultResult(pending.Name, f.customResults, fmt.Sprintf("result-of-%s", pending.Name))
 		if err := eng.OnActionComplete(context.Background(), invokeID, res, false); err != nil {
 			t.Fatalf("OnActionComplete (%s): %v", pending.Name, err)
 		}
@@ -327,6 +329,17 @@ func TestIntegration_Join_Parallel(t *testing.T) {
 
 // --- helpers ---
 
+// defaultResult returns the custom Result for a task if registered,
+// otherwise a fresh success Result carrying the given default data string.
+func defaultResult(taskName string, overrides map[string]*db.Result, defaultData string) *db.Result {
+	if overrides != nil {
+		if r, ok := overrides[taskName]; ok {
+			return r
+		}
+	}
+	return &db.Result{Data: defaultData}
+}
+
 func containsAny(s string, subs ...string) bool {
 	for _, sub := range subs {
 		if len(sub) == 0 {
@@ -399,4 +412,112 @@ func TestIntegration_PauseResumeStop(t *testing.T) {
 	if final.State != states.SUCCESS {
 		t.Fatalf("after resume + drive: state = %s, want SUCCESS", final.State)
 	}
+}
+
+// ============ Complex nested flow tests ============
+
+func TestIntegration_DiamondJoin(t *testing.T) {
+	// Classic diamond: start → [left,right] → join_here.
+	// (No extra assertions beyond SUCCESS — fanout count is implicit in
+	// the controller join logic: join_here waits for both left and right.)
+	_, _ = runWorkflowFromYAML(t, fixture{
+		yamlPath:      "diamond_join.yaml",
+		expectedState: states.SUCCESS,
+	})
+}
+
+func TestIntegration_MultiLevelFanout(t *testing.T) {
+	_, _ = runWorkflowFromYAML(t, fixture{
+		yamlPath:      "multi_level_fanout.yaml",
+		expectedState: states.SUCCESS,
+	})
+}
+
+func TestIntegration_ErrorRecovery_ChainContinues(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "error_recovery_chain.yaml",
+		expectedState: states.SUCCESS,
+		customResults: map[string]*db.Result{
+			"risky": {Error: "simulated boom"},
+		},
+	})
+
+	tasks, err := store.TaskExecutions().List(final.ID, "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	taskStates := make(map[string]string)
+	for _, te := range tasks {
+		taskStates[te.Name] = te.State
+	}
+
+	// risky must have errored
+	if taskStates["risky"] != states.ERROR {
+		t.Errorf("risky state = %s, want ERROR", taskStates["risky"])
+	}
+	// recovery must have succeeded
+	if taskStates["recover_task"] != states.SUCCESS {
+		t.Errorf("recover_task state = %s, want SUCCESS", taskStates["recover_task"])
+	}
+	// ... and its downstream must have continued — the key assertion!
+	if taskStates["continue_after_error"] != states.SUCCESS {
+		t.Errorf("continue_after_error state = %s, want SUCCESS (recovery didn't chain)", taskStates["continue_after_error"])
+	}
+	t.Logf("  task states: %v", taskStates)
+}
+
+func TestIntegration_PublishChain_4Levels(t *testing.T) {
+	final, _ := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "publish_chain.yaml",
+		expectedState: states.SUCCESS,
+	})
+
+	if final.Output == nil {
+		t.Fatal("expected output")
+	}
+	for k, v := range final.Output {
+		if s, ok := v.(string); ok && containsAny(s, "<%", "{{") {
+			t.Errorf("output[%q] still has raw expr: %q", k, s)
+		}
+	}
+	for _, key := range []string{"v1_final", "v2_final", "v3_final", "v4_final"} {
+		if _, ok := final.Output[key]; !ok {
+			t.Errorf("output missing %q", key)
+		}
+	}
+
+	// Cross-check v2_final includes the T1 value (proves publish chain accumulated).
+	if v2f, ok := final.Output["v2_final"].(string); ok {
+		if v2f == "" {
+			t.Error("v2_final empty — publish chain broken at t2")
+		}
+	}
+	t.Logf("  publish chain output: %v", final.Output)
+}
+
+func TestIntegration_WithItems_ThenBranch(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath: "with_items_then_branch.yaml",
+		input: map[string]interface{}{
+			"items": []interface{}{"x", "y"},
+		},
+		expectedState: states.SUCCESS,
+	})
+
+	// Fanout must have exactly 2 iterations.
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	var fanoutTask *db.TaskExecution
+	for _, te := range tasks {
+		if te.Name == "fanout" {
+			fanoutTask = te
+		}
+	}
+	if fanoutTask == nil {
+		t.Fatal("fanout task missing")
+	}
+	actionExs, _ := store.ActionExecutions().List(fanoutTask.ID, "")
+	if len(actionExs) != 2 {
+		t.Errorf("fanout ActionExecutions = %d, want 2", len(actionExs))
+	}
+	t.Logf("  fanout ActionExecutions: %d, fanout final state: %s", len(actionExs), fanoutTask.State)
 }

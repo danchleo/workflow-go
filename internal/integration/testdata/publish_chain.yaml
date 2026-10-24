@@ -1,0 +1,42 @@
+version: "2.0"
+name: publish_chain
+description: 4-task publish chain — each publishes a var consumed by the next, final output references all
+
+tasks:
+  t1:
+    action: std.echo
+    input:
+      output: "alpha"
+    publish:
+      v1: "T1_<% $.t1.result %>"
+    on-success:
+      - t2
+
+  t2:
+    action: std.echo
+    input:
+      output: "<% $.v1 %>-t2"
+    publish:
+      v2: "T2_<% $.t2.result %>"
+    on-success:
+      - t3
+
+  t3:
+    action: std.echo
+    input:
+      output: "<% $.v2 %>-t3"
+    publish:
+      v3: "T3_<% $.t3.result %>"
+    on-success:
+      - t4
+
+  t4:
+    action: std.echo
+    input:
+      output: "<% $.v3 %>-t4"
+
+output:
+  v1_final: "<% $.v1 %>"
+  v2_final: "<% $.v2 %>"
+  v3_final: "<% $.v3 %>"
+  v4_final: "<% $.t4.result %>"
