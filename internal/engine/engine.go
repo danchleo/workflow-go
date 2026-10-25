@@ -273,7 +273,13 @@ func rearrangeCommands(cmds []commands.WorkflowCommand) []commands.WorkflowComma
 func cmdKey(c commands.WorkflowCommand) string {
 	switch v := c.(type) {
 	case *commands.RunTask:
-		return "a-" + v.TaskName()
+		// Include UniqueKey so that two RunTask commands for the same task
+		// with different UniqueKeys do NOT dedup against each other.
+		uk := v.UniqueKey()
+		if uk == "" {
+			return "a-" + v.TaskName()
+		}
+		return "a-" + v.TaskName() + "-" + uk
 	case *commands.RunExistingTask:
 		return "b-" + v.TaskExID()
 	case *commands.SkipTask:
