@@ -1,0 +1,146 @@
+# Python mistral my_workbook.yaml — adapted for Go port
+# Original: mistral/tests/resources/workbook/v2/my_workbook.yaml
+#
+# This workbook exercises:
+#   ✅ Multi-workflow workbook (wf1 + wf2)
+#   ✅ Reverse workflow (wf1) + Direct workflow (wf2)
+#   ✅ Nested subworkflow (wf2 → wf1)
+#   ✅ with-items + workflow subworkflow (task7 runs wf2 N times)
+#   ✅ with-items double loop (task8)
+#   ✅ join: all / 2 / one on aggregation
+#   ✅ retry with break-on YAQL expression
+#   ✅ task-defaults global retry + on-error/on-success/on-complete
+#   ✅ when conditions on on-error/on-success/on-complete
+#
+# Go adaptations from Python original:
+#   - Removed `actions:` ad-hoc action (Go doesn't support workbook-embedded actions)
+#   - Removed `target: nova` (Go ignores target)
+#   - Removed `wait-before` / `wait-after` (Go doesn't implement)
+#   - Python's `workflow: wf1 name="John Doe"` → Go's `workflow: my_wb.wf1` + `input:`
+#   - Python's `break-on: <% $.my_val = 10 %>` → Go uses `==` (YAQL comparison)
+version: '2.0'
+
+name: my_wb
+description: "Go port of Python my_workbook.yaml — multi-workflow + nested + join"
+tags: [test, v2, go-port]
+
+workflows:
+  # --- wf1: reverse workflow called as subworkflow from wf2 ---
+  wf1:
+    description: "Reverse subworkflow — Go port of Python wf1"
+    type: reverse
+
+    input:
+      - name
+
+    tasks:
+      task2:
+        action: std.echo
+        input:
+          output: "Thanks <% $.name %>!"
+
+      task1:
+        action: std.echo
+        input:
+          output: "Hello <% $.name %>!"
+        requires: [task2]
+
+  # --- wf2: direct workflow with ALL the features ---
+  wf2:
+    description: "Direct workflow — Go port of Python wf2"
+    type: direct
+
+    task-defaults:
+      retry:
+        count: 10
+        delay: 0
+        break-on: "<% $.my_val == 10 %>"
+      on-error:
+        - fail: "<% $.my_val == 0 %>"
+      on-success:
+        - succeed
+      on-complete:
+        - succeed
+
+    input:
+      - my_val: 2
+      - vms: ["vm-a", "vm-b", "vm-c"]
+      - arrayI: [1, 2, 3]
+      - arrayJ: ["x", "y"]
+
+    tasks:
+      # Task 3: calls wf1 as subworkflow, passes input via input:
+      task3:
+        workflow: wf1
+        input:
+          name: "John Doe"
+        on-error:
+          - task4: "<% $.my_val == 1 %>"
+        on-success:
+          - task5: "<% $.my_val == 2 %>"
+        on-complete:
+          - task6: "<% $.my_val == 3 %>"
+
+      task4:
+        action: std.echo
+        input:
+          output: "Task 4 echo"
+
+      task5:
+        action: std.echo
+        input:
+          output: "Task 5 echo — matched my_val=2 ✅"
+        publish:
+          task5_fired: true
+
+      task6:
+        action: std.echo
+        input:
+          output: "Task 6 echo"
+
+      # Task 7: with-items + workflow subworkflow
+      # Each vm runs wf1 (with-items fanout)
+      task7:
+        with-items: vm_info in <% $.vms %>
+        workflow: wf1
+        input:
+          name: "<% $.vm_info %>"
+        publish:
+          vm_processed: "<% $.vm_info %>"
+
+      # Task 8: with-items double loop (cross product)
+      task8:
+        with-items:
+          - itemX in <% $.arrayI %>
+          - itemY in <% $.arrayJ %>
+        action: std.echo
+        input:
+          output: "pair-<% $.itemX %>-<% $.itemY %>"
+
+      # Three join variants — all / 2 / one
+      task9:
+        join: all
+        requires: [task7, task8]
+        action: std.echo
+        input:
+          output: "Task 9 (join: all) — all inbound done"
+
+      task10:
+        join: 2
+        requires: [task7, task8]
+        action: std.echo
+        input:
+          output: "Task 10 (join: 2) — 2 inbound done"
+
+      task11:
+        join: one
+        requires: [task7, task8]
+        action: std.echo
+        input:
+          output: "Task 11 (join: one) — 1 inbound done"
+
+    output:
+      wf2_final: "<% $.task5.result %>"
+      task9_msg: "<% $.task9.result %>"
+      task10_msg: "<% $.task10.result %>"
+      task11_msg: "<% $.task11.result %>"

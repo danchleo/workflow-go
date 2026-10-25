@@ -154,6 +154,13 @@ func BuildFullContext(wfEx *db.WorkflowExecution, wfSpec *v2.WorkflowSpec, taskE
 
 	// Input.
 	ctx["input"] = wfEx.Input
+	// Python ContextView also flattens wf_ex.input keys to top level so
+	// that <% $.name %> works directly (not requiring <% $.input.name %>).
+	for k, v := range wfEx.Input {
+		if _, exists := ctx[k]; !exists {
+			ctx[k] = v
+		}
+	}
 
 	// Env — Python mistral calls this __env; we expose both.
 	var envMap map[string]interface{}
@@ -478,6 +485,11 @@ func (c *DirectWorkflowController) calculateInboundContext(taskSpec *v2.TaskSpec
 
 	// Add input and env.
 	ctx["input"] = c.wfEx.Input
+	for k, v := range c.wfEx.Input {
+		if _, exists := ctx[k]; !exists {
+			ctx[k] = v
+		}
+	}
 	if env, ok := c.wfEx.Params["env"].(map[string]interface{}); ok {
 		ctx["env"] = env
 	}
@@ -968,6 +980,11 @@ func (c *ReverseWorkflowController) calculateReverseInboundContext(taskSpec *v2.
 		}
 	}
 	ctx["input"] = c.wfEx.Input
+	for k, v := range c.wfEx.Input {
+		if _, exists := ctx[k]; !exists {
+			ctx[k] = v
+		}
+	}
 	return ctx
 }
 

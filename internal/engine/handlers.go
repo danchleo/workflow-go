@@ -860,11 +860,32 @@ func (e *DefaultEngine) startWithItemsTask(ctx context.Context, taskEx *db.TaskE
 
 // startWithItemsIter creates a single with-items iteration (ActionExecution or child WorkflowExecution).
 func (e *DefaultEngine) startWithItemsIter(ctx context.Context, i, total int, taskEx *db.TaskExecution, taskSpec *v2.TaskSpec, wfEx *db.WorkflowExecution, subWfDef *db.WorkflowDefinition, withValues map[string][]interface{}, baseInput map[string]interface{}, subWfName string) error {
-	// Build per-iteration input.
-	iterInput := make(map[string]interface{})
-	for k, v := range baseInput {
-		iterInput[k] = v
+	// Build per-iteration context — Python WithItemsTask re-evaluates input
+	// expressions with the iteration variables bound so that "<% $.vm_info %>"
+	// resolves to the current iteration item.
+	iterCtx := workflow.BuildFullContext(wfEx, nil, nil)
+	for varName, items := range withValues {
+		if i < len(items) {
+			iterCtx[varName] = items[i]
+		}
 	}
+
+	// Re-evaluate task input with iteration variables bound.
+	inputSpec := taskSpec.GetInput()
+	var iterInput map[string]interface{}
+	if len(inputSpec) > 0 {
+		evaluated := expressions.EvaluateRecursively(inputSpec, iterCtx)
+		if m, ok := evaluated.(map[string]interface{}); ok {
+			iterInput = m
+		}
+	}
+	if iterInput == nil {
+		iterInput = make(map[string]interface{})
+		for k, v := range baseInput {
+			iterInput[k] = v
+		}
+	}
+	// Always bind iteration variables into the input (for action-type tasks).
 	for varName, items := range withValues {
 		if i < len(items) {
 			iterInput[varName] = items[i]
@@ -1631,6 +1652,12 @@ func evaluateTaskInput(taskSpec *v2.TaskSpec, inContext map[string]interface{}, 
 		"input":      wfInput,
 		"env":        wfContext["__env"],
 		"context":    wfContext,
+	}
+	// Python ContextView flattens wf_ex.input keys to top level.
+	for k, v := range wfInput {
+		if _, exists := ctx[k]; !exists {
+			ctx[k] = v
+		}
 	}
 
 	evaluated := expressions.EvaluateRecursively(inputSpec, ctx)
