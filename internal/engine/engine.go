@@ -390,6 +390,17 @@ func (d *Dispatcher) startNewTask(wfEx *db.WorkflowExecution, cmd *commands.RunT
 		taskEx.RuntimeContext["triggered_by"] = cmd.TriggeredBy()
 	}
 
+	// Dedup: a task with the same name already exists (e.g. pause-before
+	// then resume creates a second RunTask command). Return existing ID
+	// instead of creating a duplicate row.
+	if existing, _ := d.store.TaskExecutions().List(wfEx.ID, ""); existing != nil {
+		for _, te := range existing {
+			if te.Name == taskSpec.GetName() {
+				return te.ID, nil
+			}
+		}
+	}
+
 	if err := d.store.TaskExecutions().Create(taskEx); err != nil {
 		return "", err
 	}

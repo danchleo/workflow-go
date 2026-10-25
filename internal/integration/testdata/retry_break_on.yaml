@@ -1,0 +1,35 @@
+version: "2.0"
+name: retry_break_on
+description: "break-on fires on first error; remaining retry budget skipped → on-error recovery"
+
+input:
+  - fatal_mode: true
+
+tasks:
+  flaky:
+    action: std.fail
+    input:
+      error_msg: "fatal-config-error"
+    retry:
+      count: 5
+      delay: 0
+      break-on: <% $.last_error != null and 'fatal' in $.last_error %>
+    on-success:
+      - downstream
+    on-error:
+      - recover
+
+  recover:
+    action: std.echo
+    input:
+      output: "recovered-from-break-on"
+    on-success:
+      - downstream
+
+  downstream:
+    action: std.echo
+    input:
+      output: "final-step"
+
+output:
+  final: "<% task('downstream').result %>"

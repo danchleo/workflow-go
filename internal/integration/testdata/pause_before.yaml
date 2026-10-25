@@ -1,0 +1,24 @@
+version: "2.0"
+name: pause_before
+description: "pause-before: true pauses workflow before risky_step; user resumes; then it completes"
+
+input:
+  - greeting: "Hello"
+
+tasks:
+  risky_step:
+    action: std.echo
+    pause-before: true
+    input:
+      output: "<% $.greeting %> from risky-step"
+    on-success:
+      - final_step
+
+  final_step:
+    action: std.echo
+    input:
+      output: "all-done"
+
+output:
+  risky_out: "<% task('risky_step').result %>"
+  final_out: "<% task('final_step').result %>"

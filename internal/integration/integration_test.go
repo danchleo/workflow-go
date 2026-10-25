@@ -2219,3 +2219,170 @@ tasks:
 	t.Logf("  unlimited cron: 3 wfExs created, trigger alive (remaining=0), next=%v ✅",
 		ctFinal.NextExecutionTime)
 }
+
+// ================================================================
+// pause-before: true policy — workflow pauses before the task that has
+// pause-before set. User resumes (which uses scheduler to re-drive the
+// IDLE task), then downstream completes normally.
+// Mirror Python policies.py PauseBeforePolicy.
+// ================================================================
+func TestIntegration_PauseBefore_PausesThenResumes(t *testing.T) {
+	store, _ := db.NewSQLStore(":memory:")
+	coreSched := scheduler.NewDefaultScheduler(store, 50*time.Millisecond, 0, 30*time.Second, 0, 0)
+	coreSched.Start()
+	defer coreSched.Stop()
+
+	eng := engine.NewDefaultEngine(store).WithScheduler(coreSched)
+	svc := services.NewWorkflowService(store)
+
+	data, _ := os.ReadFile("testdata/pause_before.yaml")
+	wfDef, _ := svc.CreateWorkflow("pb-test", string(data), "p", "")
+
+	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "",
+		map[string]interface{}{"greeting": "Hi"}, "",
+		map[string]interface{}{"env": map[string]interface{}{}, "namespace": ""})
+	if err != nil {
+		t.Fatalf("StartWorkflow: %v", err)
+	}
+
+	// pause-before fires: workflow should be PAUSED.
+	afterPause, _ := store.WorkflowExecutions().Get(wfEx.ID)
+	if afterPause.State != states.PAUSED {
+		t.Fatalf("after pause-before: state=%s, want PAUSED", afterPause.State)
+	}
+
+	// ResumeWorkflow triggers scheduleRefreshTaskState for the IDLE task,
+	// which the scheduler picks up and re-runs StartTask.
+	if err := eng.ResumeWorkflow(context.Background(), wfEx.ID, nil); err != nil {
+		t.Fatalf("ResumeWorkflow: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond) // let scheduler fire
+
+	// Drive risky_step → final_step through OnActionComplete.
+	const maxIter = 30
+	for iter := 0; iter < maxIter; iter++ {
+		wf, _ := store.WorkflowExecutions().Get(wfEx.ID)
+		if states.IsCompleted(wf.State) {
+			break
+		}
+		all, _ := store.TaskExecutions().List(wfEx.ID, "")
+		var pending *db.TaskExecution
+		for _, te := range all {
+			if !states.IsCompleted(te.State) {
+				pending = te
+				break
+			}
+		}
+		if pending == nil {
+			break
+		}
+		invokeID, _ := pending.RuntimeContext["action_ex_id"].(string)
+		if invokeID == "" {
+			// Scheduler might not have dispatched yet — wait.
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		if err := eng.OnActionComplete(context.Background(), invokeID,
+			&db.Result{Data: fmt.Sprintf("ok-%s", pending.Name)}, false); err != nil {
+			t.Fatalf("OnActionComplete: %v", err)
+		}
+	}
+
+	final, _ := store.WorkflowExecutions().Get(wfEx.ID)
+	if final.State != states.SUCCESS {
+		t.Fatalf("final state = %s (info=%v), want SUCCESS", final.State, final.StateInfo)
+	}
+	t.Logf("  pause-before: paused at risky_step → resumed → all done ✅")
+}
+
+// ================================================================
+// retry.break-on: condition triggers on the very first error attempt,
+// skipping all remaining retry budget (count=5 but only 1 attempt runs).
+// Task lands in ERROR → on-error routes to recover → downstream continues.
+// Mirror Python engine/policies.py RetryPolicy.after_task_complete break-on branch.
+// ================================================================
+func TestIntegration_RetryBreakOn_StopsEarly(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "retry_break_on.yaml",
+		expectedState: states.SUCCESS, // recover → downstream → success overall
+		customResults: map[string]*db.Result{
+			"flaky": {Error: "fatal-config-error"}, // 1st attempt → ERROR, break-on fires
+		},
+	})
+
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	var flakyTask *db.TaskExecution
+	var recoverTask *db.TaskExecution
+	for _, te := range tasks {
+		switch te.Name {
+		case "flaky":
+			flakyTask = te
+		case "recover":
+			recoverTask = te
+		}
+	}
+	if flakyTask == nil {
+		t.Fatal("flaky task not found")
+	}
+
+	// flaky should be ERROR (break-on stopped retry before any subsequent attempt).
+	if flakyTask.State != states.ERROR {
+		t.Errorf("flaky state = %s, want ERROR", flakyTask.State)
+	}
+
+	// Only ONE ActionExecution — break-on consumed the error, no retry siblings.
+	actions, _ := store.ActionExecutions().List(flakyTask.ID, "")
+	if len(actions) != 1 {
+		t.Errorf("flaky ActionExecutions = %d, want 1 (break-on blocked retry)", len(actions))
+	}
+
+	// on-error path: recover → downstream.
+	if recoverTask == nil {
+		t.Error("recover task not found — on-error did NOT fire!")
+	} else if recoverTask.State != states.SUCCESS {
+		t.Errorf("recover state = %s, want SUCCESS", recoverTask.State)
+	}
+
+	t.Logf("  break-on: flaky had 1 attempt (count=5), ERROR → on-error → recover ✅")
+}
+
+// ================================================================
+// retry.continue-on: even after SUCCESS, keep retrying. Since continue-on
+// evaluates true and break-on is not set, all 3 attempts run. Task lands
+// in SUCCESS after attempt 2 (last one), on-success fires normally.
+// ================================================================
+func TestIntegration_RetryContinueOn_KeepsRetryingOnSuccess(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		yamlPath:      "retry_continue_on.yaml",
+		expectedState: states.SUCCESS,
+		customResultsByAttempt: map[string]func(int) *db.Result{
+			"loop_task": func(attempt int) *db.Result {
+				return &db.Result{Data: fmt.Sprintf("loop-attempt-%d", attempt)}
+			},
+		},
+	})
+
+	tasks, _ := store.TaskExecutions().List(final.ID, "")
+	var loopTask *db.TaskExecution
+	for _, te := range tasks {
+		if te.Name == "loop_task" {
+			loopTask = te
+		}
+	}
+	if loopTask == nil {
+		t.Fatal("loop_task not found")
+	}
+
+	if loopTask.State != states.SUCCESS {
+		t.Errorf("loop_task state = %s, want SUCCESS", loopTask.State)
+	}
+
+	// 4 ActionExecutions — count=3 means 3 retries on top of initial attempt.
+	// So total = 1 + 3 = 4, all consumed because continue-on is true.
+	actions, _ := store.ActionExecutions().List(loopTask.ID, "")
+	if len(actions) != 4 {
+		t.Errorf("loop_task ActionExecutions = %d, want 4 (continue-on keeps retrying after SUCCESS)", len(actions))
+	}
+
+	t.Logf("  continue-on: %d attempts all consumed, final SUCCESS ✅", len(actions))
+}
