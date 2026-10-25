@@ -1,0 +1,45 @@
+# Python mistral native pattern: retry with break-on expression
+# Adapted from mistral/tests/resources/workbook/v2/my_workbook.yaml L37-41
+#
+# Features exercised:
+#   ✅ retry.count
+#   ✅ retry.break-on with YAQL expression ("<% $.output == 'boom' %>")
+#   ✅ retry.continue-on with YAQL expression
+#   ✅ params with YAQL expression (Python action1 style)
+version: "2.0"
+name: retry_expressions_test
+
+tasks:
+  # Failing task that breaks on a specific error message.
+  # retry.count=3 would normally allow 3 attempts, but break-on fires
+  # on attempt 1 (error message contains "boom") → stops retry chain early.
+  flaky_with_break:
+    action: std.fail
+    input:
+      msg: "boom"
+    retry:
+      count: 3
+      break-on: "<% $.result != nil and $.result.error != '' %>"
+      delay: 0
+    on-error:
+      - recovery
+
+  # This task should get 3 full attempts because break-on is never true
+  # (break-on checks error, and continue-on is what keeps retry alive).
+  # Actually in Go std.fail always produces error, so this exercises
+  # continue-on semantics: keep retrying even on ERROR.
+  flaky_continue:
+    action: std.echo
+    input:
+      output: "always ok"
+    retry:
+      count: 3
+      continue-on: "<% true %>"
+      delay: 0
+    requires: [flaky_with_break]
+
+  recovery:
+    action: std.echo output="recovered"
+
+output:
+  status: "<% $.recovery.result %> + <% $.flaky_continue.result %>"

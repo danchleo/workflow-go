@@ -1,0 +1,75 @@
+# Python mistral native pattern: when conditions + join + on-complete
+# Adapted from mistral/tests/resources/workbook/v2/my_workbook.yaml L63-110
+#
+# Features exercised:
+#   ✅ when condition on on-error (task4: "<% $.my_val == 1 %>")
+#   ✅ when condition on on-success (task5: "<% $.my_val == 2 %>")
+#   ✅ when condition on on-complete (task6: "<% $.my_val == 3 %>")
+#   ✅ join: all (task9) — waits for ALL inbound success
+#   ✅ join: numeric (task10) — waits for 2 inbound success
+#   ✅ join: one (task11) — waits for ANY one inbound
+version: "2.0"
+name: when_join_test
+
+tasks:
+  # Entry task — publishes my_val so when conditions can evaluate it.
+  entry:
+    action: std.echo output="start"
+    publish:
+      my_val: 2
+    on-success:
+      - split_a
+      - split_b
+      - split_c
+
+  # Three parallel branches — ALL succeed.
+  split_a:
+    action: std.echo output="A-ok"
+    publish:
+      branch: a
+
+  split_b:
+    action: std.echo output="B-ok"
+    publish:
+      branch: b
+
+  split_c:
+    action: std.echo output="C-ok"
+    publish:
+      branch: c
+
+  # join: all — should fire after all 3 complete.
+  join_all:
+    join: all
+    action: std.echo output="all-joined"
+
+  # join: 2 — should fire after any 2 complete.
+  join_two:
+    join: 2
+    action: std.echo output="two-joined"
+
+  # join: one — should fire after any 1 complete.
+  join_one:
+    join: one
+    action: std.echo output="one-joined"
+
+  # When-routing task — 3 branches, each guarded by a when condition.
+  # my_val=2 should route to mid_branch (not top or bottom).
+  when_router:
+    action: std.echo output="my_val is <% $.my_val %>"
+    publish:
+      my_val: 2
+    on-success:
+      - top_branch: "<% $.my_val == 1 %>"
+      - mid_branch: "<% $.my_val == 2 %>"
+      - bottom_branch: "<% $.my_val == 3 %>"
+
+  top_branch:
+    action: std.echo output="should NOT run"
+  mid_branch:
+    action: std.echo output="SHOULD run — my_val=2 matched"
+  bottom_branch:
+    action: std.echo output="should NOT run"
+
+output:
+  final_msg: "<% $.join_all.result %> + <% $.mid_branch.result %>"

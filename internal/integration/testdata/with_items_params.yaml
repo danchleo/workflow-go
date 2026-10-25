@@ -1,0 +1,32 @@
+# Python mistral native pattern: with-items + concurrency + params expression
+# Adapted from mistral/tests/resources/wf_action_ex_concurrency.yaml
+#
+# Features exercised:
+#   ✅ with-items with array expression (range builtin)
+#   ✅ with-items concurrency limit
+#   ✅ params with YAQL expression (item value in each iteration)
+#   ✅ with-items final aggregation (parent sees array of results)
+version: "2.0"
+name: with_items_params_test
+
+tasks:
+  # Each iteration echoes its index — parent should see array ["0","1","2"].
+  fanout:
+    with-items: idx in <% range(3) %>
+    concurrency: 2
+    action: std.echo
+    input:
+      output: "<% $.idx %>"
+    publish:
+      idx_result: "<% $.idx %>"
+
+  # Parent waits for fanout to complete and reads the aggregated results.
+  collector:
+    requires: [fanout]
+    action: std.echo
+    input:
+      output: "collected: <% task(fanout).result %>"
+
+output:
+  items: "<% $.fanout.result %>"
+  collected: "<% $.collector.result %>"
