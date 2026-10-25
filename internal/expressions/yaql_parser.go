@@ -271,7 +271,9 @@ func (p *yaqParser) parsePrimary() (*node, error) {
 			}
 			return &node{kind: nkCall, name: name, args: args}, nil
 		}
-		return nil, fmt.Errorf("unexpected identifier %q (not a call)", name)
+		// Bare identifier — treat as variable reference (Python/YAQL allow
+		// bare identifiers like task(task1) where task1 is a variable name).
+		return &node{kind: nkVar, varName: name}, nil
 	case tokLParen:
 		p.advance()
 		n, err := p.parseExpr()

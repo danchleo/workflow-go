@@ -1,0 +1,22 @@
+---
+version: "2.0"
+
+name: nested_error
+
+workflows:
+  wf1:
+    type: direct
+
+    tasks:
+      task1:
+        workflow: wf2
+
+  wf2:
+    type: direct
+    # "fail_task" is intentionally unique so integration test's customResults
+    # can target it without colliding with other tests' task names.
+    tasks:
+      fail_task:
+        action: std.echo
+        input:
+          output: "this should not appear — task will be forced ERROR"

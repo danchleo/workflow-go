@@ -1200,8 +1200,10 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 		if taskEx.Output == nil {
 			taskEx.Output = make(map[string]interface{})
 		}
-		// Also ensure a "result" key exists for easy dot-path expressions.
-		if _, ok := taskEx.Output["result"]; !ok {
+		// Python: subworkflow task.result == child wf_ex.output (no forced
+		// override to child state). Only add a "result" key as a convenience
+		// when the child output is empty (no workflow-level output defined).
+		if len(taskEx.Output) == 0 {
 			taskEx.Output["result"] = childWfEx.State
 		}
 	} else if result != nil && result.Data != nil {

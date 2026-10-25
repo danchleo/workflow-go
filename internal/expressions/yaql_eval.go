@@ -107,7 +107,9 @@ func (e *yaqEval) evalVar(name string) (interface{}, error) {
 	if v, ok := e.ctx[name]; ok {
 		return v, nil
 	}
-	return nil, nil
+	// Python YAQL: bare identifier not bound in context returns its name as string.
+	// This lets task(task1) work like task('task1') — the bare identifier auto-coerces.
+	return name, nil
 }
 
 func (e *yaqEval) evalMember(target *node, name string) (interface{}, error) {
@@ -540,6 +542,13 @@ func yaqTask(args []interface{}) (interface{}, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("task() takes 0 or 1 arg")
 	}
+
+	// If the arg is already a taskData map (bare identifier collided with
+	// ctx["taskName"]), return it directly — it IS the task result the user wants.
+	if m, ok := args[0].(map[string]interface{}); ok {
+		return m, nil
+	}
+
 	name := fmt.Sprintf("%v", args[0])
 	if results, ok := ctx["__task_results"]; ok {
 		if m, ok := results.(map[string]interface{}); ok {

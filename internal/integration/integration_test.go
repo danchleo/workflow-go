@@ -2597,3 +2597,164 @@ func TestIntegration_PythonNative_MyWorkbook(t *testing.T) {
 
 	t.Logf("  my_workbook (Python native) all checks passed")
 }
+
+// --- Python mistral workbook/nested tests (WB1, WB2, wb_with_nested_wf) ---
+
+// TestIntegration_Nested_ReverseCalledByDirect ports Python WB1: a reverse
+// workflow (wf1) gets nested-called by a direct workflow (wf2), with
+// output propagation back to parent for further publish.
+// Go adapts: Python inline workflow args (wf1 param1='Bonnie' param2='Clyde')
+// become explicit input: dict; Python task_name='task2' dropped (Go reverse
+// starts from no-requires task naturally).
+func TestIntegration_Nested_ReverseCalledByDirect(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		workbookPath:  "nested_reverse.yaml",
+		entryWorkflow: "wf2",
+		expectedState: states.SUCCESS,
+	})
+
+	// Walk all WorkflowExecutions — should have 2: wf2 (direct) + wf1 (reverse).
+	allWfExs, _ := store.WorkflowExecutions().List("")
+	var parentWf, childWf *db.WorkflowExecution
+	for _, w := range allWfExs {
+		switch w.Name {
+		case "nested_reverse.wf2":
+			parentWf = w
+		case "nested_reverse.wf1":
+			childWf = w
+		}
+	}
+	if parentWf == nil {
+		t.Fatal("nested_reverse.wf2 (parent) not found")
+	}
+	if childWf == nil {
+		t.Fatal("nested_reverse.wf1 (child reverse) not found")
+	}
+	if childWf.State != states.SUCCESS {
+		t.Errorf("child reverse wf1 state = %s, want SUCCESS", childWf.State)
+	}
+	if childWf.TaskExecutionID == "" {
+		t.Error("child TaskExecutionID is empty (should point to parent's task)")
+	} else {
+		t.Logf("  child TaskExecutionID=%s (parent task ref)", childWf.TaskExecutionID)
+	}
+
+	// Child wf1 workflow-level output was evaluated via task() builtin.
+	// Fake executor returns "result-of-<taskName>" so check no raw expr left.
+	childFinal, hasFinal := childWf.Output["final_result"]
+	if !hasFinal {
+		t.Error("child wf1 output missing 'final_result'")
+	} else if s, ok := childFinal.(string); ok {
+		if containsAny(s, "<%", "${", "task(") {
+			t.Errorf("child final_result still raw expression: %q", s)
+		} else {
+			t.Logf("  child wf1 final_result=%q (evaluated ✅)", s)
+		}
+	}
+
+	// Parent wf2 output slogan also evaluated.
+	slogan, hasSlogan := final.Output["slogan"]
+	if !hasSlogan {
+		t.Error("parent wf2 output missing 'slogan'")
+	} else if s, ok := slogan.(string); ok {
+		if containsAny(s, "<%", "${", "task(") {
+			t.Errorf("parent slogan still raw expression: %q", s)
+		} else {
+			t.Logf("  parent slogan=%q (evaluated ✅)", s)
+		}
+	}
+
+	t.Logf("  nested reverse-by-direct: parent=%v child=%v final_state=%s",
+		parentWf.State, childWf.State, final.State)
+}
+
+// TestIntegration_Nested_ChildErrorPropagates ports Python WB2: parent wf1
+// calls child wf2 which intentionally fails. Verify parent wf1 goes ERROR
+// because its only task fails.
+func TestIntegration_Nested_ChildErrorPropagates(t *testing.T) {
+	failRes := &db.Result{Error: "intentional failure"}
+	final, store := runWorkflowFromYAML(t, fixture{
+		workbookPath:  "nested_error.yaml",
+		entryWorkflow: "wf1",
+		expectedState: states.ERROR,
+		customResults: map[string]*db.Result{
+			"fail_task": failRes, // unique name — no collision
+		},
+	})
+
+	allWfExs, _ := store.WorkflowExecutions().List("")
+	var parentWf, childWf *db.WorkflowExecution
+	for _, w := range allWfExs {
+		switch w.Name {
+		case "nested_error.wf1":
+			parentWf = w
+		case "nested_error.wf2":
+			childWf = w
+		}
+	}
+	if parentWf == nil {
+		t.Fatal("nested_error.wf1 (parent) not found")
+	}
+	if childWf == nil {
+		t.Fatal("nested_error.wf2 (child) not found")
+	}
+
+	// Child should be ERROR (failed action).
+	if childWf.State != states.ERROR {
+		t.Errorf("child wf2 state = %s, want ERROR", childWf.State)
+	} else {
+		t.Logf("  child wf2 correctly ERROR")
+	}
+
+	// Parent should also be ERROR (only task was the subworkflow call).
+	if parentWf.State != states.ERROR {
+		t.Errorf("parent wf1 state = %s, want ERROR (should cascade from child)", parentWf.State)
+	} else {
+		t.Logf("  parent wf1 correctly ERROR (cascaded from child)")
+	}
+	if final.State != states.ERROR {
+		t.Errorf("final state = %s, want ERROR", final.State)
+	}
+
+	t.Logf("  nested error propagation: OK")
+}
+
+// TestIntegration_Nested_SimplePortsPythonFixture ports the simplest
+// workbook nested fixture (wb_with_nested_wf.yaml): wrapping_wf → inner_wf
+// with one echo task. Verifies basic subworkflow execution inside a workbook.
+func TestIntegration_Nested_SimplePortsPythonFixture(t *testing.T) {
+	_, store := runWorkflowFromYAML(t, fixture{
+		workbookPath:  "nested_simple.yaml",
+		entryWorkflow: "wrapping_wf",
+		expectedState: states.SUCCESS,
+	})
+
+	allWfExs, _ := store.WorkflowExecutions().List("")
+	var parentWf, childWf *db.WorkflowExecution
+	for _, w := range allWfExs {
+		switch w.Name {
+		case "nested_simple.wrapping_wf":
+			parentWf = w
+		case "nested_simple.inner_wf":
+			childWf = w
+		}
+	}
+	if parentWf == nil {
+		t.Fatal("nested_simple.wrapping_wf (parent) not found")
+	}
+	if childWf == nil {
+		t.Fatal("nested_simple.inner_wf (child) not found")
+	}
+	if childWf.State != states.SUCCESS {
+		t.Errorf("inner_wf state = %s, want SUCCESS", childWf.State)
+	} else {
+		t.Logf("  inner_wf SUCCESS")
+	}
+	if childWf.TaskExecutionID == "" {
+		t.Error("child TaskExecutionID is empty (parent ref missing)")
+	} else {
+		t.Logf("  child TaskExecutionID=%s (parent ref present ✅)", childWf.TaskExecutionID)
+	}
+
+	t.Logf("  simple nested workbook: 2 WfExs, all SUCCESS ✅")
+}
