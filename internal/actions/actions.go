@@ -902,6 +902,9 @@ type AdHocActionDescriptor struct {
 
 // Instantiate creates an AdHocAction wrapping the resolved base action.
 func (d *AdHocActionDescriptor) Instantiate(input map[string]interface{}) (Action, error) {
+	if d.SystemProv == nil {
+		return nil, fmt.Errorf("AdHocActionDescriptor %q: SystemProv is not set", d.Name)
+	}
 	baseDesc, ok := d.SystemProv.Find(d.BaseName, d.Namespace)
 	if !ok {
 		return nil, fmt.Errorf("AdHocActionDescriptor: base action %q not found", d.BaseName)

@@ -165,3 +165,54 @@ func TestCacheLifecycle(t *testing.T) {
 		t.Errorf("not cleared")
 	}
 }
+
+// ------------------------------------------------------------
+// Version validation tests
+// ------------------------------------------------------------
+
+func TestParseYAML_VersionOK(t *testing.T) {
+	// String "2.0" — the common form.
+	if _, err := ParseYAML("version: \"2.0\"\ntasks: {}\n"); err != nil {
+		t.Errorf("version '2.0' string rejected: %v", err)
+	}
+	// Plain scalar 2.0 (YAML parses this as float64).
+	if _, err := ParseYAML("version: 2.0\ntasks: {}\n"); err != nil {
+		t.Errorf("version 2.0 float rejected: %v", err)
+	}
+	// Integer 2 — we tolerate it (normalized to "2.0").
+	if _, err := ParseYAML("version: 2\ntasks: {}\n"); err != nil {
+		t.Errorf("version int 2 rejected: %v", err)
+	}
+}
+
+func TestParseYAML_VersionMissing(t *testing.T) {
+	_, err := ParseYAML("tasks:\n  t1:\n    action: std.echo\n")
+	if err == nil {
+		t.Fatal("missing version should be rejected")
+	}
+	if !strings.Contains(err.Error(), "missing") {
+		t.Errorf("error = %q, should mention missing version", err.Error())
+	}
+}
+
+func TestParseYAML_VersionUnsupported(t *testing.T) {
+	_, err := ParseYAML("version: \"3.0\"\ntasks: {}\n")
+	if err == nil {
+		t.Fatal("version 3.0 should be rejected")
+	}
+	if !strings.Contains(err.Error(), "unsupported DSL version") {
+		t.Errorf("error = %q", err.Error())
+	}
+
+	_, err = ParseYAML("version: \"1.0\"\ntasks: {}\n")
+	if err == nil {
+		t.Fatal("version 1.0 should be rejected")
+	}
+}
+
+func TestParseYAML_VersionBadType(t *testing.T) {
+	_, err := ParseYAML("version: [1, 2]\ntasks: {}\n")
+	if err == nil {
+		t.Fatal("list version should be rejected")
+	}
+}

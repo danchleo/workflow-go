@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/mistral/workflow/internal/lang/v2"
+	v2 "github.com/mistral/workflow/internal/lang/v2"
 )
 
 const (
@@ -24,7 +24,9 @@ var (
 	wfDefCacheMu sync.RWMutex
 )
 
-// ParseYAML parses YAML text into a generic map.
+// ParseYAML parses YAML text into a generic map and validates the DSL version.
+// Only version "2.0" is supported (matches Mistral v2.0 DSL). An explicit
+// version field is required — missing or non-"2.0" values are rejected.
 func ParseYAML(text string) (map[string]interface{}, error) {
 	var result map[string]interface{}
 	if err := yaml.Unmarshal([]byte(text), &result); err != nil {
@@ -33,7 +35,30 @@ func ParseYAML(text string) (map[string]interface{}, error) {
 	if result == nil {
 		return make(map[string]interface{}), nil
 	}
-	return result, nil
+	return result, validateVersion(result)
+}
+
+// validateVersion enforces the top-level "version" field to be "2.0".
+func validateVersion(data map[string]interface{}) error {
+	vRaw, ok := data["version"]
+	if !ok {
+		return fmt.Errorf("missing required top-level 'version' field (only version %s is supported)", V2_0)
+	}
+	var v string
+	switch raw := vRaw.(type) {
+	case string:
+		v = raw
+	case int:
+		v = fmt.Sprintf("%d.0", raw)
+	case float64:
+		v = fmt.Sprintf("%.1f", raw)
+	default:
+		return fmt.Errorf("'version' field must be a string, got %T", vRaw)
+	}
+	if v != V2_0 {
+		return fmt.Errorf("unsupported DSL version %q; only version %s is supported", v, V2_0)
+	}
+	return nil
 }
 
 // GetWorkbookSpec parses a full workbook (actions + workflows).
