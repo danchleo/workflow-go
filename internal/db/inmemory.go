@@ -13,14 +13,20 @@ import (
 type InMemoryStore struct {
 	mu sync.RWMutex
 
-	workflowDefs  map[string]*WorkflowDefinition
-	actionDefs    map[string]*ActionDefinition
-	wfExecs       map[string]*WorkflowExecution
-	taskExecs     map[string]*TaskExecution
-	actionExecs   map[string]*ActionExecution
-	environments  map[string]*Environment
-	scheduledJobs map[string]*ScheduledJob
-	cronTriggers  map[string]*CronTrigger
+	workflowDefs    map[string]*WorkflowDefinition
+	actionDefs      map[string]*ActionDefinition
+	wfExecs         map[string]*WorkflowExecution
+	taskExecs       map[string]*TaskExecution
+	actionExecs     map[string]*ActionExecution
+	environments    map[string]*Environment
+	scheduledJobs   map[string]*ScheduledJob
+	cronTriggers    map[string]*CronTrigger
+	workbooks       map[string]*Workbook
+	dynActionDefs   map[string]*DynamicActionDefinition
+	eventTriggers   map[string]*EventTrigger
+	resourceMembers map[string]*ResourceMember
+	codeSources     map[string]*CodeSource
+	metrics         map[string]*MistralMetrics
 
 	// Locks: map of lock name -> channel used for simple mutex semantics.
 	locks map[string]chan struct{}
@@ -29,15 +35,21 @@ type InMemoryStore struct {
 // NewInMemoryStore creates a new in-memory store.
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
-		workflowDefs:  make(map[string]*WorkflowDefinition),
-		actionDefs:    make(map[string]*ActionDefinition),
-		wfExecs:       make(map[string]*WorkflowExecution),
-		taskExecs:     make(map[string]*TaskExecution),
-		actionExecs:   make(map[string]*ActionExecution),
-		environments:  make(map[string]*Environment),
-		scheduledJobs: make(map[string]*ScheduledJob),
-		cronTriggers:  make(map[string]*CronTrigger),
-		locks:         make(map[string]chan struct{}),
+		workflowDefs:    make(map[string]*WorkflowDefinition),
+		actionDefs:      make(map[string]*ActionDefinition),
+		wfExecs:         make(map[string]*WorkflowExecution),
+		taskExecs:       make(map[string]*TaskExecution),
+		actionExecs:     make(map[string]*ActionExecution),
+		environments:    make(map[string]*Environment),
+		scheduledJobs:   make(map[string]*ScheduledJob),
+		cronTriggers:    make(map[string]*CronTrigger),
+		workbooks:       make(map[string]*Workbook),
+		dynActionDefs:   make(map[string]*DynamicActionDefinition),
+		eventTriggers:   make(map[string]*EventTrigger),
+		resourceMembers: make(map[string]*ResourceMember),
+		codeSources:     make(map[string]*CodeSource),
+		metrics:         make(map[string]*MistralMetrics),
+		locks:           make(map[string]chan struct{}),
 	}
 }
 
@@ -49,6 +61,14 @@ func (s *InMemoryStore) ActionExecutions() ActionExecutionStore       { return &
 func (s *InMemoryStore) Environments() EnvironmentStore               { return &envStore{s} }
 func (s *InMemoryStore) ScheduledJobs() ScheduledJobStore             { return &memScheduledJobStore{s} }
 func (s *InMemoryStore) CronTriggers() CronTriggerStore               { return &memCronTriggerStore{s} }
+func (s *InMemoryStore) Workbooks() WorkbookStore                     { return &memWorkbookStore{s} }
+func (s *InMemoryStore) DynamicActionDefinitions() DynamicActionDefinitionStore {
+	return &memDynActionDefStore{s}
+}
+func (s *InMemoryStore) EventTriggers() EventTriggerStore     { return &memEventTriggerStore{s} }
+func (s *InMemoryStore) ResourceMembers() ResourceMemberStore { return &memResourceMemberStore{s} }
+func (s *InMemoryStore) CodeSources() CodeSourceStore         { return &memCodeSourceStore{s} }
+func (s *InMemoryStore) MistralMetrics() MistralMetricsStore  { return &memMistralMetricsStore{s} }
 
 func (s *InMemoryStore) AcquireLock(name string) error {
 	s.mu.Lock()
@@ -229,6 +249,7 @@ func (w *wmExecStore) Create(wf *WorkflowExecution) error {
 	if wf.ID == "" {
 		wf.ID = GenerateID()
 	}
+	wf.Validate()
 	now := Now()
 	wf.CreatedAt = now
 	wf.UpdatedAt = now
@@ -284,6 +305,7 @@ func (w *wmExecStore) Update(wf *WorkflowExecution) error {
 	if !ok {
 		return &NotFoundError{Entity: "WorkflowExecution", ID: wf.ID}
 	}
+	wf.Validate()
 	wf.CreatedAt = existing.CreatedAt
 	wf.UpdatedAt = Now()
 	w.s.wfExecs[wf.ID] = wf
@@ -322,6 +344,7 @@ func (t *tmExecStore) Create(te *TaskExecution) error {
 	if te.ID == "" {
 		te.ID = GenerateID()
 	}
+	te.Validate()
 	now := Now()
 	te.CreatedAt = now
 	te.UpdatedAt = now
@@ -421,6 +444,7 @@ func (t *tmExecStore) Update(te *TaskExecution) error {
 	if !ok {
 		return &NotFoundError{Entity: "TaskExecution", ID: te.ID}
 	}
+	te.Validate()
 	te.CreatedAt = existing.CreatedAt
 	te.UpdatedAt = Now()
 	t.s.taskExecs[te.ID] = te
@@ -476,6 +500,7 @@ func (a *amExecStore) Create(ae *ActionExecution) error {
 	if ae.ID == "" {
 		ae.ID = GenerateID()
 	}
+	ae.Validate()
 	now := Now()
 	ae.CreatedAt = now
 	ae.UpdatedAt = now
@@ -525,6 +550,7 @@ func (a *amExecStore) Update(ae *ActionExecution) error {
 	if !ok {
 		return &NotFoundError{Entity: "ActionExecution", ID: ae.ID}
 	}
+	ae.Validate()
 	ae.CreatedAt = existing.CreatedAt
 	ae.UpdatedAt = Now()
 	a.s.actionExecs[ae.ID] = ae
@@ -750,3 +776,325 @@ func (m *memScheduledJobStore) Delete(id string) error {
 
 // Helper: check whether a string starts with a given prefix (for filtering).
 func hasPrefix(s, prefix string) bool { return strings.HasPrefix(s, prefix) }
+
+// --- WorkbookStore (InMemory) ---
+
+type memWorkbookStore struct{ s *InMemoryStore }
+
+func (m *memWorkbookStore) Create(wb *Workbook) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	if wb.ID == "" {
+		wb.ID = GenerateID()
+	}
+	m.s.workbooks[wb.ID] = wb
+	return nil
+}
+func (m *memWorkbookStore) Get(id string) (*Workbook, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	wb, ok := m.s.workbooks[id]
+	if !ok {
+		return nil, &NotFoundError{Entity: "Workbook", ID: id}
+	}
+	return wb, nil
+}
+func (m *memWorkbookStore) GetByName(name, namespace, projectID string) (*Workbook, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	for _, wb := range m.s.workbooks {
+		if wb.Name == name {
+			if namespace != "" && wb.Namespace != namespace {
+				continue
+			}
+			if projectID != "" && wb.ProjectID != projectID {
+				continue
+			}
+			return wb, nil
+		}
+	}
+	return nil, &NotFoundError{Entity: "Workbook", ID: name}
+}
+func (m *memWorkbookStore) List(namespace, projectID string) ([]*Workbook, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	var out []*Workbook
+	for _, wb := range m.s.workbooks {
+		if namespace != "" && wb.Namespace != namespace {
+			continue
+		}
+		if projectID != "" && wb.ProjectID != projectID {
+			continue
+		}
+		out = append(out, wb)
+	}
+	return out, nil
+}
+func (m *memWorkbookStore) Update(wb *Workbook) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	m.s.workbooks[wb.ID] = wb
+	return nil
+}
+func (m *memWorkbookStore) Delete(id string) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	delete(m.s.workbooks, id)
+	return nil
+}
+
+// --- DynamicActionDefinitionStore (InMemory) ---
+
+type memDynActionDefStore struct{ s *InMemoryStore }
+
+func (m *memDynActionDefStore) Create(d *DynamicActionDefinition) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	if d.ID == "" {
+		d.ID = GenerateID()
+	}
+	m.s.dynActionDefs[d.ID] = d
+	return nil
+}
+func (m *memDynActionDefStore) Get(id string) (*DynamicActionDefinition, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	d, ok := m.s.dynActionDefs[id]
+	if !ok {
+		return nil, &NotFoundError{Entity: "DynamicActionDefinition", ID: id}
+	}
+	return d, nil
+}
+func (m *memDynActionDefStore) GetByName(name, namespace, projectID string) (*DynamicActionDefinition, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	for _, d := range m.s.dynActionDefs {
+		if d.Name == name && d.Namespace == namespace && d.ProjectID == projectID {
+			return d, nil
+		}
+	}
+	return nil, &NotFoundError{Entity: "DynamicActionDefinition", ID: name}
+}
+func (m *memDynActionDefStore) List(namespace, projectID string) ([]*DynamicActionDefinition, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	var out []*DynamicActionDefinition
+	for _, d := range m.s.dynActionDefs {
+		if namespace != "" && d.Namespace != namespace {
+			continue
+		}
+		if projectID != "" && d.ProjectID != projectID {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+func (m *memDynActionDefStore) Update(d *DynamicActionDefinition) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	m.s.dynActionDefs[d.ID] = d
+	return nil
+}
+func (m *memDynActionDefStore) Delete(id string) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	delete(m.s.dynActionDefs, id)
+	return nil
+}
+
+// --- EventTriggerStore (InMemory) ---
+
+type memEventTriggerStore struct{ s *InMemoryStore }
+
+func (m *memEventTriggerStore) Create(e *EventTrigger) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	if e.ID == "" {
+		e.ID = GenerateID()
+	}
+	m.s.eventTriggers[e.ID] = e
+	return nil
+}
+func (m *memEventTriggerStore) Get(id string) (*EventTrigger, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	e, ok := m.s.eventTriggers[id]
+	if !ok {
+		return nil, &NotFoundError{Entity: "EventTrigger", ID: id}
+	}
+	return e, nil
+}
+func (m *memEventTriggerStore) GetByExchangeTopicEvent(exchange, topic, event, projectID string) (*EventTrigger, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	for _, e := range m.s.eventTriggers {
+		if e.Exchange == exchange && e.Topic == topic && e.Event == event {
+			if projectID != "" && e.ProjectID != projectID {
+				continue
+			}
+			return e, nil
+		}
+	}
+	return nil, &NotFoundError{Entity: "EventTrigger", ID: exchange + "/" + topic + "/" + event}
+}
+func (m *memEventTriggerStore) List() ([]*EventTrigger, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	var out []*EventTrigger
+	for _, e := range m.s.eventTriggers {
+		out = append(out, e)
+	}
+	return out, nil
+}
+func (m *memEventTriggerStore) Update(e *EventTrigger) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	m.s.eventTriggers[e.ID] = e
+	return nil
+}
+func (m *memEventTriggerStore) Delete(id string) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	delete(m.s.eventTriggers, id)
+	return nil
+}
+
+// --- ResourceMemberStore (InMemory) ---
+
+type memResourceMemberStore struct{ s *InMemoryStore }
+
+func (m *memResourceMemberStore) Create(r *ResourceMember) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	if r.ID == "" {
+		r.ID = GenerateID()
+	}
+	m.s.resourceMembers[r.ID] = r
+	return nil
+}
+func (m *memResourceMemberStore) Get(id string) (*ResourceMember, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	r, ok := m.s.resourceMembers[id]
+	if !ok {
+		return nil, &NotFoundError{Entity: "ResourceMember", ID: id}
+	}
+	return r, nil
+}
+func (m *memResourceMemberStore) ListByResource(resourceID, resourceType string) ([]*ResourceMember, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	var out []*ResourceMember
+	for _, r := range m.s.resourceMembers {
+		if r.ResourceID == resourceID && r.ResourceType == resourceType {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+func (m *memResourceMemberStore) Update(r *ResourceMember) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	m.s.resourceMembers[r.ID] = r
+	return nil
+}
+func (m *memResourceMemberStore) Delete(id string) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	delete(m.s.resourceMembers, id)
+	return nil
+}
+
+// --- CodeSourceStore (InMemory) ---
+
+type memCodeSourceStore struct{ s *InMemoryStore }
+
+func (m *memCodeSourceStore) Create(c *CodeSource) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	if c.ID == "" {
+		c.ID = GenerateID()
+	}
+	m.s.codeSources[c.ID] = c
+	return nil
+}
+func (m *memCodeSourceStore) Get(id string) (*CodeSource, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	c, ok := m.s.codeSources[id]
+	if !ok {
+		return nil, &NotFoundError{Entity: "CodeSource", ID: id}
+	}
+	return c, nil
+}
+func (m *memCodeSourceStore) GetByName(name, namespace, projectID string) (*CodeSource, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	for _, c := range m.s.codeSources {
+		if c.Name == name && c.Namespace == namespace && c.ProjectID == projectID {
+			return c, nil
+		}
+	}
+	return nil, &NotFoundError{Entity: "CodeSource", ID: name}
+}
+func (m *memCodeSourceStore) List(namespace, projectID string) ([]*CodeSource, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	var out []*CodeSource
+	for _, c := range m.s.codeSources {
+		if namespace != "" && c.Namespace != namespace {
+			continue
+		}
+		if projectID != "" && c.ProjectID != projectID {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+func (m *memCodeSourceStore) Update(c *CodeSource) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	m.s.codeSources[c.ID] = c
+	return nil
+}
+func (m *memCodeSourceStore) Delete(id string) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	delete(m.s.codeSources, id)
+	return nil
+}
+
+// --- MistralMetricsStore (InMemory) ---
+
+type memMistralMetricsStore struct{ s *InMemoryStore }
+
+func (m *memMistralMetricsStore) GetByName(name string) (*MistralMetrics, error) {
+	m.s.mu.RLock()
+	defer m.s.mu.RUnlock()
+	mm, ok := m.s.metrics[name]
+	if !ok {
+		return nil, &NotFoundError{Entity: "MistralMetrics", ID: name}
+	}
+	return mm, nil
+}
+
+func (m *memMistralMetricsStore) Set(name, value string) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	mm, ok := m.s.metrics[name]
+	if ok {
+		mm.Value = value
+		return nil
+	}
+	m.s.metrics[name] = &MistralMetrics{Name: name, Value: value}
+	return nil
+}
+
+func (m *memMistralMetricsStore) Delete(name string) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	delete(m.s.metrics, name)
+	return nil
+}

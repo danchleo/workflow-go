@@ -96,6 +96,62 @@ type CronTriggerStore interface {
 	Delete(id string) error
 }
 
+// WorkbookStore defines CRUD for workbooks.
+type WorkbookStore interface {
+	Create(wb *Workbook) error
+	Get(id string) (*Workbook, error)
+	GetByName(name, namespace, projectID string) (*Workbook, error)
+	List(namespace, projectID string) ([]*Workbook, error)
+	Update(wb *Workbook) error
+	Delete(id string) error
+}
+
+// DynamicActionDefinitionStore defines CRUD for dynamic action definitions.
+type DynamicActionDefinitionStore interface {
+	Create(d *DynamicActionDefinition) error
+	Get(id string) (*DynamicActionDefinition, error)
+	GetByName(name, namespace, projectID string) (*DynamicActionDefinition, error)
+	List(namespace, projectID string) ([]*DynamicActionDefinition, error)
+	Update(d *DynamicActionDefinition) error
+	Delete(id string) error
+}
+
+// EventTriggerStore defines CRUD for event triggers.
+type EventTriggerStore interface {
+	Create(e *EventTrigger) error
+	Get(id string) (*EventTrigger, error)
+	GetByExchangeTopicEvent(exchange, topic, event, projectID string) (*EventTrigger, error)
+	List() ([]*EventTrigger, error)
+	Update(e *EventTrigger) error
+	Delete(id string) error
+}
+
+// ResourceMemberStore defines CRUD for resource members.
+type ResourceMemberStore interface {
+	Create(m *ResourceMember) error
+	Get(id string) (*ResourceMember, error)
+	ListByResource(resourceID, resourceType string) ([]*ResourceMember, error)
+	Update(m *ResourceMember) error
+	Delete(id string) error
+}
+
+// CodeSourceStore defines CRUD for code sources.
+type CodeSourceStore interface {
+	Create(c *CodeSource) error
+	Get(id string) (*CodeSource, error)
+	GetByName(name, namespace, projectID string) (*CodeSource, error)
+	List(namespace, projectID string) ([]*CodeSource, error)
+	Update(c *CodeSource) error
+	Delete(id string) error
+}
+
+// MistralMetricsStore defines CRUD for metrics key/value.
+type MistralMetricsStore interface {
+	GetByName(name string) (*MistralMetrics, error)
+	Set(name, value string) error
+	Delete(name string) error
+}
+
 // Store is the aggregate database interface that combines all entity stores.
 type Store interface {
 	WorkflowDefinitions() WorkflowDefinitionStore
@@ -106,6 +162,12 @@ type Store interface {
 	Environments() EnvironmentStore
 	ScheduledJobs() ScheduledJobStore
 	CronTriggers() CronTriggerStore
+	Workbooks() WorkbookStore
+	DynamicActionDefinitions() DynamicActionDefinitionStore
+	EventTriggers() EventTriggerStore
+	ResourceMembers() ResourceMemberStore
+	CodeSources() CodeSourceStore
+	MistralMetrics() MistralMetricsStore
 
 	// Lock management (named locks for concurrency control).
 	AcquireLock(lockName string) error

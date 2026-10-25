@@ -7,8 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mistral/workflow/internal/actions"
 	"github.com/mistral/workflow/internal/commands"
 	"github.com/mistral/workflow/internal/db"
+	"github.com/mistral/workflow/internal/executors"
 	"github.com/mistral/workflow/internal/expressions"
 	"github.com/mistral/workflow/internal/lang"
 	v2 "github.com/mistral/workflow/internal/lang/v2"
@@ -134,6 +136,28 @@ func registerEngineJobHandlers(e *DefaultEngine) {
 				return
 			}
 			e.advanceWorkflow(wfExID, taskExID)
+		})
+
+		// refresh_task_state: join-task wakeup. Scheduled after any task completes,
+		// this handler re-evaluates a waiting join task's logical state and either
+		// (a) re-enters StartTask if RUNNING (calling continue_task / _refresh_task_state),
+		// (b) marks ERROR if dependencies are permanently broken, or
+		// (c) no-ops if still WAITING.
+		// Mirrors Python task_handler._refresh_task_state + _schedule_refresh_task_state.
+		scheduler.RegisterJobHandler(scheduler.JobRefreshTaskState, func(args map[string]interface{}) {
+			taskExID, _ := args["task_ex_id"].(string)
+			if taskExID == "" {
+				return
+			}
+			e.refreshTaskState(taskExID)
+		})
+
+		scheduler.RegisterJobHandler(scheduler.JobIntegrityCheck, func(args map[string]interface{}) {
+			wfExID, _ := args["wf_ex_id"].(string)
+			if wfExID == "" {
+				return
+			}
+			e.checkIntegrity(context.Background(), wfExID)
 		})
 	})
 }
@@ -300,6 +324,13 @@ func (e *DefaultEngine) StartWorkflow(ctx context.Context, wfDefID, wfNamespace,
 		return nil, fmt.Errorf("creating workflow execution: %w", err)
 	}
 
+	// Crash-recovery sweep: schedule an integrity check that fires ~120s
+	// from now (and re-schedules itself) to catch tasks that may be stuck
+	// in RUNNING state after an engine crash. Mirrors Python
+	// _schedule_check_and_fix_integrity called from workflow_handler.py
+	// whenever a workflow transitions to RUNNING.
+	e.scheduleIntegrityCheck(wfEx.ID)
+
 	// Find controller and dispatch start commands.
 	tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
 	ctrl := workflow.GetController(wfEx, wfSpec, tasks)
@@ -360,6 +391,16 @@ func (e *DefaultEngine) ResumeWorkflow(ctx context.Context, wfExID string, env m
 
 	ctrl := workflow.GetController(wfEx, wfSpec, tasks)
 	cmds := ctrl.ContinueWorkflow(nil)
+
+	// Re-run all IDLE tasks (set by pause-before policy).
+	// Python resume_workflow iterates over IDLE tasks and calls continue_task.
+	for _, t := range tasks {
+		if t.State == states.IDLE {
+			// Trigger a refresh; scheduleRefreshTaskState will re-check logical state
+			// and call continueTask → StartTask if ready.
+			e.scheduleRefreshTaskState(t.ID)
+		}
+	}
 
 	if err := e.store.WorkflowExecutions().Update(wfEx); err != nil {
 		return err
@@ -523,6 +564,33 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 	// Evaluate action input.
 	inputDict := evaluateTaskInput(taskSpec, taskEx.InContext, wfEx.Input, wfEx.Context)
 	taskEx.RuntimeContext["resolved_input"] = inputDict
+
+	// ================================================================
+	// PauseBeforePolicy — mirror Python policies.py PauseBeforePolicy.
+	// If task has pause-before (truthy boolean), set workflow to PAUSED
+	// and this task to IDLE. Mirrors task._before_task_start().
+	// ================================================================
+	if taskEx.RuntimeContext["pause_before_done"] == nil {
+		policies := taskSpec.GetPolicies()
+		if policies != nil {
+			if pbRaw := policies.GetPauseBefore(); pbRaw != nil {
+				if isTruthy(pbRaw) {
+					taskEx.State = states.IDLE
+					taskEx.StateInfo = "Set by 'pause-before' policy"
+					taskEx.RuntimeContext["pause_before_done"] = true
+					_ = e.store.TaskExecutions().Update(taskEx)
+
+					wfEx.State = states.PAUSED
+					wfEx.StateInfo = fmt.Sprintf("Paused by 'pause-before' policy at task '%s'", taskEx.Name)
+					_ = e.store.WorkflowExecutions().Update(wfEx)
+
+					log.Printf("pause-before: workflow %s paused before task %s → PAUSED", wfEx.ID, taskEx.Name)
+					return nil
+				}
+				taskEx.RuntimeContext["pause_before_done"] = true
+			}
+		}
+	}
 
 	// ================================================================
 	// WaitBeforePolicy — mirror Python policies.py WaitBeforePolicy.
@@ -903,6 +971,7 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 		if result != nil {
 			actionEx.Output = result.ToDict()
 		}
+		actionEx.StateInfo = stateInfo
 		actionEx.Accepted = true
 		if err := e.store.ActionExecutions().Update(actionEx); err != nil {
 			return err
@@ -914,8 +983,13 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 	// Per-ActionExecution granularity: a failed individual iteration retries
 	// independently of other with-items siblings. This runs BEFORE the
 	// with-items aggregation gate so retries don't corrupt failed_count.
+	//
+	// Invoked for both ERROR and SUCCESS — break_on / continue_on inside
+	// handleRetry decide whether to actually retry. SUCCESS without
+	// continue-on defaults to NO retry (stop_continue_flag).
+	// handleRetry itself returns false when no retry policy is configured.
 	// ============================================================
-	if states.IsError(newState) && actionEx != nil {
+	if actionEx != nil {
 		retryRetried, retryErr := e.handleRetry(ctx, actionEx, taskEx, wfEx)
 		if retryErr != nil {
 			return retryErr
@@ -1100,6 +1174,39 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 					taskEx.Published = m
 				}
 			}
+
+			// ================================================================
+			// FailOnPolicy — mirror Python policies.py FailOnPolicy.
+			// If task SUCCESS and fail-on evaluates truthy, override to ERROR.
+			// Supports literal boolean AND string expression form
+			// (fail-on: <% $.should_fail %>) — Python YAQL handles both.
+			// ================================================================
+			if taskEx.State == states.SUCCESS {
+				if policies := taskSpec.GetPolicies(); policies != nil {
+					if foRaw := policies.GetFailOn(); foRaw != nil {
+						var foVal interface{}
+						if s, ok := foRaw.(string); ok {
+							// Expression form — evaluate against full context.
+							allTasks2, _ := e.store.TaskExecutions().List(wfEx.ID, "")
+							for i, te := range allTasks2 {
+								if te.ID == taskEx.ID {
+									allTasks2[i] = taskEx
+									break
+								}
+							}
+							ctx := workflow.BuildFullContext(wfEx, wfSpec, allTasks2)
+							foVal = expressions.EvaluateRecursively(s, ctx)
+						} else {
+							foVal = foRaw
+						}
+						if isTruthy(foVal) {
+							taskEx.State = states.ERROR
+							taskEx.StateInfo = "Failed by 'fail-on' policy"
+							log.Printf("fail-on: task %s SUCCESS → ERROR by fail-on policy", taskEx.Name)
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -1124,6 +1231,11 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 				return err
 			}
 		}
+
+		// P0: wake up waiting join tasks that were transitively affected.
+		// Mirrors Python task_handler._check_affected_tasks called after
+		// Task.complete() dispatches workflow commands.
+		e.checkAffectedTasks(taskEx, wfEx)
 	}
 
 	return nil
@@ -1192,6 +1304,76 @@ func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExec
 		return false, nil
 	}
 
+	// ================================================================
+	// break_on / continue_on condition evaluation.
+	// Mirrors Python RetryPolicy.after_task_complete expression logic.
+	//   break_triggered = (state == ERROR) AND break_on evaluates truthy
+	//   stop_continue   = (state == SUCCESS) AND (continue_on NOT set OR evaluates falsy)
+	// Python evaluates expressions against task outbound context (data_flow).
+	// Go evaluates against full workflow context (richer, includes parent scope).
+	// ================================================================
+	allTasks2, _ := e.store.TaskExecutions().List(wfEx.ID, "")
+	for i, te := range allTasks2 {
+		if te.ID == taskEx.ID {
+			allTasks2[i] = taskEx // in-memory current state
+			break
+		}
+	}
+	exprCtx := workflow.BuildFullContext(wfEx, wfSpec, allTasks2)
+	// Also expose the current action execution result so expressions like
+	//   break-on: <% $.last_error.contains('timeout') %>  work.
+	if states.IsError(actionEx.State) {
+		if si, ok := actionEx.StateInfo.(string); ok {
+			exprCtx["last_error"] = si
+		} else {
+			exprCtx["last_error"] = fmt.Sprintf("%v", actionEx.StateInfo)
+		}
+		exprCtx["last_output"] = actionEx.Output
+	}
+
+	breakOnRaw := retrySpec.GetBreakOn()
+	continueOnRaw := retrySpec.GetContinueOn()
+
+	breakTriggered := false
+	if states.IsError(actionEx.State) && breakOnRaw != nil {
+		var boVal interface{}
+		if s, ok := breakOnRaw.(string); ok {
+			boVal = expressions.EvaluateRecursively(s, exprCtx)
+		} else {
+			boVal = breakOnRaw
+		}
+		breakTriggered = isTruthy(boVal)
+		if breakTriggered {
+			log.Printf("retry: break-on triggered for actionEx %s (state_info=%v) — aborting retry",
+				actionEx.ID, actionEx.StateInfo)
+		}
+	}
+
+	stopContinue := false
+	if actionEx.State == states.SUCCESS {
+		// Python: stop_continue_flag = (state == SUCCESS) AND (continue_on NOT SET OR evaluates falsy)
+		// Must NOT trigger on ERROR — we want ERROR → retry (unless break_on fires).
+		if continueOnRaw == nil {
+			stopContinue = true // SUCCESS + no continue-on → default: don't retry
+		} else {
+			var coVal interface{}
+			if s, ok := continueOnRaw.(string); ok {
+				coVal = expressions.EvaluateRecursively(s, exprCtx)
+			} else {
+				coVal = continueOnRaw
+			}
+			stopContinue = !isTruthy(coVal)
+			if stopContinue {
+				log.Printf("retry: continue-on evaluated falsy for actionEx %s — aborting retry",
+					actionEx.ID)
+			}
+		}
+	}
+
+	if breakTriggered || stopContinue {
+		return false, nil
+	}
+
 	attempt++
 	sync := true
 	buildRetryActionEx := func() *db.ActionExecution {
@@ -1254,6 +1436,27 @@ func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExec
 	return true, nil
 }
 
+// forceFailWorkflow forcibly transitions a workflow execution to ERROR state
+// when the engine encounters an internal failure it cannot recover from.
+// Mirrors Python engine's force_fail_task — engine-level errors must propagate
+// to workflow level so operators see them, not just a log line.
+func (e *DefaultEngine) forceFailWorkflow(wfEx *db.WorkflowExecution, reason string) {
+	if wfEx == nil {
+		return
+	}
+	if states.IsCompleted(wfEx.State) || states.IsPaused(wfEx.State) {
+		return
+	}
+	wfEx.State = states.ERROR
+	wfEx.StateInfo = reason
+	wfEx.Accepted = true
+	if err := e.store.WorkflowExecutions().Update(wfEx); err != nil {
+		log.Printf("forceFailWorkflow: failed to persist wfEx %s ERROR: %v", wfEx.ID, err)
+	} else {
+		log.Printf("forceFailWorkflow: wfEx %s → ERROR (%s)", wfEx.ID, reason)
+	}
+}
+
 // advanceWorkflow is the deferred-completion helper used by wait-after policy
 // (and any future policy that defers task → workflow advancement). It mirrors
 // the tail of OnActionComplete: load wfSpec, get controller, ContinueWorkflow,
@@ -1295,6 +1498,12 @@ func (e *DefaultEngine) advanceWorkflow(wfExID string, doneTaskExID string) {
 
 	if err := e.checkAndCompleteWorkflow(wfEx, ctrl, wfSpec); err != nil {
 		log.Printf("advanceWorkflow: checkAndCompleteWorkflow failed: %v", err)
+	}
+
+	// P0: same as OnActionComplete — wake up join tasks after deferred advance
+	// (wait-after policy path). doneTaskEx carries the freshly-completed task.
+	if doneTaskEx != nil {
+		e.checkAffectedTasks(doneTaskEx, wfEx)
 	}
 }
 
@@ -1404,7 +1613,28 @@ func buildPublishContext(wfEx *db.WorkflowExecution, taskEx *db.TaskExecution) m
 	return ctx
 }
 
-// evaluateOutput evaluates output expressions against context.
+// isTruthy returns true for Go truthy values — mirrors Python's bool() semantics.
+func isTruthy(v interface{}) bool {
+	if v == nil {
+		return false
+	}
+	switch x := v.(type) {
+	case bool:
+		return x
+	case int:
+		return x != 0
+	case float64:
+		return x != 0
+	case string:
+		return x != ""
+	case []interface{}:
+		return len(x) > 0
+	case map[string]interface{}:
+		return len(x) > 0
+	}
+	return true
+}
+
 func evaluateOutput(output map[string]interface{}, ctx map[string]interface{}) map[string]interface{} {
 	if len(output) == 0 {
 		return nil
@@ -1414,4 +1644,385 @@ func evaluateOutput(output map[string]interface{}, ctx map[string]interface{}) m
 		return m
 	}
 	return nil
+}
+
+// --- P0: join-task refresh logic -------------------------------------------
+// Ported from mistral/engine/task_handler.py:
+//   _check_affected_tasks → scheduleRefreshTaskState → refreshTaskState
+
+// checkAffectedTasks examines the completed task and wakes any waiting join
+// tasks that are transitively downstream. Called by OnActionComplete and
+// advanceWorkflow after the main workflow advance is done.
+func (e *DefaultEngine) checkAffectedTasks(taskEx *db.TaskExecution, wfEx *db.WorkflowExecution) {
+	if taskEx == nil || wfEx == nil {
+		return
+	}
+	// Workflow already terminal — nothing to refresh.
+	if states.IsCompleted(wfEx.State) || states.IsPaused(wfEx.State) {
+		return
+	}
+	// Task not terminal — shouldn't happen here, but guard anyway.
+	if !states.IsCompleted(taskEx.State) {
+		return
+	}
+	// Must have a scheduler wired in to defer the refresh.
+	if e.sched == nil {
+		return
+	}
+
+	wfDef, _ := e.store.WorkflowDefinitions().Get(wfEx.WorkflowID)
+	if wfDef == nil {
+		return
+	}
+	wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
+	if wfSpec == nil {
+		return
+	}
+	tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
+
+	ctrl := workflow.GetController(wfEx, wfSpec, tasks)
+	affectedIDs := ctrl.FindIndirectlyAffectedTasks(taskEx.Name)
+	if len(affectedIDs) == 0 {
+		return
+	}
+
+	for _, id := range affectedIDs {
+		e.scheduleRefreshTaskState(id)
+	}
+	log.Printf("checkAffectedTasks: task %s completed → scheduled refresh for %d join task(s)",
+		taskEx.Name, len(affectedIDs))
+}
+
+// scheduleRefreshTaskState schedules a refresh for a single join taskEx via
+// the shared scheduler with key-based dedup. Multiple upstream completions
+// that target the same join task collapse to one scheduled job.
+func (e *DefaultEngine) scheduleRefreshTaskState(taskExID string) {
+	if taskExID == "" || e.sched == nil {
+		return
+	}
+	dedupKey := "th_r_t_s-" + taskExID
+	if _, err := e.sched.ScheduleWithKey(
+		scheduler.JobRefreshTaskState,
+		map[string]interface{}{"task_ex_id": taskExID},
+		0, // fire as soon as scheduler picks it up
+		dedupKey,
+	); err != nil {
+		log.Printf("scheduleRefreshTaskState: failed to schedule for %s: %v", taskExID, err)
+	}
+}
+
+// refreshTaskState is the scheduler callback. It re-evaluates the join task's
+// logical state and either continues it, completes it with ERROR, or no-ops
+// if still waiting. Mirrors Python task_handler._refresh_task_state.
+func (e *DefaultEngine) refreshTaskState(taskExID string) {
+	taskEx, err := e.store.TaskExecutions().Get(taskExID)
+	if err != nil || taskEx == nil {
+		log.Printf("refreshTaskState: taskEx %s not found: %v", taskExID, err)
+		return
+	}
+
+	wfEx, err := e.store.WorkflowExecutions().Get(taskEx.WorkflowExecutionID)
+	if err != nil || wfEx == nil {
+		return
+	}
+	if states.IsCompleted(wfEx.State) || states.IsPaused(wfEx.State) {
+		return
+	}
+
+	wfDef, _ := e.store.WorkflowDefinitions().Get(wfEx.WorkflowID)
+	if wfDef == nil {
+		return
+	}
+	wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
+	if wfSpec == nil {
+		return
+	}
+	tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
+
+	ctrl := workflow.GetController(wfEx, wfSpec, tasks)
+	logical, err := ctrl.GetLogicalTaskState(taskEx)
+	if err != nil {
+		log.Printf("refreshTaskState: GetLogicalTaskState failed for %s: %v", taskEx.Name, err)
+		return
+	}
+
+	switch logical.State {
+	case states.RUNNING:
+		log.Printf("refreshTaskState: join task %s → RUNNING (dependencies met) → continueTask", taskEx.Name)
+		e.continueTask(taskEx, wfEx)
+	case states.ERROR:
+		log.Printf("refreshTaskState: join task %s → ERROR (dependencies unresolvable)", taskEx.Name)
+		taskEx.State = states.ERROR
+		taskEx.StateInfo = logical.StateInfo
+		taskEx.Processed = true
+		_ = e.store.TaskExecutions().Update(taskEx)
+		e.advanceWorkflow(wfEx.ID, taskEx.ID)
+	default:
+		// Still WAITING — nothing to do.
+		log.Printf("refreshTaskState: join task %s still WAITING (cardinality=%d) — no-op",
+			taskEx.Name, logical.Cardinality)
+	}
+}
+
+// continueTask resets a task to RUNNING state and re-enters StartTask so a
+// new ActionExecution is created and dispatched. Mirrors Python
+// task_handler.continue_task called from _refresh_task_state.
+func (e *DefaultEngine) continueTask(taskEx *db.TaskExecution, wfEx *db.WorkflowExecution) {
+	taskEx.State = states.RUNNING
+	taskEx.StateInfo = ""
+	taskEx.Processed = false
+	_ = e.store.TaskExecutions().Update(taskEx)
+
+	if err := e.StartTask(context.Background(), taskEx.ID, false, false, nil, false, false); err != nil {
+		log.Printf("continueTask: StartTask(%s) failed: %v", taskEx.ID, err)
+	}
+}
+
+// ================================================================
+// P2.1: on_action_update — subworkflow PAUSE/RUNNING cascade to parent workflow.
+// Ported from Python mistral/engine/task_handler.py:_on_action_update.
+//
+// Called externally whenever an ActionExecution transitions to a non-terminal
+// state (e.g. PAUSE, RUNNING). The logic is:
+//   - action_ex.state = PAUSED → pause the parent workflow
+//   - action_ex.state = RUNNING → resume parent workflow BUT only if no other
+//     sibling task in the parent is still PAUSED (keep parent paused)
+//
+// In Go this is invoked by the API layer when clients explicitly pause/resume
+// a subworkflow (child WorkflowExecution). The PAUSE/RESUME API calls mutate
+// childWfEx.state; callers should then invoke OnActionUpdate(childWfEx) which
+// reads childWfEx.TaskExecutionID (the parent's taskEx row) and walks to the
+// parent wfEx to apply cascade rules.
+// ================================================================
+func (e *DefaultEngine) OnActionUpdate(wfExID string) error {
+	childWfEx, err := e.store.WorkflowExecutions().Get(wfExID)
+	if err != nil || childWfEx == nil {
+		return fmt.Errorf("OnActionUpdate: child wfEx %s not found: %v", wfExID, err)
+	}
+
+	taskEx, err := e.store.TaskExecutions().Get(childWfEx.TaskExecutionID)
+	if err != nil || taskEx == nil {
+		// Not a subworkflow (childWfEx has no parent taskEx) → nothing to cascade.
+		return nil
+	}
+
+	parentWfEx, err := e.store.WorkflowExecutions().Get(taskEx.WorkflowExecutionID)
+	if err != nil || parentWfEx == nil {
+		return nil
+	}
+
+	log.Printf("OnActionUpdate: child wfEx %s state=%s → parent taskEx %s state=%s",
+		childWfEx.ID, childWfEx.State, taskEx.ID, parentWfEx.State)
+
+	if states.IsPaused(childWfEx.State) {
+		// Cascade: parent workflow pauses.
+		if !states.IsPaused(parentWfEx.State) {
+			parentWfEx.State = states.PAUSED
+			parentWfEx.StateInfo = fmt.Sprintf("Paused by subworkflow %s (task %s)", childWfEx.ID, taskEx.Name)
+			if err := e.store.WorkflowExecutions().Update(parentWfEx); err != nil {
+				return err
+			}
+			log.Printf("OnActionUpdate: parent wfEx %s → PAUSED (child wfEx %s)", parentWfEx.ID, childWfEx.ID)
+		}
+		// Parent task stays RUNNING_DELAYED-ish — mark as PAUSED so dispatcher skips.
+		if !states.IsPausedOrCompleted(taskEx.State) {
+			taskEx.State = states.PAUSED
+			_ = e.store.TaskExecutions().Update(taskEx)
+		}
+		return nil
+	}
+
+	if states.IsRunning(childWfEx.State) {
+		// Cascade: check whether parent has ANY other PAUSED taskEx.
+		// If yes → parent stays PAUSED (multi-subworkflow mutual-cascade rule).
+		// If no  → resume parent workflow.
+		tasks, _ := e.store.TaskExecutions().List(parentWfEx.ID, "")
+		hasOtherPaused := false
+		for _, t := range tasks {
+			if t.ID != taskEx.ID && states.IsPaused(t.State) {
+				hasOtherPaused = true
+				break
+			}
+		}
+		if !hasOtherPaused && states.IsPaused(parentWfEx.State) {
+			// Resume taskEx first if it's PAUSED, then resume parent wfEx.
+			if states.IsPaused(taskEx.State) {
+				taskEx.State = states.RUNNING_DELAYED
+				_ = e.store.TaskExecutions().Update(taskEx)
+			}
+			return e.ResumeWorkflow(context.Background(), parentWfEx.ID, nil)
+		}
+		// Other siblings still paused → just resume this specific taskEx.
+		if states.IsPaused(taskEx.State) {
+			taskEx.State = states.RUNNING_DELAYED
+			_ = e.store.TaskExecutions().Update(taskEx)
+		}
+	}
+	return nil
+}
+
+// ================================================================
+// D3: DispatchAction — executor integration.
+//
+// Ported from Python mistral/engine/default_engine.py:_run_action.
+// The Go engine originally left action execution entirely to external test
+// drivers (tests run the action and invoke OnActionComplete). This method
+// closes the loop: given an ActionExecution ID, resolve the matching action
+// from the registry, run it through the default executor, and feed the
+// result back into OnActionComplete. This allows callers (tests, API
+// clients) to fire an action without manual orchestration.
+// ================================================================
+func (e *DefaultEngine) DispatchAction(ctx context.Context, actionExID string) (*db.ActionExecution, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	actionEx, err := e.store.ActionExecutions().Get(actionExID)
+	if err != nil || actionEx == nil {
+		return nil, fmt.Errorf("DispatchAction: actionEx %s not found", actionExID)
+	}
+	if !states.IsRunning(actionEx.State) {
+		return actionEx, nil // already terminal or waiting
+	}
+
+	action := actions.NewActionRegistry()
+	d, ok := action.Get(actionEx.Name)
+	if !ok {
+		// No such action — fail gracefully rather than panic.
+		if err := e.OnActionComplete(ctx, actionExID, &db.Result{Error: fmt.Errorf("unknown action %q", actionEx.Name)}, false); err != nil {
+			return nil, err
+		}
+		return e.store.ActionExecutions().Get(actionExID)
+	}
+	inst := d.Factory()
+
+	// Pull timeout from parent task's policies, if configured.
+	var timeoutDur time.Duration
+	taskEx, _ := e.store.TaskExecutions().Get(actionEx.TaskExecutionID)
+	if taskEx != nil {
+		wfDef, _ := e.store.WorkflowDefinitions().Get(taskEx.WorkflowID)
+		if wfDef != nil {
+			wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
+			if wfSpec != nil {
+				ts := wfSpec.GetTask(taskEx.Name)
+				if ts != nil {
+					if p := ts.GetPolicies(); p != nil {
+						if td := p.GetTimeout(); td != nil {
+							switch v := td.(type) {
+							case float64:
+								timeoutDur = time.Duration(int(v)) * time.Second
+							case int:
+								timeoutDur = time.Duration(v) * time.Second
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	exec := executors.GetDefaultExecutor()
+	input := actionEx.Input
+	if input == nil {
+		input = map[string]interface{}{}
+	}
+	result, runErr := exec.RunAction(inst, actionEx.ID, false, input, "", false, timeoutDur)
+	if runErr != nil {
+		// Executor returned Go error — wrap in db.Result{Error: ...}.
+		result = &db.Result{Error: runErr}
+	}
+
+	if err := e.OnActionComplete(ctx, actionExID, result, false); err != nil {
+		return nil, err
+	}
+	return e.store.ActionExecutions().Get(actionExID)
+}
+
+// ================================================================
+// _check_and_fix_integrity — crash-recovery sweep for stuck RUNNING tasks.
+// Ported from Python mistral/engine/workflow_handler.py ~line 110.
+//
+// The pattern: a workflow may be left with taskEx.State=RUNNING but NO
+// actionEx=RUNNING (engine crashed in between). The integrity check fires
+// periodically, finds these stuck rows, and triggers OnActionComplete on
+// the most recently finished child so the task can resume.
+//
+// This handler also reschedules itself with a 120-second delay — mirroring
+// Python's `_schedule_check_and_fix_integrity(wf_ex, delay=120)`. The check
+// stops rescheduling once the workflow reaches a terminal state.
+// ================================================================
+
+const integrityCheckDelay = 120 * time.Second
+
+// scheduleIntegrityCheck queues the first (or next) integrity sweep for wfEx.
+func (e *DefaultEngine) scheduleIntegrityCheck(wfExID string) {
+	if wfExID == "" {
+		return
+	}
+	if e.sched == nil {
+		return // no scheduler configured (test mode)
+	}
+	args := map[string]interface{}{"wf_ex_id": wfExID}
+	if _, err := e.sched.ScheduleWithKey(
+		scheduler.JobIntegrityCheck,
+		args,
+		integrityCheckDelay,
+		"",
+	); err != nil {
+		log.Printf("integrity_check: scheduler.Schedule failed: %v", err)
+	}
+}
+
+func (e *DefaultEngine) checkIntegrity(ctx context.Context, wfExID string) {
+	wfEx, err := e.store.WorkflowExecutions().Get(wfExID)
+	if err != nil || wfEx == nil {
+		return
+	}
+
+	// Stop rescheduling once workflow is terminal.
+	if states.IsCompleted(wfEx.State) {
+		return
+	}
+
+	// Reschedule ourselves FIRST so that even if we crash mid-sweep, the
+	// next tick will pick up where we left off.
+	e.scheduleIntegrityCheck(wfExID)
+
+	// Find RUNNING task executions.
+	taskExes, _ := e.store.TaskExecutions().List(wfExID, states.RUNNING)
+	for _, taskEx := range taskExes {
+		actionExes, _ := e.store.ActionExecutions().List(taskEx.ID, "")
+		if len(actionExes) == 0 {
+			continue
+		}
+
+		// Is every actionEx terminal? If yes, the task is stuck.
+		allFinished := true
+		var lastFinished *db.ActionExecution
+		var lastFinishedAt time.Time
+		for _, ae := range actionExes {
+			if !states.IsCompleted(ae.State) {
+				allFinished = false
+				break
+			}
+			if ae.UpdatedAt.After(lastFinishedAt) {
+				lastFinishedAt = ae.UpdatedAt
+				lastFinished = ae
+			}
+		}
+		if !allFinished {
+			continue
+		}
+
+		// All children terminal → trigger OnActionComplete on the most
+		// recently finished one to advance task state.
+		if lastFinished == nil {
+			continue
+		}
+		log.Printf("integrity_check: recovering stuck taskEx %s (wfEx %s) via child actionEx %s",
+			taskEx.ID, wfEx.ID, lastFinished.ID)
+
+		if err := e.OnActionComplete(ctx, lastFinished.ID, nil, false); err != nil {
+			log.Printf("integrity_check: OnActionComplete failed: %v", err)
+		}
+	}
 }

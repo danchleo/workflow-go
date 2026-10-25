@@ -34,8 +34,10 @@ type JobType string
 // Built-in job types that engine registers.
 const (
 	JobFailIfIncomplete JobType = "fail_if_incomplete"
-	JobContinueTask     JobType = "continue_task" // retry delayed → re-enter StartTask
-	JobCompleteTask     JobType = "complete_task" // wait-after delayed → set final state + ContinueWorkflow
+	JobContinueTask     JobType = "continue_task"      // retry delayed → re-enter StartTask
+	JobCompleteTask     JobType = "complete_task"      // wait-after delayed → set final state + ContinueWorkflow
+	JobRefreshTaskState JobType = "refresh_task_state" // join wakeup → re-check logical state
+	JobIntegrityCheck   JobType = "integrity_check"    // crash-recovery sweep for stuck RUNNING tasks
 )
 
 // JobHandlerRegistry maps JobType → handler function.
@@ -249,13 +251,17 @@ func (s *DefaultScheduler) ScheduleWithKey(jobType JobType, args map[string]inte
 	return id, nil
 }
 
-// HasScheduledJobs returns true if a pending job exists for the given key.
-// Empty key → "any pending job at all".
-// Checks in-memory first (fast path), then DB (crash-recovery path).
+// HasScheduledJobs returns true if a pending (non-processing) job exists for the
+// given key. Empty key → "any pending job at all".
+// Captured jobs (captured_at != nil) are excluded — they are currently being
+// processed by some scheduler instance and should not be double-scheduled.
+// Matches Python's has_scheduled_jobs(processing=False).
 func (s *DefaultScheduler) HasScheduledJobs(key string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// In-memory heap only contains non-captured jobs — heapDispatcher hasn't
+	// captured them yet (it captures via DB on pop).
 	if key == "" {
 		if s.heap.Len() > 0 {
 			return true
@@ -266,13 +272,15 @@ func (s *DefaultScheduler) HasScheduledJobs(key string) bool {
 		}
 	}
 
-	// DB fallback — covers: crash (heap+keyIndex lost), or another scheduler
-	// scheduled this job.
+	// DB fallback — also skip captured jobs (processing=true).
 	jobs, err := s.store.ScheduledJobs().List()
 	if err != nil {
 		return false
 	}
 	for _, j := range jobs {
+		if j.CapturedAt != nil {
+			continue // being processed — skip
+		}
 		if key == "" {
 			return true
 		}

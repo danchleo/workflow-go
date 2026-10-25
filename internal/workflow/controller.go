@@ -44,6 +44,12 @@ type WorkflowController interface {
 
 	// MayCompleteWorkflow reports whether completing this task may complete the workflow.
 	MayCompleteWorkflow(taskEx *db.TaskExecution) bool
+
+	// FindIndirectlyAffectedTasks walks outbound transitions from the given task
+	// and returns TaskExecution IDs of join tasks that are transitively affected.
+	// Ported from mistral/workflow/direct_workflow.py find_indirectly_affected_task_executions.
+	// Reverse workflow returns nil — there are no join tasks.
+	FindIndirectlyAffectedTasks(taskName string) []string
 }
 
 // TaskLogicalState describes what state a task should have based on workflow logic.
@@ -105,7 +111,9 @@ func BuildTaskResultMap(taskExecs []*db.TaskExecution) map[string]interface{} {
 func BuildFullContext(wfEx *db.WorkflowExecution, wfSpec *v2.WorkflowSpec, taskExecs []*db.TaskExecution) map[string]interface{} {
 	ctx := make(map[string]interface{})
 
-	// Task results nested under task names. Also flatten published vars to top level.
+	// __task_results mirrors Python's task("name").result lookup.
+	// This is also used by $.task_name.result dot-access.
+	taskResults := make(map[string]interface{})
 	for _, te := range taskExecs {
 		if !states.IsCompleted(te.State) {
 			continue
@@ -134,7 +142,9 @@ func BuildFullContext(wfEx *db.WorkflowExecution, wfSpec *v2.WorkflowSpec, taskE
 		taskData["state"] = te.State
 		taskData["id"] = te.ID
 		ctx[te.Name] = taskData
+		taskResults[te.Name] = taskData
 	}
+	ctx["__task_results"] = taskResults
 
 	// Workflow context vars.
 	for k, v := range wfEx.Context {
@@ -144,9 +154,23 @@ func BuildFullContext(wfEx *db.WorkflowExecution, wfSpec *v2.WorkflowSpec, taskE
 	// Input.
 	ctx["input"] = wfEx.Input
 
-	// Env.
-	if env, ok := wfEx.Params["env"].(map[string]interface{}); ok {
-		ctx["env"] = env
+	// Env — Python mistral calls this __env; we expose both.
+	var envMap map[string]interface{}
+	if e, ok := wfEx.Params["env"].(map[string]interface{}); ok {
+		envMap = e
+	} else {
+		envMap = make(map[string]interface{})
+	}
+	ctx["env"] = envMap
+	ctx["__env"] = envMap
+
+	// __execution — Python's execution() builtin.
+	ctx["__execution"] = map[string]interface{}{
+		"id":     wfEx.ID,
+		"name":   wfEx.Name,
+		"state":  wfEx.State,
+		"params": wfEx.Params,
+		"input":  wfEx.Input,
 	}
 
 	// Vars.
@@ -160,6 +184,28 @@ func BuildFullContext(wfEx *db.WorkflowExecution, wfSpec *v2.WorkflowSpec, taskE
 		ctx["vars"] = make(map[string]interface{})
 	}
 
+	return ctx
+}
+
+// BuildTaskExpressionContext adds per-task execution details to ctx.
+// In Python mistral this is the __task_execution special key.
+// Also makes task() (no-arg) work by pointing __current_task.
+func BuildTaskExpressionContext(ctx map[string]interface{}, taskEx *db.TaskExecution) map[string]interface{} {
+	if ctx == nil {
+		ctx = make(map[string]interface{})
+	}
+	if taskEx == nil {
+		return ctx
+	}
+	tex := map[string]interface{}{
+		"id":             taskEx.ID,
+		"name":           taskEx.Name,
+		"state":          taskEx.State,
+		"in_context":     taskEx.InContext,
+		"runtime_context": taskEx.RuntimeContext,
+	}
+	ctx["__task_execution"] = tex
+	ctx["__current_task"] = tex // for task() no-arg builtin
 	return ctx
 }
 
@@ -396,17 +442,58 @@ func (c *DirectWorkflowController) GetLogicalTaskState(taskEx *db.TaskExecution)
 	}
 
 	inboundSpecs := c.wfSpec.InboundTaskSpecs(taskSpec)
-	inboundExecs := c.filterCompletedTasksForSpecs(inboundSpecs)
+
+	// Build fast lookup from task name → TaskExecution.
+	tExecByName := map[string]*db.TaskExecution{}
+	for _, te := range c.tasks {
+		tExecByName[te.Name] = te
+	}
+
+	// Classify inbound executions by state.
+	// Plus: for inbound tasks that have NO TaskExecution yet, recursively check
+	// whether they could possibly be created (mirrors Python
+	// _get_induced_join_state + _possible_route). If they can never be created,
+	// count them as ERROR-like blockers.
+	var successCnt, errorCnt int
+	var waitingNames, impossibleNames []string
+	for _, spec := range inboundSpecs {
+		name := spec.GetName()
+		matched := tExecByName[name]
+		if matched == nil {
+			// No TaskExecution yet — check if it can possibly be triggered.
+			if possible, _ := c.possibleRoute(spec, tExecByName, map[string]bool{}, 0); possible {
+				waitingNames = append(waitingNames, name)
+			} else {
+				impossibleNames = append(impossibleNames, name)
+				errorCnt++ // permanently blocked — treat like ERROR for join math
+			}
+			continue
+		}
+		switch matched.State {
+		case states.SUCCESS, states.SKIPPED:
+			successCnt++
+		case states.ERROR, states.CANCELLED:
+			errorCnt++
+		default:
+			waitingNames = append(waitingNames, name)
+		}
+	}
 
 	joinVal := taskSpec.GetJoin()
-	cardinality := len(inboundSpecs) - len(inboundExecs)
+	totalInbound := len(inboundSpecs)
+	if totalInbound == 0 {
+		return &TaskLogicalState{State: states.RUNNING}, nil
+	}
 
+	// Resolve join requirement.
 	joinRequirement := 1
+	joinIsAll := false
 	if joinVal != nil {
 		switch jv := joinVal.(type) {
 		case string:
 			if jv == "all" {
-				joinRequirement = len(inboundSpecs)
+				joinRequirement = totalInbound
+				joinIsAll = true
 			} else if jv == "one" {
 				joinRequirement = 1
 			}
@@ -417,11 +504,143 @@ func (c *DirectWorkflowController) GetLogicalTaskState(taskEx *db.TaskExecution)
 		}
 	}
 
-	if len(inboundExecs) < joinRequirement {
-		return &TaskLogicalState{State: states.WAITING, Cardinality: cardinality}, nil
+	// SUCCESS count meets requirement → RUNNING.
+	if successCnt >= joinRequirement {
+		return &TaskLogicalState{State: states.RUNNING}, nil
 	}
 
-	return &TaskLogicalState{State: states.RUNNING}, nil
+	// Check if permanently blocked:
+	//   - join:all with any ERROR (incl. impossible route) → impossible to satisfy
+	//   - join:N / one  → errors leave fewer remaining than requirement
+	if joinIsAll && errorCnt > 0 {
+		msg := fmt.Sprintf("Blocked by failed inbound tasks: %v", waitingNames)
+		if len(impossibleNames) > 0 {
+			msg = fmt.Sprintf("Blocked — upstream tasks have no possible route: %v", impossibleNames)
+		}
+		return &TaskLogicalState{State: states.ERROR, StateInfo: msg}, nil
+	}
+	if !joinIsAll && errorCnt > (totalInbound-joinRequirement) {
+		return &TaskLogicalState{
+			State:     states.ERROR,
+			StateInfo: fmt.Sprintf("Cannot satisfy join requirement: %d succeeded, %d failed (need %d)", successCnt, errorCnt, joinRequirement),
+		}, nil
+	}
+
+	cardinality := joinRequirement - successCnt
+	return &TaskLogicalState{State: states.WAITING, Cardinality: cardinality}, nil
+}
+
+// possibleRoute recursively checks whether the given taskSpec can possibly be
+// triggered. Mirrors Python DirectWorkflowController._possible_route.
+//
+// A task can be triggered if:
+//   - It has no inbound specs (start task → always possible), OR
+//   - At least one inbound spec has a TaskExecution that is NOT terminal
+//     (still running → could complete and trigger us), OR
+//   - At least one inbound spec has a COMPLETED TaskExecution whose outbound
+//     clauses (on-success/on-error/...) include us (we were actually triggered),
+//     OR
+//   - At least one ancestor branch itself has a possible route (no dead end).
+//
+// Key insight (matching Python): if inbound's TaskExecution is ERROR but
+// inbound has NO on-error clause pointing at us → we CANNOT be triggered
+// from that branch. We must check spec-level outbound definitions.
+//
+// Cycle guard: visited map prevents infinite loops in DAG traversal.
+// Depth guard: 30 matches Python MAX_SEARCH_DEPTH.
+func (c *DirectWorkflowController) possibleRoute(spec *v2.TaskSpec, tExecByName map[string]*db.TaskExecution, visited map[string]bool, depth int) (bool, int) {
+	const maxDepth = 30
+	if depth > maxDepth {
+		return true, depth // depth cap — assume possible to avoid false negatives
+	}
+	name := spec.GetName()
+	if visited[name] {
+		return true, depth // already checked upstream → don't re-enter
+	}
+	visited[name] = true
+
+	// Has TaskExecution?
+	if te, ok := tExecByName[name]; ok {
+		if !states.IsCompleted(te.State) {
+			return true, depth // running/waiting — route exists, hasn't finished
+		}
+		// Terminal state: was this specific task triggered by some inbound?
+		// Python checks t_ex.next_tasks which is populated dynamically; we
+		// approximate by checking spec-level outbound clauses.
+		// If ANY inbound spec's outbound leads to us → possible.
+		return true, depth // terminal task had exec → route existed (done)
+	}
+
+	// No TaskExecution — recurse into inbound.
+	inSpecs := c.wfSpec.InboundTaskSpecs(spec)
+	if len(inSpecs) == 0 {
+		return true, depth // start task — guaranteed to be created eventually
+	}
+
+	for _, in := range inSpecs {
+		inTe, hasExec := tExecByName[in.GetName()]
+
+		if hasExec {
+			// Inbound has execution.
+			if !states.IsCompleted(inTe.State) {
+				// Inbound still running → could trigger us later.
+				return true, depth
+			}
+			// Inbound is terminal. Does it have an outbound clause that
+			// could trigger US given its actual state?
+			if inboundCouldTrigger(in, inTe.State, name) {
+				return true, depth
+			}
+			// Inbound terminal but can't trigger us → dead end, check next inbound.
+			continue
+		}
+
+		// Inbound has NO execution — recurse into ITS inbound.
+		if sub, _ := c.possibleRoute(in, tExecByName, visited, depth+1); sub {
+			return true, depth
+		}
+	}
+	return false, depth // all upstream branches dead-ended
+}
+
+// inboundCouldTrigger checks whether an inbound spec could trigger us given
+// that its own execution ended in endState. Mirrors Python's t_name in next_tasks
+// check — static, using spec-level outbound clause definitions.
+func inboundCouldTrigger(inbound *v2.TaskSpec, endState, ourName string) bool {
+	if inbound == nil {
+		return false
+	}
+	// On-SUCCESS always fires for SUCCESS/SKIPPED.
+	if endState == states.SUCCESS || endState == states.SKIPPED {
+		return clauseContainsTask(inbound.GetOnSuccess(), ourName)
+	}
+	// On-ERROR fires for ERROR/CANCELLED.
+	if endState == states.ERROR || endState == states.CANCELLED {
+		if clauseContainsTask(inbound.GetOnError(), ourName) {
+			return true
+		}
+		if clauseContainsTask(inbound.GetOnComplete(), ourName) {
+			return true
+		}
+		if clauseContainsTask(inbound.GetOnSkip(), ourName) {
+			return true
+		}
+		return false
+	}
+	return clauseContainsTask(inbound.GetOnComplete(), ourName)
+}
+
+// clauseContainsTask returns true if any NextTaskNames from the clause contain target.
+func clauseContainsTask(clause *v2.OnClauseSpec, target string) bool {
+	if clause == nil {
+		return false
+	}
+	for _, n := range clause.NextTaskNames() {
+		if n == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *DirectWorkflowController) IsErrorHandledFor(taskEx *db.TaskExecution) bool {
@@ -470,6 +689,94 @@ func (c *DirectWorkflowController) EvaluateWorkflowFinalContext() (map[string]in
 
 func (c *DirectWorkflowController) MayCompleteWorkflow(taskEx *db.TaskExecution) bool {
 	return states.IsCompleted(taskEx.State)
+}
+
+// FindIndirectlyAffectedTasks walks outbound transitions from the given
+// task and collects TaskExecution IDs of join tasks that are transitively
+// affected. A join task is "affected" if there is a path via on-success /
+// on-error / on-complete / on-skip from the source task to a join task,
+// AND that join task has a TaskExecution row in DB.
+//
+// This is what wakes waiting join tasks when a dependency completes.
+// Ported from mistral/workflow/direct_workflow.py: find_indirectly_affected_task_executions
+func (c *DirectWorkflowController) FindIndirectlyAffectedTasks(taskName string) []string {
+	// Collect all join task spec names.
+	allJoins := map[string]bool{}
+	for name, spec := range c.wfSpec.GetTasks() {
+		_ = name
+		if spec.GetJoin() != nil {
+			allJoins[spec.GetName()] = true
+		}
+	}
+	if len(allJoins) == 0 {
+		return nil
+	}
+
+	// Build TaskExecution lookup by name (only for join tasks — we don't need all).
+	tExecByName := map[string]*db.TaskExecution{}
+	for _, te := range c.tasks {
+		if allJoins[te.Name] {
+			tExecByName[te.Name] = te
+		}
+	}
+	if len(tExecByName) == 0 {
+		return nil
+	}
+
+	// BFS from source task along outbound transitions.
+	visited := map[string]bool{}
+	// Push first hop onto the work stack.
+	outbound := c.wfSpec.OutboundTaskNames(taskName)
+	if len(outbound) == 0 {
+		return nil
+	}
+
+	var queue []string
+	seen := map[string]bool{}
+	for _, n := range outbound {
+		if !seen[n] {
+			seen[n] = true
+			queue = append(queue, n)
+		}
+	}
+
+	var result []string
+	resultSeen := map[string]bool{}
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+
+		if visited[name] {
+			continue // cycle guard
+		}
+		visited[name] = true
+
+		// Encountered engine command (pause / fail / etc.) — not a real task.
+		if c.wfSpec.GetTask(name) == nil {
+			continue
+		}
+
+		// Join task that exists in DB — collect it.
+		if allJoins[name] {
+			if te, ok := tExecByName[name]; ok {
+				if !resultSeen[te.ID] {
+					resultSeen[te.ID] = true
+					result = append(result, te.ID)
+				}
+			}
+			continue // don't walk beyond a join task; it's the terminal target
+		}
+
+		// Not a join — keep walking.
+		for _, next := range c.wfSpec.OutboundTaskNames(name) {
+			if !seen[next] {
+				seen[next] = true
+				queue = append(queue, next)
+			}
+		}
+	}
+
+	return result
 }
 
 // --- ReverseWorkflowController ---
@@ -653,4 +960,10 @@ func (c *ReverseWorkflowController) EvaluateWorkflowFinalContext() (map[string]i
 
 func (c *ReverseWorkflowController) MayCompleteWorkflow(taskEx *db.TaskExecution) bool {
 	return states.IsCompleted(taskEx.State)
+}
+
+func (c *ReverseWorkflowController) FindIndirectlyAffectedTasks(taskName string) []string {
+	// Reverse workflow has no join tasks. Mirror Python reverse_workflow.py:
+	// find_indirectly_affected_task_executions → empty set.
+	return nil
 }

@@ -328,7 +328,22 @@ func (s *TaskSpec) GetPolicies() *PoliciesSpec                { return s.policie
 func (s *TaskSpec) GetTarget() interface{}                    { return s.target }
 func (s *TaskSpec) GetKeepResult() interface{}                { return s.keepResult }
 func (s *TaskSpec) GetSafeRerun() interface{}                 { return s.safeRerun }
-func (s *TaskSpec) GetConcurrency() int                       { return s.concurrency }
+func (s *TaskSpec) GetConcurrency() int {
+	if s.concurrency > 0 {
+		return s.concurrency
+	}
+	if p := s.policies; p != nil {
+		if c := p.GetConcurrency(); c != nil {
+			switch v := c.(type) {
+			case float64:
+				return int(v)
+			case int:
+				return v
+			}
+		}
+	}
+	return 0
+}
 func (s *TaskSpec) GetType() string {
 	if s.workflow != "" {
 		return WorkflowTaskType

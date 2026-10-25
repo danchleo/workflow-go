@@ -45,6 +45,7 @@ func NewSQLStore(dsn string) (Store, error) {
 	}
 	if err := gormDB.AutoMigrate(
 		&gWorkflowDef{}, &gActionDef{}, &gWfEx{}, &gTaskEx{}, &gActEx{}, &gEnv{}, &gCronTrigger{}, &gScheduledJob{},
+		&gWorkbook{}, &gDynamicActionDef{}, &gEventTrigger{}, &gResourceMember{}, &gNamedLock{}, &gCodeSource{}, &gMistralMetrics{},
 	); err != nil {
 		return nil, fmt.Errorf("autmigrate: %w", err)
 	}
@@ -66,6 +67,14 @@ func (s *sqlStore) ActionExecutions() ActionExecutionStore       { return &sqlAc
 func (s *sqlStore) Environments() EnvironmentStore               { return &sqlEnvStoreSQL{db: s.db} }
 func (s *sqlStore) ScheduledJobs() ScheduledJobStore             { return &sqlScheduledJobStore{db: s.db} }
 func (s *sqlStore) CronTriggers() CronTriggerStore               { return &sqlCronTriggerStore{db: s.db} }
+func (s *sqlStore) Workbooks() WorkbookStore                     { return &sqlWorkbookStore{db: s.db} }
+func (s *sqlStore) DynamicActionDefinitions() DynamicActionDefinitionStore {
+	return &sqlDynamicActionDefStore{db: s.db}
+}
+func (s *sqlStore) EventTriggers() EventTriggerStore     { return &sqlEventTriggerStore{db: s.db} }
+func (s *sqlStore) ResourceMembers() ResourceMemberStore { return &sqlResourceMemberStore{db: s.db} }
+func (s *sqlStore) CodeSources() CodeSourceStore         { return &sqlCodeSourceStore{db: s.db} }
+func (s *sqlStore) MistralMetrics() MistralMetricsStore  { return &sqlMistralMetricsStore{db: s.db} }
 
 func (s *sqlStore) AcquireLock(name string) error {
 	// Use an in-process named channel — good enough for :memory: SQLite
@@ -126,117 +135,58 @@ func jsonUnmarshal(s string, out interface{}) {
 	_ = json.Unmarshal([]byte(s), out)
 }
 
-// --- GORM models ---
+// --- Blob-pattern GORM models (defers detailed mapping to sql_stores.go) ---
 
-type gWorkflowDefinition struct {
-	ID          string `gorm:"primaryKey"`
-	Name        string `gorm:"index"`
-	Description string
-	Spec        string // JSON text
-	ProjectID   string `gorm:"index"`
-	Namespace   string
-	CreatedAt   string
-	UpdatedAt   string
+type gWorkbook struct {
+	ID   string `gorm:"primaryKey"`
+	Name string `gorm:"index"`
+	Data string
 }
 
-func (gWorkflowDefinition) TableName() string { return "workflow_definitions" }
+func (gWorkbook) TableName() string { return "workbooks" }
 
-type gActionDefinition struct {
-	ID        string `gorm:"primaryKey"`
-	Name      string `gorm:"index"`
-	Spec      string
-	ProjectID string `gorm:"index"`
-	Namespace string
-	CreatedAt string
-	UpdatedAt string
+type gDynamicActionDef struct {
+	ID   string `gorm:"primaryKey"`
+	Name string `gorm:"index"`
+	Data string
 }
 
-func (gActionDefinition) TableName() string { return "action_definitions" }
+func (gDynamicActionDef) TableName() string { return "dynamic_action_definitions" }
 
-type gWorkflowExecution struct {
-	ID                string `gorm:"primaryKey"`
-	WorkflowName      string
-	WorkflowID        string `gorm:"index"`
-	WorkflowNamespace string
-	Description       string
-	State             string `gorm:"index"`
-	StateInfo         string
-	Input             string // JSON
-	Output            string // JSON
-	Params            string // JSON
-	Context           string // JSON
-	ProjectID         string `gorm:"index"`
-	Scope             string `gorm:"index"`
-	RootExecutionID   string
-	TaskExecutionID   string
-	CreatedAt         string
-	UpdatedAt         string `gorm:"index"`
+type gEventTrigger struct {
+	ID   string `gorm:"primaryKey"`
+	Name string `gorm:"index"`
+	Data string
 }
 
-func (gWorkflowExecution) TableName() string { return "workflow_executions" }
+func (gEventTrigger) TableName() string { return "event_triggers" }
 
-type gTaskExecution struct {
-	ID                  string `gorm:"primaryKey"`
-	Name                string
-	WorkflowExecutionID string `gorm:"index"`
-	WorkflowName        string
-	WorkflowNamespace   string
-	WorkflowID          string `gorm:"index"`
-	Spec                string // JSON
-	ActionSpec          string // JSON — Python action_spec (action inline spec)
-	State               string `gorm:"index"`
-	StateInfo           string
-	InContext           string // JSON
-	Input               string // JSON
-	Output              string // JSON
-	Published           string // JSON
-	RuntimeContext      string // JSON
-	UniqueKey           string `gorm:"uniqueIndex"` // Python UniqueConstraint('unique_key')
-	Type                string
-	Processed           bool
-	HasNextTasks        bool
-	NextTasks           string // JSON list [(task_name, event)]
-	ErrorHandled        bool
-	StartedAt           string // ISO8601 nullable
-	FinishedAt          string // ISO8601 nullable
-	ProjectID           string `gorm:"index"`
-	Scope               string `gorm:"index"`
-	CreatedAt           string
-	UpdatedAt           string `gorm:"index"`
+type gResourceMember struct {
+	ID   string `gorm:"primaryKey"`
+	Data string
 }
 
-func (gTaskExecution) TableName() string { return "task_executions" }
+func (gResourceMember) TableName() string { return "resource_members" }
 
-type gActionExecution struct {
-	ID                string `gorm:"primaryKey"`
-	Name              string
-	State             string
-	StateInfo         string
-	Input             string // JSON
-	Output            string // JSON
-	RuntimeContext    string // JSON
-	WorkflowNamespace string
-	TaskExecutionID   string `gorm:"index"`
-	WorkflowName      string
-	WorkflowID        string
-	ProjectID         string
-	Accepted          bool
-	IsSync            *bool
-	CreatedAt         string
-	UpdatedAt         string
+type gNamedLock struct {
+	ID   string `gorm:"primaryKey"`
+	Name string `gorm:"uniqueIndex"`
 }
 
-func (gActionExecution) TableName() string { return "action_executions" }
+func (gNamedLock) TableName() string { return "named_locks" }
 
-type gEnvironment struct {
-	ID          string `gorm:"primaryKey"`
-	Name        string `gorm:"uniqueIndex:env_name_ns"`
-	Namespace   string `gorm:"uniqueIndex:env_name_ns"`
-	ProjectID   string
-	Description string
-	Variables   string // JSON
-	CreatedAt   string
-	UpdatedAt   string
+type gCodeSource struct {
+	ID   string `gorm:"primaryKey"`
+	Name string `gorm:"index"`
+	Data string
 }
 
-func (gEnvironment) TableName() string { return "environments" }
+func (gCodeSource) TableName() string { return "code_sources" }
+
+type gMistralMetrics struct {
+	ID    int    `gorm:"primaryKey;autoIncrement"`
+	Name  string `gorm:"uniqueIndex"`
+	Value string
+}
+
+func (gMistralMetrics) TableName() string { return "mistral_metrics" }

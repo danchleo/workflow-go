@@ -12,10 +12,65 @@
 package db
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// --- Validation constants (mirror Python SQLAlchemy validators) ---
+
+// MaxStateInfoLen caps state_info string length. Python's SQLAlchemy column
+// uses a 65535-length TEXT; we cap at 32768 to keep logs readable.
+const MaxStateInfoLen = 32768
+
+// MaxNameLen caps name fields.
+const MaxNameLen = 255
+
+// validateName checks that a workflow/task/action name doesn't contain
+// whitespace (Python has a @validates hook for this).
+func validateName(name string) error {
+	if name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if len(name) > MaxNameLen {
+		return fmt.Errorf("name length %d exceeds max %d", len(name), MaxNameLen)
+	}
+	if strings.ContainsAny(name, " \t\n") {
+		return fmt.Errorf("name %q must not contain whitespace", name)
+	}
+	return nil
+}
+
+// truncateStateInfo auto-truncates state_info strings that are too long.
+// Python has this via SQLAlchemy before_insert hook.
+func truncateStateInfo(info interface{}) interface{} {
+	if s, ok := info.(string); ok && len(s) > MaxStateInfoLen {
+		return s[:MaxStateInfoLen] + "...(truncated)"
+	}
+	return info
+}
+
+// ValidateWorkflowDefinition validates before save.
+func (w *WorkflowDefinition) Validate() error {
+	return validateName(w.Name)
+}
+
+// ValidateWorkflowExecution validates before save.
+func (w *WorkflowExecution) Validate() {
+	w.StateInfo = truncateStateInfo(w.StateInfo)
+}
+
+// ValidateTaskExecution validates before save.
+func (t *TaskExecution) Validate() {
+	t.StateInfo = truncateStateInfo(t.StateInfo)
+}
+
+// ValidateActionExecution validates before save.
+func (a *ActionExecution) Validate() {
+	a.StateInfo = truncateStateInfo(a.StateInfo)
+}
 
 // GenerateID returns a new UUID string.
 func GenerateID() string {
@@ -205,6 +260,11 @@ type ScheduledJob struct {
 	CapturedAt *time.Time             `json:"captured_at,omitempty"` // nil = not yet captured
 	Key        string                 `json:"key"`
 	CreatedAt  time.Time              `json:"created_at"`
+	// AuthCtx carries auth/tenant context from the caller that scheduled the job.
+	// The scheduler does not interpret it — it is simply forwarded back to
+	// handlers when the job fires, mirroring Python's auth_ctx propagation.
+	// Typical contents: {"trust_id": "...", "project_id": "...", "namespace": "..."}.
+	AuthCtx map[string]interface{} `json:"auth_ctx,omitempty"`
 }
 
 // CronTrigger stores cron trigger definitions.
@@ -224,6 +284,107 @@ type CronTrigger struct {
 	Scope               string                 `json:"scope"`
 	CreatedAt           time.Time              `json:"created_at"`
 	UpdatedAt           time.Time              `json:"updated_at"`
+}
+
+// NamedLock mirrors Python mistral/db/v2/sqlalchemy/models.py NamedLock.
+//
+// Used as a distributed mutex across scheduler workers: a worker acquires
+// the lock by attempting to Insert a row with unique (Name) — two workers
+// can only succeed with one INSERT; the other must wait for the first to
+// Delete + commit. In Go's GORM layer the same semantics hold via GORM's
+// unique index + transactional isolation. The table should never contain
+// committed rows — all usage is around transactional play.
+type NamedLock struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name" gorm:"uniqueIndex"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Validate checks invariants.
+func (nl *NamedLock) Validate() error {
+	if nl.Name == "" {
+		return fmt.Errorf("NamedLock.name required")
+	}
+	return nil
+}
+
+// DynamicActionDefinition mirrors Python mistral/db/v2/sqlalchemy/models.py
+// DynamicActionDefinition. Registers a dynamically-loaded action at runtime.
+// In Python this pairs with CodeSource (a code blob). The Go version is
+// simplified: no CodeSource model (embedded code is a separate problem) —
+// just metadata about a registered dynamic action so the engine can find it
+// by (name, namespace, project).
+type DynamicActionDefinition struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name" gorm:"uniqueIndex:uniq_dyn_action"`
+	Namespace    string    `json:"namespace,omitempty" gorm:"uniqueIndex:uniq_dyn_action"`
+	ProjectID    string    `json:"project_id" gorm:"uniqueIndex:uniq_dyn_action"`
+	Scope        string    `json:"scope,omitempty"`
+	ClassName    string    `json:"class_name"`
+	CodeSourceID string    `json:"code_source_id,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+func (d *DynamicActionDefinition) Validate() error {
+	if d.Name == "" {
+		return fmt.Errorf("DynamicActionDefinition.name required")
+	}
+	return nil
+}
+
+// EventTrigger mirrors Python mistral/db/v2/sqlalchemy/models.py EventTrigger.
+// Maps an external event (exchange + topic + event) to a workflow definition.
+// The engine's event handler calls events.Subscribe() for each row.
+type EventTrigger struct {
+	ID             string                 `json:"id"`
+	Name           string                 `json:"name"`
+	ProjectID      string                 `json:"project_id" gorm:"uniqueIndex:uniq_evt_trigger"`
+	Scope          string                 `json:"scope,omitempty"`
+	WorkflowID     string                 `json:"workflow_id" gorm:"uniqueIndex:uniq_evt_trigger"`
+	WorkflowParams map[string]interface{} `json:"workflow_params,omitempty"`
+	WorkflowInput  map[string]interface{} `json:"workflow_input,omitempty"`
+	Exchange       string                 `json:"exchange" gorm:"uniqueIndex:uniq_evt_trigger"`
+	Topic          string                 `json:"topic" gorm:"uniqueIndex:uniq_evt_trigger"`
+	Event          string                 `json:"event" gorm:"uniqueIndex:uniq_evt_trigger"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
+}
+
+func (e *EventTrigger) Validate() error {
+	if e.WorkflowID == "" {
+		return fmt.Errorf("EventTrigger.workflow_id required")
+	}
+	if e.Exchange == "" || e.Topic == "" || e.Event == "" {
+		return fmt.Errorf("EventTrigger requires exchange, topic, event")
+	}
+	return nil
+}
+
+// ResourceMember mirrors Python mistral/db/v2/sqlalchemy/models.py ResourceMember.
+// Tracks who has what role on a resource (workflow, workbook, action).
+type ResourceMember struct {
+	ID           string    `json:"id"`
+	ResourceID   string    `json:"resource_id" gorm:"uniqueIndex:uniq_member"`
+	ResourceType string    `json:"resource_type" gorm:"uniqueIndex:uniq_member"` // "workflow" / "workbook" / "action"
+	ProjectID    string    `json:"project_id"`
+	MemberID     string    `json:"member_id" gorm:"uniqueIndex:uniq_member"`
+	Status       string    `json:"status"` // "pending" / "accepted"
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+func (r *ResourceMember) Validate() error {
+	if r.ResourceID == "" || r.MemberID == "" {
+		return fmt.Errorf("ResourceMember requires resource_id and member_id")
+	}
+	if r.ResourceType == "" {
+		r.ResourceType = "workflow"
+	}
+	if r.Status == "" {
+		r.Status = "pending"
+	}
+	return nil
 }
 
 // Result is the standard action/workflow result type.
@@ -270,4 +431,38 @@ func (r *Result) FromDict(d map[string]interface{}) {
 			r.Cancel = b
 		}
 	}
+}
+
+// CodeSource mirrors Python mistral/db/v2/sqlalchemy/models.py CodeSource.
+// Stores a blob of source code paired with DynamicActionDefinition —
+// the Go engine rarely loads this at runtime (user-defined dynamic actions
+// are compiled out-of-band), but the model is required so that dynamic
+// action metadata stays round-trip compatible with the Python API surface.
+type CodeSource struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name" gorm:"uniqueIndex:uniq_code_source"`
+	Namespace string    `json:"namespace,omitempty" gorm:"uniqueIndex:uniq_code_source"`
+	Content   string    `json:"content"`
+	Version   int       `json:"version"`
+	Tags      []string  `json:"tags"`
+	ProjectID string    `json:"project_id" gorm:"uniqueIndex:uniq_code_source"`
+	Scope     string    `json:"scope,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (c *CodeSource) Validate() error {
+	if c.Name == "" {
+		return fmt.Errorf("CodeSource.name required")
+	}
+	return nil
+}
+
+// MistralMetrics mirrors Python mistral/db/v2/sqlalchemy/models.py MistralMetrics.
+// Single-row-style key/value for maintenance mode and other engine-wide toggles.
+// Known keys (from Python api/controllers/maintenance.py): "maintenance".
+type MistralMetrics struct {
+	ID    int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name  string `json:"name" gorm:"uniqueIndex"`
+	Value string `json:"value"`
 }

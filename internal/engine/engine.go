@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"sync"
 
 	"github.com/mistral/workflow/internal/commands"
@@ -84,7 +85,16 @@ func Register(fn func(), inTx ...bool) {
 	defaultQueue.Register(fn, inTx...)
 }
 
-// Drain executes all queued callbacks.
+// Drain executes all queued callbacks asynchronously in a fresh goroutine,
+// mirroring Python's post_tx_queue.run decorator which spawns
+// `threading.Thread(target=_within_new_thread).start()` after the main
+// engine method returns. Callers do NOT wait for the goroutine — callbacks
+// are fire-and-forget. This ensures downstream operations (e.g.
+// checkAndCompleteWorkflow) execute AFTER the current call stack's DB
+// writes are visible to other readers.
+//
+// If synchronous draining is needed (e.g. tests that assert final state),
+// use DrainSync instead.
 func (q *PostTxQueue) Drain() {
 	q.mu.Lock()
 	callbacks := q.callbacks
@@ -93,6 +103,27 @@ func (q *PostTxQueue) Drain() {
 	q.inTxCallbacks = nil
 	q.mu.Unlock()
 
+	if len(callbacks) == 0 && len(inTxCallbacks) == 0 {
+		return
+	}
+	go q.runAll(callbacks, inTxCallbacks)
+}
+
+// DrainSync executes queued callbacks synchronously in the calling goroutine.
+// Useful for tests and rare cases where the caller must observe final state
+// immediately. Python has no direct equivalent — Python always spawns a new
+// thread — but Go tests need this for deterministic assertions.
+func (q *PostTxQueue) DrainSync() {
+	q.mu.Lock()
+	callbacks := q.callbacks
+	inTxCallbacks := q.inTxCallbacks
+	q.callbacks = nil
+	q.inTxCallbacks = nil
+	q.mu.Unlock()
+	q.runAll(callbacks, inTxCallbacks)
+}
+
+func (q *PostTxQueue) runAll(callbacks, inTxCallbacks []func()) {
 	for _, cb := range callbacks {
 		safeRun(cb)
 	}
@@ -101,9 +132,14 @@ func (q *PostTxQueue) Drain() {
 	}
 }
 
-// DrainGlobal drains the global queue.
+// DrainGlobal drains the global queue asynchronously.
 func DrainGlobal() {
 	defaultQueue.Drain()
+}
+
+// DrainGlobalSync drains the global queue synchronously.
+func DrainGlobalSync() {
+	defaultQueue.DrainSync()
 }
 
 // safeRun runs a callback and recovers from panics.
@@ -231,12 +267,36 @@ func rearrangeCommands(cmds []commands.WorkflowCommand) []commands.WorkflowComma
 	return result
 }
 
+// cmdKey returns a sortable key for deterministic command ordering.
+// RunTask → task name, RunExistingTask → task_ex_id, state commands → empty (sorted first).
+// Mirrors Python dispatcher's unique_key sorting.
+func cmdKey(c commands.WorkflowCommand) string {
+	switch v := c.(type) {
+	case *commands.RunTask:
+		return "a-" + v.TaskName()
+	case *commands.RunExistingTask:
+		return "b-" + v.TaskExID()
+	case *commands.SkipTask:
+		return "c-" + v.TaskExID()
+	default:
+		return "z-" // state / workflow commands last
+	}
+}
+
 func (d *Dispatcher) processCommands(wfEx *db.WorkflowExecution, cmds []commands.WorkflowCommand) error {
 	if len(cmds) == 0 {
 		return nil
 	}
 
 	cmds = rearrangeCommands(cmds)
+
+	// Python dispatcher sorts waiting tasks by unique_key before running to
+	// prevent deadlock under concurrent task execution. Go doesn't use DB-level
+	// named locks yet, but sorting gives deterministic dispatch order which is
+	// a prerequisite for future lock-based concurrency control.
+	sort.SliceStable(cmds, func(i, j int) bool {
+		return cmdKey(cmds[i]) < cmdKey(cmds[j])
+	})
 
 	for _, cmd := range cmds {
 		if states.IsCompleted(wfEx.State) {
