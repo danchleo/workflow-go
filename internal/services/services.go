@@ -124,6 +124,9 @@ func (s *WorkbookService) CreateWorkbook(name string, definition string, project
 		Definition: definition,
 		ProjectID:  projectID,
 	}
+	if err := s.store.Workbooks().Create(wb); err != nil {
+		return nil, fmt.Errorf("creating workbook: %w", err)
+	}
 
 	wbFlows := wbSpec.GetWorkflows()
 	for wfName, wfSpec := range wbFlows {
