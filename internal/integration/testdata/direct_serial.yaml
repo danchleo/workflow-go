@@ -12,7 +12,7 @@ tasks:
     input:
       output: "<% $.greeting %>, <% $.name %>!"
     publish:
-      greeting_result: "<% $.greeting_task.result %>"
+      greeting_result: "<% task('greeting_task').result %>"
     on-success:
       - farewell_task
 
@@ -22,5 +22,5 @@ tasks:
       output: "Done <% $.greeting_result %>"
 
 output:
-  final_msg: "<% $.farewell_task.result %>"
+  final_msg: "<% task('farewell_task').result %>"
   greeting_was: "<% $.greeting_result %>"

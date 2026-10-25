@@ -9,7 +9,7 @@ tasks:
       output: "item-<% $.item %>"
     with-items: item in <% $.items %>
     publish:
-      collected: "<% $.fanout.result %>"
+      collected: "<% task('fanout').result %>"
     on-success:
       - sink
 

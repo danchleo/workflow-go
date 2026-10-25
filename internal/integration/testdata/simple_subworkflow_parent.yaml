@@ -22,4 +22,4 @@ tasks:
 
 output:
   parent_msg: "parent done"
-  child_msg: "<% $.call_sub.result %>"
+  child_msg: "<% task('call_sub').result %>"
