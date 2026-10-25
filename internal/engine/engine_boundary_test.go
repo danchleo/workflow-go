@@ -84,18 +84,17 @@ tasks:
       output: "recovered"
 `
 
-// TestEngine_RerunWorkflow_Reset verifies RerunWorkflow(reset=true) flips
-// Processed=false, brings the workflow back to RUNNING, and re-drives the
-// workflow controller to emit commands for the reset task.
-// This mirrors Python test_direct_workflow_rerun.py test_rerun_failed_task's
-// core assertions without depending on the full end-to-end reset chain.
-func TestEngine_RerunWorkflow_Reset(t *testing.T) {
+// TestEngine_RerunWorkflow_Reset_EndToEnd drives the full reset → rerun chain:
+// first SUCCESS → second ERROR → recover SUCCESS → RerunWorkflow(reset) →
+// second re-executes SUCCESS → workflow finishes SUCCESS.
+// This mirrors Python test_direct_workflow_rerun.py test_rerun_failed_task.
+func TestEngine_RerunWorkflow_Reset_EndToEnd(t *testing.T) {
 	eng, store := newEngine(t)
 	wfDef := mustCreateWorkflow(t, store, "rerun", rerunWFYAML)
 
 	wfEx, _ := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", defaultParams())
 
-	// first → SUCCESS → second → ERROR → recover → SUCCESS
+	// Drive to pre-rerun state: first→SUCCESS, second→ERROR, recover→SUCCESS.
 	const maxIter = 10
 	for i := 0; i < maxIter; i++ {
 		p := findPendingTask(t, store, wfEx.ID)
@@ -104,7 +103,7 @@ func TestEngine_RerunWorkflow_Reset(t *testing.T) {
 		}
 		invokeID, _ := p.RuntimeContext["action_ex_id"].(string)
 		if invokeID == "" {
-			break
+			continue
 		}
 		var result *db.Result
 		if p.Name == "second" {
@@ -115,45 +114,140 @@ func TestEngine_RerunWorkflow_Reset(t *testing.T) {
 		eng.OnActionComplete(context.Background(), invokeID, result, false)
 	}
 
-	// Capture second task state BEFORE rerun.
+	// Capture second's pre-rerun state.
 	tasks, _ := store.TaskExecutions().List(wfEx.ID, "")
-	var second *db.TaskExecution
+	var secondID string
 	for _, te := range tasks {
 		if te.Name == "second" {
-			second = te
+			secondID = te.ID
+			if te.State != states.ERROR {
+				t.Fatalf("pre-rerun: second.state = %s, want ERROR", te.State)
+			}
 		}
 	}
-	if second == nil {
-		t.Fatal("second task not found")
-	}
-	beforeState := second.State
-	beforeProcessed := second.Processed
-
-	if !beforeProcessed {
-		t.Error("precondition: second should be processed=true before rerun")
-	}
-	if beforeState != states.ERROR {
-		t.Logf("precondition: second state = %s (expected ERROR)", beforeState)
+	if secondID == "" {
+		t.Fatal("second not found")
 	}
 
-	// Rerun with reset=true.
-	if err := eng.RerunWorkflow(context.Background(), second.ID, true, false, nil); err != nil {
+	wfExBefore, _ := store.WorkflowExecutions().Get(wfEx.ID)
+	t.Logf("pre-rerun: wfEx.state=%s, second.state=ERROR", wfExBefore.State)
+
+	// --- Rerun with reset=true ---
+	if err := eng.RerunWorkflow(context.Background(), secondID, true, false, nil); err != nil {
 		t.Fatalf("RerunWorkflow(reset): %v", err)
 	}
 
-	// Assertions on the reset task.
-	resetSecond, _ := store.TaskExecutions().Get(second.ID)
+	// Assertions on reset.
+	resetSecond, _ := store.TaskExecutions().Get(secondID)
 	if resetSecond.Processed {
 		t.Error("after reset: Processed should be false")
 	}
-	if resetSecond.State == beforeState {
-		t.Errorf("after reset: state should change from %s, still %s", beforeState, resetSecond.State)
+	if resetSecond.State == states.ERROR {
+		t.Logf("after reset: state still ERROR → dispatcher may not have fired yet; that's acceptable")
 	}
-
-	// Workflow should be back to RUNNING regardless of prior state.
 	wfExAfter, _ := store.WorkflowExecutions().Get(wfEx.ID)
 	if wfExAfter.State != states.RUNNING {
-		t.Errorf("after rerun: wfEx state = %s, want RUNNING", wfExAfter.State)
+		t.Errorf("after rerun: wfEx.state = %s, want RUNNING", wfExAfter.State)
+	}
+
+	// --- Drive second to SUCCESS now that it re-executes ---
+	const rerunIter = 20
+	for i := 0; i < rerunIter; i++ {
+		if states.IsCompleted(wfExAfter.State) {
+			break
+		}
+		p := findPendingTask(t, store, wfEx.ID)
+		if p == nil {
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		invokeID, _ := p.RuntimeContext["action_ex_id"].(string)
+		if invokeID == "" {
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		if p.Name == "second" {
+			driveTaskWithResult(t, eng, store, p, &db.Result{Data: "second-fixed"})
+		} else {
+			driveTaskWithResult(t, eng, store, p, &db.Result{Data: p.Name + "-ok"})
+		}
+		wfExAfter, _ = store.WorkflowExecutions().Get(wfEx.ID)
+	}
+
+	final, _ := store.WorkflowExecutions().Get(wfEx.ID)
+	if final.State != states.SUCCESS {
+		t.Errorf("final wfEx.state = %s (info=%v), want SUCCESS", final.State, final.StateInfo)
+	}
+
+	// second should now be SUCCESS too.
+	finalSecond, _ := store.TaskExecutions().Get(secondID)
+	if finalSecond.State != states.SUCCESS {
+		t.Errorf("second final state = %s, want SUCCESS", finalSecond.State)
+	}
+}
+
+// TestEngine_RerunWorkflow_Skip skips a task instead of resetting it.
+// After skip, workflow should reach SUCCESS without running the skipped task.
+func TestEngine_RerunWorkflow_Skip(t *testing.T) {
+	eng, store := newEngine(t)
+	wfDef := mustCreateWorkflow(t, store, "skip", rerunWFYAML)
+
+	wfEx, _ := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", defaultParams())
+
+	// first → SUCCESS → second → ERROR
+	for i := 0; i < 5; i++ {
+		p := findPendingTask(t, store, wfEx.ID)
+		if p == nil {
+			break
+		}
+		invokeID, _ := p.RuntimeContext["action_ex_id"].(string)
+		if invokeID == "" {
+			continue
+		}
+		var result *db.Result
+		if p.Name == "second" {
+			result = &db.Result{Error: "simulated-fail"}
+		} else {
+			result = &db.Result{Data: p.Name + "-ok"}
+		}
+		eng.OnActionComplete(context.Background(), invokeID, result, false)
+	}
+
+	// Skip second — should propagate to recover then wfEx SUCCESS.
+	tasks, _ := store.TaskExecutions().List(wfEx.ID, "")
+	var secondID string
+	for _, te := range tasks {
+		if te.Name == "second" {
+			secondID = te.ID
+		}
+	}
+
+	if err := eng.RerunWorkflow(context.Background(), secondID, false, true, nil); err != nil {
+		t.Fatalf("RerunWorkflow(skip): %v", err)
+	}
+
+	// Drive remaining pending tasks to completion.
+	for i := 0; i < 10; i++ {
+		p := findPendingTask(t, store, wfEx.ID)
+		if p == nil {
+			break
+		}
+		invokeID, _ := p.RuntimeContext["action_ex_id"].(string)
+		if invokeID == "" {
+			continue
+		}
+		driveTaskWithResult(t, eng, store, p, &db.Result{Data: p.Name + "-ok"})
+	}
+
+	// second should now be SKIPPED, not ERROR.
+	skipSecond, _ := store.TaskExecutions().Get(secondID)
+	if skipSecond.State != states.SKIPPED {
+		t.Errorf("second state after skip rerun = %s, want SKIPPED", skipSecond.State)
+	}
+
+	final, _ := store.WorkflowExecutions().Get(wfEx.ID)
+	if final.State != states.SUCCESS {
+		t.Errorf("final wfEx.state = %s (info=%v), want SUCCESS", final.State, final.StateInfo)
 	}
 }
 

@@ -425,7 +425,14 @@ func (d *Dispatcher) runExistingTask(cmd *commands.RunExistingTask) error {
 	taskEx.Processed = false
 	taskEx.RuntimeContext = make(map[string]interface{})
 
-	return d.store.TaskExecutions().Update(taskEx)
+	if err := d.store.TaskExecutions().Update(taskEx); err != nil {
+		return err
+	}
+
+	// Kick off the actual action execution — without this the task stays RUNNING
+	// forever with no ActionExecution created. This mirrors RunTask's path which
+	// calls starter.StartTask right after startNewTask.
+	return d.starter.StartTask(context.Background(), taskEx.ID, false, false, nil, cmd.Reset(), false)
 }
 
 func (d *Dispatcher) skipTask(cmd *commands.SkipTask) error {

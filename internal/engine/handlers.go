@@ -509,7 +509,43 @@ func (e *DefaultEngine) RerunWorkflow(ctx context.Context, taskExID string, rese
 		cmds = ctrl.RerunTasks([]*db.TaskExecution{taskEx}, reset)
 	}
 
-	return e.dispatcher.DispatchWorkflowCommands(wfEx, cmds)
+	if err := e.dispatcher.DispatchWorkflowCommands(wfEx, cmds); err != nil {
+		return err
+	}
+
+	// For SKIP: the task never goes through OnActionComplete, so we need
+	// to explicitly drive ContinueWorkflow to pick up on-skip transitions
+	// and (eventually) workflow completion.
+	if skip {
+		// Skip updated the task state → reload for controller's fresh view.
+		tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
+		ctrl = workflow.GetController(wfEx, wfSpec, tasks)
+		// Find the just-skipped task (it's still in tasks list, now SKIPPED).
+		var skipTaskEx *db.TaskExecution
+		for _, te := range tasks {
+			if te.ID == taskEx.ID {
+				skipTaskEx = te
+				break
+			}
+		}
+		next := ctrl.ContinueWorkflow(skipTaskEx)
+		if len(next) > 0 {
+			if err := e.dispatcher.DispatchWorkflowCommands(wfEx, next); err != nil {
+				return err
+			}
+		}
+
+		// Mirror OnActionComplete's tail: check workflow completion + wake joins.
+		wfEx, _ = e.store.WorkflowExecutions().Get(wfEx.ID)
+		if ctrl.MayCompleteWorkflow(skipTaskEx) {
+			if err := e.checkAndCompleteWorkflow(wfEx, ctrl, wfSpec); err != nil {
+				return err
+			}
+		}
+		e.checkAffectedTasks(skipTaskEx, wfEx)
+	}
+
+	return nil
 }
 
 // StartTask runs a task execution.
