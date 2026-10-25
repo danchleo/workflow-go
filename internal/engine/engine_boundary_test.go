@@ -2,12 +2,14 @@ package engine
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/mistral/workflow/internal/commands"
 	"github.com/mistral/workflow/internal/db"
+	"github.com/mistral/workflow/internal/lang/parser"
 	"github.com/mistral/workflow/internal/services"
 	"github.com/mistral/workflow/internal/states"
 )
@@ -453,5 +455,112 @@ func TestCmdKey_Uniqueness(t *testing.T) {
 	r5 := commands.NewRunTask("t1", nil, nil, false) // no unique key
 	if cmdKey(r4) != cmdKey(r5) {
 		t.Log("info: same task name + no unique key → keys collide (expected)")
+	}
+}
+
+// ------------------------------------------------------------
+// Spec validation via engine.StartWorkflow
+// ------------------------------------------------------------
+
+// noStartTaskWF is a malformed direct workflow where every task has an
+// inbound transition → no start task. NewWorkflowSpec should reject it
+// both at registration (WorkflowService.CreateWorkflow) and at start
+// time (engine.StartWorkflow).
+const noStartTaskWF = `
+version: "2.0"
+name: no_start
+
+tasks:
+  a:
+    action: std.echo
+    on-success:
+      - b
+
+  b:
+    action: std.echo
+    on-success:
+      - c
+
+  c:
+    action: std.echo
+    on-success:
+      - a
+`
+
+func TestWorkflowService_Create_NoStartTask(t *testing.T) {
+	store := db.NewInMemoryStore()
+	svc := services.NewWorkflowService(store)
+	_, err := svc.CreateWorkflow("no_start", noStartTaskWF, "p", "")
+	if err == nil {
+		t.Fatal("expected error for no-start-task direct workflow")
+	}
+	if !strings.Contains(err.Error(), "start task") {
+		t.Errorf("error should mention 'start task': %v", err)
+	}
+}
+
+func TestEngine_StartWorkflow_NoStartTask_Direct(t *testing.T) {
+	// Manually bypass CreateWorkflow validation (e.g. direct DB write)
+	// to confirm engine.StartWorkflow ALSO rejects it as a defense-in-depth.
+	store := db.NewInMemoryStore()
+	data, err := parser.ParseYAML(noStartTaskWF)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wfDef := &db.WorkflowDefinition{
+		Name:       "no_start_looped",
+		ProjectID:  "p",
+		Namespace:  "",
+		Definition: noStartTaskWF,
+		Spec:       data,
+	}
+	if err := store.WorkflowDefinitions().Create(wfDef); err != nil {
+		t.Fatal(err)
+	}
+
+	eng := NewDefaultEngine(store)
+	_, err = eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", defaultParams())
+	if err == nil {
+		t.Fatal("expected error: NewWorkflowSpec should reject no-start-task wf")
+	}
+	if !strings.Contains(err.Error(), "start task") {
+		t.Errorf("error = %q, should mention start task", err.Error())
+	}
+}
+
+// reverse workflow only requires at least one task — it has no "start task" concept.
+// This test locks down that reverse workflows with a cycle are fine.
+func TestEngine_StartWorkflow_ReverseWithCycle_OK(t *testing.T) {
+	const reverseCycleWF = `
+version: "2.0"
+name: rev_cycle
+type: reverse
+
+tasks:
+  end:
+    action: std.echo
+    requires: [a]
+
+  a:
+    action: std.echo
+    requires: [b]
+
+  b:
+    action: std.echo
+    requires: [end]
+`
+	store := db.NewInMemoryStore()
+	svc := services.NewWorkflowService(store)
+	wfDef, err := svc.CreateWorkflow("rev_cycle", reverseCycleWF, "p", "")
+	if err != nil {
+		t.Fatalf("reverse workflow with cycle should be valid: %v", err)
+	}
+	eng := NewDefaultEngine(store)
+	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", defaultParams())
+	if err != nil {
+		t.Fatalf("StartWorkflow reverse cycle: %v", err)
+	}
+	if wfEx.State != states.RUNNING {
+		t.Errorf("reverse cycle wfEx.state = %s", wfEx.State)
 	}
 }
