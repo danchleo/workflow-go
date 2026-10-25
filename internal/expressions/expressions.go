@@ -161,6 +161,35 @@ func SetDefaultEvaluator(e Evaluator) {
 // GetDefaultEvaluator returns the current default evaluator.
 func GetDefaultEvaluator() Evaluator { return defaultEvaluator }
 
+// EvaluateBool evaluates the expression and coerces the result to bool.
+// Used for "when:" conditions in on-clauses — returns true on error
+// (fail-open matches Python mistral's resilient expression evaluation).
+func EvaluateBool(expr string, ctx map[string]interface{}) (bool, error) {
+	val, err := defaultEvaluator.Evaluate(expr, ctx)
+	if err != nil {
+		return true, err
+	}
+	return truthy(val), nil
+}
+
+func truthy(v interface{}) bool {
+	if v == nil {
+		return false
+	}
+	switch x := v.(type) {
+	case bool:
+		return x
+	case string:
+		return x != ""
+	case float64:
+		return x != 0
+	case int:
+		return x != 0
+	default:
+		return true // non-nil non-zero → truthy
+	}
+}
+
 // Recursively evaluates any expression found in data (string, map, slice).
 func EvaluateRecursively(data interface{}, context map[string]interface{}) interface{} {
 	if data == nil {

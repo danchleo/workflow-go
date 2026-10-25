@@ -9,6 +9,7 @@ import (
 
 	"github.com/mistral/workflow/internal/commands"
 	"github.com/mistral/workflow/internal/db"
+	"github.com/mistral/workflow/internal/expressions"
 	v2 "github.com/mistral/workflow/internal/lang/v2"
 	"github.com/mistral/workflow/internal/states"
 )
@@ -198,10 +199,10 @@ func BuildTaskExpressionContext(ctx map[string]interface{}, taskEx *db.TaskExecu
 		return ctx
 	}
 	tex := map[string]interface{}{
-		"id":             taskEx.ID,
-		"name":           taskEx.Name,
-		"state":          taskEx.State,
-		"in_context":     taskEx.InContext,
+		"id":              taskEx.ID,
+		"name":            taskEx.Name,
+		"state":           taskEx.State,
+		"in_context":      taskEx.InContext,
 		"runtime_context": taskEx.RuntimeContext,
 	}
 	ctx["__task_execution"] = tex
@@ -260,91 +261,160 @@ func (c *DirectWorkflowController) findNextCommands(taskEx *db.TaskExecution) []
 		return cmds
 	}
 
-	// Task completion: find outbound transitions.
 	taskSpec := c.wfSpec.GetTask(taskEx.Name)
 	if taskSpec == nil {
 		return nil
 	}
 
-	// Determine which on-clause to use based on the completed task state.
-	var outboundClause *v2.OnClauseSpec
+	// Build the ContextView that Python uses for condition/param evaluation.
+	ctxView := BuildFullContext(c.wfEx, c.wfSpec, c.tasks)
+	// Inject the current task's outbound context (task dict) — Python
+	// ContextView prepends get_current_task_dict(task_ex).
+	ctxView["__current_task"] = taskEx
+	ctxView["current_task"] = map[string]interface{}{
+		"id":     taskEx.ID,
+		"name":   taskEx.Name,
+		"state":  taskEx.State,
+		"result": taskEx.Output,
+	}
+
+	// Python _find_next_tasks clause ordering:
+	//   1. ERROR     → on-error
+	//   2. SKIPPED   → on-skip (empty fallback to on-success)
+	//   3. SUCCESS   → on-success
+	//   4. completed & not CANCELLED/SKIPPED → on-complete (APPENDED last)
+	var candidateClauses []*v2.OnClauseSpec
+	skipFallbackSuccess := false
+
 	switch taskEx.State {
-	case states.SUCCESS:
-		outboundClause = taskSpec.GetOnSuccess()
 	case states.ERROR:
-		outboundClause = taskSpec.GetOnError()
+		if cl := taskSpec.GetOnError(); cl != nil {
+			candidateClauses = append(candidateClauses, cl)
+		}
 	case states.SKIPPED:
-		outboundClause = taskSpec.GetOnSkip()
-	default:
-		outboundClause = taskSpec.GetOnComplete()
+		if cl := taskSpec.GetOnSkip(); cl != nil {
+			candidateClauses = append(candidateClauses, cl)
+			// Check if on-skip has ANY matched entries; if not, fall back to on-success.
+			if !cl.HasAnyWhen() {
+				skipFallbackSuccess = true
+			}
+		} else {
+			skipFallbackSuccess = true
+		}
 	}
 
-	if outboundClause == nil {
-		outboundClause = taskSpec.GetOnComplete()
+	// SUCCESS or skip-empty fallback → on-success.
+	if taskEx.State == states.SUCCESS || skipFallbackSuccess {
+		if cl := taskSpec.GetOnSuccess(); cl != nil {
+			candidateClauses = append(candidateClauses, cl)
+		}
 	}
 
-	if outboundClause == nil {
+	// on-complete: only if task is in a terminal state that's NOT cancelled/skipped.
+	if states.IsCompleted(taskEx.State) && !states.IsCancelledOrSkipped(taskEx.State) {
+		if cl := taskSpec.GetOnComplete(); cl != nil {
+			candidateClauses = append(candidateClauses, cl)
+		}
+	}
+
+	if len(candidateClauses) == 0 {
 		return nil
 	}
 
-	// Generate commands for each outbound transition.
-	for _, next := range outboundClause.GetNext() {
-		if v2.IsEngineCommand(next.Task) {
-			switch next.Task {
-			case v2.FailCommand:
-				cmds = append(cmds, commands.NewFailWorkflow(taskEx.Name, nil, "", nil, true))
-			case v2.SucceedCommand:
-				cmds = append(cmds, commands.NewSucceedWorkflow(taskEx.Name, nil, "", nil, true))
-			case v2.PauseCommand:
-				cmds = append(cmds, commands.NewPauseWorkflow(taskEx.Name, nil, "", nil, true))
-			case v2.NoopCommand:
-				// Skip noop.
-			}
-			continue
-		}
-
-		triggeredBy := []map[string]interface{}{{
-			"task_id":   taskEx.ID,
-			"task_name": taskEx.Name,
-			"event":     taskEx.State,
-		}}
-
-		nextTaskSpec := c.wfSpec.GetTask(next.Task)
-		if nextTaskSpec == nil {
-			continue
-		}
-
-		// Check join logic.
-		joinVal := nextTaskSpec.GetJoin()
-		inboundSpecs := c.wfSpec.InboundTaskSpecs(nextTaskSpec)
-		inboundExecs := c.filterCompletedTasksForSpecs(inboundSpecs)
-
-		shouldRun := true
-		if joinVal != nil {
-			switch jv := joinVal.(type) {
-			case string:
-				if jv == "all" {
-					shouldRun = len(inboundExecs) >= len(inboundSpecs)
-				} else if jv == "one" {
-					shouldRun = len(inboundExecs) >= 1
+	for _, clause := range candidateClauses {
+		for _, next := range clause.GetNext() {
+			// Evaluate "when" condition (empty or missing = always run).
+			if next.When != "" {
+				truthy, err := expressions.EvaluateBool(next.When, ctxView)
+				if err != nil {
+					// Fail-open? Python expr.evaluate returns truthy on error.
+					// We log but default to true to match mistral's resilient behavior.
+					truthy = true
 				}
-			case float64:
-				shouldRun = len(inboundExecs) >= int(jv)
-			case int:
-				shouldRun = len(inboundExecs) >= jv
+				if !truthy {
+					continue
+				}
 			}
-		}
 
-		if !shouldRun {
-			continue
-		}
+			if v2.IsEngineCommand(next.Task) {
+				switch next.Task {
+				case v2.FailCommand:
+					cmds = append(cmds, commands.NewFailWorkflow(taskEx.Name, nil, "", nil, true))
+				case v2.SucceedCommand:
+					cmds = append(cmds, commands.NewSucceedWorkflow(taskEx.Name, nil, "", nil, true))
+				case v2.PauseCommand:
+					cmds = append(cmds, commands.NewPauseWorkflow(taskEx.Name, nil, "", nil, true))
+				case v2.NoopCommand:
+					// Skip noop.
+				}
+				continue
+			}
 
-		ctx := c.calculateInboundContext(nextTaskSpec, taskEx)
-		handlesError := taskEx.State == states.ERROR
-		cmds = append(cmds, commands.NewRunTask(next.Task, ctx, triggeredBy, handlesError))
+			triggeredBy := []map[string]interface{}{{
+				"task_id":   taskEx.ID,
+				"task_name": taskEx.Name,
+				"event":     taskEx.State,
+			}}
+
+			nextTaskSpec := c.wfSpec.GetTask(next.Task)
+			if nextTaskSpec == nil {
+				continue
+			}
+
+			// Join logic (same as before).
+			joinVal := nextTaskSpec.GetJoin()
+			inboundSpecs := c.wfSpec.InboundTaskSpecs(nextTaskSpec)
+			inboundExecs := c.filterCompletedTasksForSpecs(inboundSpecs)
+
+			shouldRun := true
+			if joinVal != nil {
+				switch jv := joinVal.(type) {
+				case string:
+					if jv == "all" {
+						shouldRun = len(inboundExecs) >= len(inboundSpecs)
+					} else if jv == "one" {
+						shouldRun = len(inboundExecs) >= 1
+					}
+				case float64:
+					shouldRun = len(inboundExecs) >= int(jv)
+				case int:
+					shouldRun = len(inboundExecs) >= jv
+				}
+			}
+
+			if !shouldRun {
+				continue
+			}
+
+			ctx := c.calculateInboundContext(nextTaskSpec, taskEx)
+
+			// Recursively evaluate params (Python expr.evaluate_recursively).
+			params := next.Params
+			if len(params) > 0 {
+				evaluated := expressions.EvaluateRecursively(params, ctxView)
+				if m, ok := evaluated.(map[string]interface{}); ok {
+					ctx = mergeMaps(ctx, m)
+				}
+			}
+
+			handlesError := taskEx.State == states.ERROR
+			cmds = append(cmds, commands.NewRunTask(next.Task, ctx, triggeredBy, handlesError))
+		}
 	}
 
 	return cmds
+}
+
+// mergeMaps merges b into a (shallow copy — values may themselves be maps).
+func mergeMaps(a, b map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(a)+len(b))
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
 }
 
 func (c *DirectWorkflowController) filterCompletedTasksForSpecs(specs []*v2.TaskSpec) []*db.TaskExecution {
@@ -688,7 +758,24 @@ func (c *DirectWorkflowController) EvaluateWorkflowFinalContext() (map[string]in
 }
 
 func (c *DirectWorkflowController) MayCompleteWorkflow(taskEx *db.TaskExecution) bool {
-	return states.IsCompleted(taskEx.State)
+	// Python: super().may_complete_workflow(task_ex) and not task_ex.has_next_tasks
+	// Base = states.is_completed(task_ex.state); Direct adds the has_next_tasks check.
+	if !states.IsCompleted(taskEx.State) {
+		return false
+	}
+	// If this task already has known next tasks, we can't complete yet —
+	// downstream commands may still be in flight.
+	if taskEx.HasNextTasks {
+		return false
+	}
+	// Also ensure no sibling tasks are still pending — another pending
+	// task could still produce downstream transitions that affect completion.
+	for _, te := range c.tasks {
+		if te.ID != taskEx.ID && !states.IsCompleted(te.State) {
+			return false
+		}
+	}
+	return true
 }
 
 // FindIndirectlyAffectedTasks walks outbound transitions from the given
