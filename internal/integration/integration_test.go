@@ -2894,3 +2894,61 @@ func TestIntegration_Nested_DynamicWorkflowName(t *testing.T) {
 
 	t.Logf("  dynamic workflow name: wf2 + wf3 both work ✅")
 }
+
+// TestIntegration_Nested_DynamicInputDict ports Python WB4: dynamic workflow
+// name AND dynamic child input — input: dict references <% $.inp %> to pass
+// a resolved value down into the subworkflow. Mirrors Python
+// test_dynamic_subworkflow_with_generic_input.
+func TestIntegration_Nested_DynamicInputDict(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		workbookPath:  "nested_dynamic_input.yaml",
+		entryWorkflow: "wf1",
+		input: map[string]interface{}{
+			"wf_name": "wf2",
+			"inp":     "dynamic-value",
+		},
+		expectedState: states.SUCCESS,
+	})
+
+	allWfExs, _ := store.WorkflowExecutions().List("")
+	var parentWf, childWf *db.WorkflowExecution
+	for _, w := range allWfExs {
+		switch w.Name {
+		case "nested_dynamic_input.wf1":
+			parentWf = w
+		case "nested_dynamic_input.wf2":
+			childWf = w
+		}
+	}
+	if parentWf == nil {
+		t.Fatal("wf1 parent not found")
+	}
+	if childWf == nil {
+		t.Fatal("wf2 child not found")
+	}
+	if childWf.State != states.SUCCESS {
+		t.Errorf("child wf2 state = %s, want SUCCESS", childWf.State)
+	}
+
+	// Child should have received "dynamic-value" as its Input["inp"].
+	if v, ok := childWf.Input["inp"]; !ok {
+		t.Error("child wf2 missing inp in Input")
+	} else if v != "dynamic-value" {
+		t.Errorf("child wf2 Input.inp = %q, want 'dynamic-value'", v)
+	} else {
+		t.Logf("  child wf2 Input.inp=%q ✅ (dynamic input propagated)", v)
+	}
+
+	// Parent output sub_wf_out should reflect child's output value.
+	subOut, hasSub := final.Output["sub_wf_out"]
+	if !hasSub {
+		t.Error("parent wf1 output missing 'sub_wf_out'")
+	} else if s, ok := subOut.(string); ok {
+		t.Logf("  parent sub_wf_out=%q", s)
+		if containsAny(s, "<%", "${", "task(") {
+			t.Errorf("parent sub_wf_out still raw expression: %q", s)
+		}
+	}
+
+	t.Logf("  dynamic input dict: ✅")
+}

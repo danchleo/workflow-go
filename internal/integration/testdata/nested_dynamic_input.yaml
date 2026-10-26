@@ -1,0 +1,36 @@
+---
+version: "2.0"
+
+name: nested_dynamic_input
+
+workflows:
+  wf1:
+    type: direct
+    input:
+      - wf_name
+      - inp
+    output:
+      sub_wf_out: "<% $.sub_wf_out %>"
+
+    tasks:
+      task1:
+        # Python WB4: dynamic workflow name + dynamic input dict.
+        # Go resolveWorkflowName() evaluates workflow: expr.
+        # input: here we use a plain dict referencing $.inp so evaluateTaskInput
+        # can pass the resolved dict as child input — Python does the same.
+        workflow: "<% $.wf_name %>"
+        input:
+          inp: "<% $.inp %>"
+        publish:
+          sub_wf_out: "<% task(task1).result.sub_wf_out %>"
+
+  wf2:
+    type: direct
+    input:
+      - inp
+    output:
+      sub_wf_out: "<% $.inp %>"
+
+    tasks:
+      task1:
+        action: std.noop
