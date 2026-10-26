@@ -2758,3 +2758,139 @@ func TestIntegration_Nested_SimplePortsPythonFixture(t *testing.T) {
 
 	t.Logf("  simple nested workbook: 2 WfExs, all SUCCESS ✅")
 }
+
+// TestIntegration_Nested_DeepChainRootExecutionID ports Python WB6: 3-level
+// nested chain wf1→wf2→wf3. Verifies RootExecutionID propagation chain:
+// wf1 (entry) has RootExecutionID = "" (or =wf1.ID self), wf2 & wf3 both
+// point back to wf1.ID as their root. Mirror Python test_subworkflows.py
+// test_subworkflow_root_execution_id.
+func TestIntegration_Nested_DeepChainRootExecutionID(t *testing.T) {
+	final, store := runWorkflowFromYAML(t, fixture{
+		workbookPath:  "nested_deep_chain.yaml",
+		entryWorkflow: "wf1",
+		expectedState: states.SUCCESS,
+	})
+
+	allWfExs, _ := store.WorkflowExecutions().List("")
+	var wf1, wf2, wf3 *db.WorkflowExecution
+	for _, w := range allWfExs {
+		switch w.Name {
+		case "nested_deep_chain.wf1":
+			wf1 = w
+		case "nested_deep_chain.wf2":
+			wf2 = w
+		case "nested_deep_chain.wf3":
+			wf3 = w
+		}
+	}
+	if len(allWfExs) != 3 {
+		t.Fatalf("expected 3 WorkflowExecutions, got %d", len(allWfExs))
+	}
+	if wf1 == nil {
+		t.Fatal("wf1 missing")
+	}
+	if wf2 == nil {
+		t.Fatal("wf2 missing")
+	}
+	if wf3 == nil {
+		t.Fatal("wf3 missing")
+	}
+	for _, w := range []*db.WorkflowExecution{wf1, wf2, wf3} {
+		if w.State != states.SUCCESS {
+			t.Errorf("%s state=%s want SUCCESS", w.Name, w.State)
+		}
+	}
+
+	// Root execution ID chain: wf1 is root (root=itself or empty),
+	// wf2 and wf3 both point to wf1.ID.
+	if wf1.RootExecutionID != "" && wf1.RootExecutionID != wf1.ID {
+		t.Errorf("wf1 RootExecutionID=%q, want empty or wf1.ID=%s", wf1.RootExecutionID, wf1.ID)
+	}
+	if wf2.RootExecutionID != wf1.ID {
+		t.Errorf("wf2 RootExecutionID=%s, want wf1.ID=%s", wf2.RootExecutionID, wf1.ID)
+	}
+	if wf3.RootExecutionID != wf1.ID {
+		t.Errorf("wf3 RootExecutionID=%s, want wf1.ID=%s", wf3.RootExecutionID, wf1.ID)
+	}
+	t.Logf("  RootExecutionID chain: wf1.root=%v wf2.root=%s wf3.root=%s (all → wf1.ID=%s) ✅",
+		wf1.RootExecutionID, wf2.RootExecutionID, wf3.RootExecutionID, wf1.ID)
+
+	t.Logf("  deep chain (3 levels): 3 WfExs all SUCCESS, root chain correct ✅")
+	_ = final
+}
+
+// TestIntegration_Nested_DynamicWorkflowName ports Python WB3: workflow:
+// field can be a YAQL expression <% $.wf_name %> that resolves to a concrete
+// subworkflow name at runtime. Mirrors Python test_subworkflow_success →
+// test_dynamic_subworkflow_wf2.
+func TestIntegration_Nested_DynamicWorkflowName(t *testing.T) {
+	// First: launch wf1 with wf_name="wf2" → child should be wf2, output=wf2_out
+	final, store := runWorkflowFromYAML(t, fixture{
+		workbookPath:  "nested_dynamic_wf.yaml",
+		entryWorkflow: "wf1",
+		input: map[string]interface{}{
+			"wf_name": "wf2",
+		},
+		expectedState: states.SUCCESS,
+	})
+
+	allWfExs, _ := store.WorkflowExecutions().List("")
+	var parentWf, childWf *db.WorkflowExecution
+	for _, w := range allWfExs {
+		switch w.Name {
+		case "nested_dynamic_wf.wf1":
+			parentWf = w
+		case "nested_dynamic_wf.wf2":
+			childWf = w
+		}
+	}
+	if parentWf == nil {
+		t.Fatal("wf1 parent not found")
+	}
+	if childWf == nil {
+		t.Fatal("dynamic wf2 child not found — resolveWorkflowName may not be evaluating <% $.wf_name %>")
+	}
+	if childWf.State != states.SUCCESS {
+		t.Errorf("child wf2 state = %s, want SUCCESS", childWf.State)
+	}
+
+	// Verify parent output has wf2_out propagated via task() builtin.
+	subOut, hasSub := final.Output["sub_wf_out"]
+	if !hasSub {
+		t.Error("parent wf1 output missing 'sub_wf_out'")
+	} else {
+		s, _ := subOut.(string)
+		t.Logf("  parent sub_wf_out=%q", s)
+		if containsAny(s, "<%", "${", "task(") {
+			t.Errorf("parent sub_wf_out still raw expression: %q", s)
+		}
+	}
+	t.Logf("  dynamic wf2: ✅ (wf1→wf2 resolved via $.wf_name expr)")
+
+	// Second run with wf_name="wf3" — verify it picks different child.
+	_, store2 := runWorkflowFromYAML(t, fixture{
+		workbookPath:  "nested_dynamic_wf.yaml",
+		entryWorkflow: "wf1",
+		input: map[string]interface{}{
+			"wf_name": "wf3",
+		},
+		expectedState: states.SUCCESS,
+	})
+
+	allWfExs2, _ := store2.WorkflowExecutions().List("")
+	var childWf3 *db.WorkflowExecution
+	for _, w := range allWfExs2 {
+		if w.Name == "nested_dynamic_wf.wf3" {
+			childWf3 = w
+		}
+	}
+	if childWf3 == nil {
+		t.Fatal("dynamic wf3 child not found — second run didn't pick wf3")
+	}
+	if childWf3.State != states.SUCCESS {
+		t.Errorf("child wf3 state = %s, want SUCCESS", childWf3.State)
+	}
+	t.Logf("  dynamic wf3: ✅ (wf1→wf3 resolved via $.wf_name expr)")
+
+	t.Logf("  dynamic workflow name: wf2 + wf3 both work ✅")
+}

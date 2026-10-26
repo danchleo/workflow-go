@@ -677,7 +677,13 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 	// → WorkflowAction.schedule(): start a child WorkflowExecution with
 	// parent's task_execution_id stashed in params so that when the child
 	// completes it can propagate its result back via OnActionComplete(wfAction=true).
-	if subWfName := taskSpec.GetWorkflowName(); subWfName != "" {
+	if subWfNameRaw := taskSpec.GetWorkflowName(); subWfNameRaw != "" {
+		// Python engine_utils.resolve_workflow_definition first evaluates
+		// workflow: as a YAQL expression — supports <% $.wf_name %> dynamic names.
+		subWfName := resolveWorkflowName(subWfNameRaw, wfEx, wfSpec, nil)
+		if subWfName == "" {
+			return fmt.Errorf("sub-workflow expression %q evaluated to empty", subWfNameRaw)
+		}
 		// Python engine_utils.resolve_workflow_definition:
 		//   parent_wf_ex.runtime_context['wb_name'] → first try wb_name.subWfName
 		//   then fall back to bare subWfName
@@ -817,9 +823,14 @@ func (e *DefaultEngine) startWithItemsTask(ctx context.Context, taskEx *db.TaskE
 	taskEx.RuntimeContext["with_items_started"] = 0
 
 	// Resolve once: is this with-items over actions or over sub-workflows?
-	subWfName := taskSpec.GetWorkflowName()
+	subWfNameRaw := taskSpec.GetWorkflowName()
 	var subWfDef *db.WorkflowDefinition
-	if subWfName != "" {
+	var subWfName string
+	if subWfNameRaw != "" {
+		subWfName = resolveWorkflowName(subWfNameRaw, wfEx, nil, nil)
+		if subWfName == "" {
+			return fmt.Errorf("sub-workflow expression %q evaluated to empty", subWfNameRaw)
+		}
 		// Scope-aware resolution (wb_name first, then global fallback).
 		parentWbName, _ := wfEx.RuntimeContext["wb_name"].(string)
 		var err error
@@ -1088,9 +1099,14 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 					if wfSpec2 != nil {
 						taskSpec := wfSpec2.GetTask(taskEx.Name)
 						if taskSpec != nil {
-							subWfName := taskSpec.GetWorkflowName()
+							subWfNameRaw := taskSpec.GetWorkflowName()
 							var subWfDef *db.WorkflowDefinition
-							if subWfName != "" {
+							var subWfName string
+							if subWfNameRaw != "" {
+								subWfName = resolveWorkflowName(subWfNameRaw, wfEx, wfSpec2, nil)
+								if subWfName == "" {
+									return fmt.Errorf("sub-workflow expression %q evaluated to empty", subWfNameRaw)
+								}
 								parentWbName, _ := wfEx.RuntimeContext["wb_name"].(string)
 								if parentWbName != "" {
 									subWfDef, _ = e.store.WorkflowDefinitions().GetByName(parentWbName+"."+subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID)
@@ -1640,6 +1656,37 @@ func (e *DefaultEngine) checkAndCompleteWorkflow(wfEx *db.WorkflowExecution, ctr
 	}
 
 	return nil
+}
+
+// resolveWorkflowName evaluates a potential YAQL expression in a workflow:
+// field value. Python mistral's engine_utils.resolve_workflow_definition
+// first evaluates `workflow: <% $.wf_name %>` expressions against context
+// before doing the scope-aware lookup. Returns the raw string if it's not
+// an expression (backward-compat).
+func resolveWorkflowName(raw string, wfEx *db.WorkflowExecution, wfSpec *v2.WorkflowSpec, inContext map[string]interface{}) string {
+	if raw == "" {
+		return ""
+	}
+	if !expressions.IsExpression(raw) {
+		return raw
+	}
+	// Build a full context for evaluation.
+	ctx := workflow.BuildFullContext(wfEx, wfSpec, nil)
+	if inContext != nil {
+		ctx["in_context"] = inContext
+	}
+	val, err := expressions.GetDefaultEvaluator().Evaluate(raw, ctx)
+	if err != nil {
+		log.Printf("  resolveWorkflowName evaluate %q failed: %v, falling back to raw", raw, err)
+		return raw
+	}
+	if s, ok := val.(string); ok {
+		return s
+	}
+	if val == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", val)
 }
 
 // evaluateTaskInput evaluates a task's input dictionary against context.

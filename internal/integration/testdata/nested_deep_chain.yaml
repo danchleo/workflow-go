@@ -1,0 +1,23 @@
+---
+version: "2.0"
+
+name: nested_deep_chain
+
+workflows:
+  wf1:
+    type: direct
+    tasks:
+      task1:
+        workflow: wf2
+
+  wf2:
+    type: direct
+    tasks:
+      task1:
+        workflow: wf3
+
+  wf3:
+    type: direct
+    tasks:
+      task1:
+        action: std.noop

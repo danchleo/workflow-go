@@ -1,0 +1,38 @@
+---
+version: "2.0"
+
+name: nested_dynamic_wf
+
+workflows:
+  wf1:
+    type: direct
+    input:
+      - wf_name
+    output:
+      sub_wf_out: "<% $.sub_wf_out %>"
+
+    tasks:
+      task1:
+        # Python: workflow: <% $.wf_name %> — dynamic subworkflow name.
+        # Go resolveWorkflowName() evaluates this YAQL before lookup.
+        workflow: "<% $.wf_name %>"
+        publish:
+          sub_wf_out: "<% task(task1).result.sub_wf_out %>"
+
+  wf2:
+    type: direct
+    output:
+      sub_wf_out: "wf2_out"
+
+    tasks:
+      task1:
+        action: std.noop
+
+  wf3:
+    type: direct
+    output:
+      sub_wf_out: "wf3_out"
+
+    tasks:
+      task1:
+        action: std.noop
