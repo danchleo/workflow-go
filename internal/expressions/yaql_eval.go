@@ -17,7 +17,10 @@ type yaqEval struct {
 }
 
 // BuiltinFunc is the signature for a registered YAQL builtin function.
-type BuiltinFunc func(args []interface{}) (interface{}, error)
+// eval provides per-call context (eval.ctx) so builtins can resolve ctx
+// without a global variable — each yaqEval instance carries its own ctx,
+// making concurrent evaluation safe.
+type BuiltinFunc func(eval *yaqEval, args []interface{}) (interface{}, error)
 
 // NewYaqEval creates a YAQL evaluator with Mistral-standard builtins.
 func NewYaqEval(ctx map[string]interface{}) *yaqEval {
@@ -153,7 +156,7 @@ func (e *yaqEval) evalCall(n *node) (interface{}, error) {
 		if !ok {
 			return nil, fmt.Errorf("unknown method %s()", n.name)
 		}
-		return fn(append([]interface{}{target}, args...))
+		return fn(e, append([]interface{}{target}, args...))
 	}
 
 	// plain function call: func(args)
@@ -161,7 +164,7 @@ func (e *yaqEval) evalCall(n *node) (interface{}, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown function %s()", n.name)
 	}
-	return fn(args)
+	return fn(e, args)
 }
 
 func (e *yaqEval) evalUnary(op tokType, n *node) (interface{}, error) {
@@ -529,10 +532,10 @@ func isIn(needle, haystack interface{}) bool {
 
 // ---------- Standard builtins ----------
 
-func yaqTask(args []interface{}) (interface{}, error) {
+func yaqTask(eval *yaqEval, args []interface{}) (interface{}, error) {
 	// task() → current task (via __task_execution.name or __execution.current_task_id)
 	// task("name") → named task result
-	ctx := currentEvalCtx()
+	ctx := eval.ctx
 	if len(args) == 0 {
 		if cur, ok := ctx["__current_task"]; ok {
 			return cur, nil
@@ -560,31 +563,23 @@ func yaqTask(args []interface{}) (interface{}, error) {
 	return nil, nil
 }
 
-// currentEvalCtx is set temporarily during builtin evaluation so builtins
-// like task() / env() / execution() can access context without threading.
-var currentCtxHolder map[string]interface{}
-
-func currentEvalCtx() map[string]interface{} {
-	return currentCtxHolder
-}
-
-func yaqEnv(args []interface{}) (interface{}, error) {
-	ctx := currentEvalCtx()
+func yaqEnv(eval *yaqEval, args []interface{}) (interface{}, error) {
+	ctx := eval.ctx
 	if v, ok := ctx["__env"]; ok {
 		return v, nil
 	}
 	return map[string]interface{}{}, nil
 }
 
-func yaqExecution(args []interface{}) (interface{}, error) {
-	ctx := currentEvalCtx()
+func yaqExecution(eval *yaqEval, args []interface{}) (interface{}, error) {
+	ctx := eval.ctx
 	if v, ok := ctx["__execution"]; ok {
 		return v, nil
 	}
 	return map[string]interface{}{}, nil
 }
 
-func yaqRange(args []interface{}) (interface{}, error) {
+func yaqRange(eval *yaqEval, args []interface{}) (interface{}, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("range() takes 1 arg")
 	}
@@ -599,11 +594,11 @@ func yaqRange(args []interface{}) (interface{}, error) {
 	return out, nil
 }
 
-func yaqUUID(args []interface{}) (interface{}, error) {
+func yaqUUID(eval *yaqEval, args []interface{}) (interface{}, error) {
 	return uuid.New().String(), nil
 }
 
-func yaqJSONDump(args []interface{}) (interface{}, error) {
+func yaqJSONDump(eval *yaqEval, args []interface{}) (interface{}, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("json_dump_() takes 1 arg")
 	}
@@ -614,7 +609,7 @@ func yaqJSONDump(args []interface{}) (interface{}, error) {
 	return string(b), nil
 }
 
-func yaqJSONParse(args []interface{}) (interface{}, error) {
+func yaqJSONParse(eval *yaqEval, args []interface{}) (interface{}, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("json_parse_() takes 1 arg")
 	}
@@ -629,15 +624,15 @@ func yaqJSONParse(args []interface{}) (interface{}, error) {
 	return v, nil
 }
 
-func yaqGlobal(args []interface{}) (interface{}, error) {
-	ctx := currentEvalCtx()
+func yaqGlobal(eval *yaqEval, args []interface{}) (interface{}, error) {
+	ctx := eval.ctx
 	if v, ok := ctx["__global"]; ok {
 		return v, nil
 	}
 	return nil, nil
 }
 
-func yaqLength(args []interface{}) (interface{}, error) {
+func yaqLength(eval *yaqEval, args []interface{}) (interface{}, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("length() takes 1 arg")
 	}
@@ -653,7 +648,7 @@ func yaqLength(args []interface{}) (interface{}, error) {
 	return 0, nil
 }
 
-func yaqFirst(args []interface{}) (interface{}, error) {
+func yaqFirst(eval *yaqEval, args []interface{}) (interface{}, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("first() takes 1 arg")
 	}
@@ -666,7 +661,7 @@ func yaqFirst(args []interface{}) (interface{}, error) {
 	return nil, nil
 }
 
-func yaqSum(args []interface{}) (interface{}, error) {
+func yaqSum(eval *yaqEval, args []interface{}) (interface{}, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("sum() takes 1 arg")
 	}
@@ -692,7 +687,7 @@ func yaqSum(args []interface{}) (interface{}, error) {
 	return total, nil
 }
 
-func yaqAbs(args []interface{}) (interface{}, error) {
+func yaqAbs(eval *yaqEval, args []interface{}) (interface{}, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("abs() takes 1 arg")
 	}
@@ -712,13 +707,13 @@ func yaqAbs(args []interface{}) (interface{}, error) {
 	return f, nil
 }
 
-func yaqList(args []interface{}) (interface{}, error) {
+func yaqList(eval *yaqEval, args []interface{}) (interface{}, error) {
 	out := make([]interface{}, len(args))
 	copy(out, args)
 	return out, nil
 }
 
-func yaqDict(args []interface{}) (interface{}, error) {
+func yaqDict(eval *yaqEval, args []interface{}) (interface{}, error) {
 	m := make(map[string]interface{})
 	for i := 0; i+1 < len(args); i += 2 {
 		m[fmt.Sprintf("%v", args[i])] = args[i+1]
@@ -735,10 +730,6 @@ func EvaluateYAQL(expr string, ctx map[string]interface{}) (interface{}, error) 
 		return nil, err
 	}
 	ev := NewYaqEval(ctx)
-	// set the context holder so builtins can reach it
-	prev := currentCtxHolder
-	currentCtxHolder = ctx
-	defer func() { currentCtxHolder = prev }()
 	return ev.Eval(n)
 }
 
