@@ -283,7 +283,7 @@ func (s *sqlTaskExStoreSQL) List(workflowExecutionID, state string) ([]*TaskExec
 	if state != "" {
 		q = q.Where("state = ?", state)
 	}
-	if err := q.Find(&gs).Error; err != nil {
+	if err := q.Order("COALESCE(data->>'FinishedAt', '0') ASC").Find(&gs).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*TaskExecution, len(gs))

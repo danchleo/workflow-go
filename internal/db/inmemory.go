@@ -403,8 +403,23 @@ func (t *tmExecStore) List(workflowExecutionID, state string) ([]*TaskExecution,
 		result = append(result, te)
 	}
 
-	// Sort by name.
-	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	// Sort: unfinished first (nil FinishedAt), then by FinishedAt ascending.
+	// This lets BuildFullContext iterate tasks in start-then-finish order so
+	// later-completed task publish values overwrite earlier ones when they
+	// share the same published key — matching Python's dict-assignment order.
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].FinishedAt == nil && result[j].FinishedAt != nil {
+			return true
+		}
+		if result[i].FinishedAt != nil && result[j].FinishedAt == nil {
+			return false
+		}
+		if result[i].FinishedAt != nil && result[j].FinishedAt != nil {
+			return result[i].FinishedAt.Before(*result[j].FinishedAt)
+		}
+		// Both nil: stable tiebreaker by name.
+		return result[i].Name < result[j].Name
+	})
 
 	// Load children.
 	for _, te := range result {
