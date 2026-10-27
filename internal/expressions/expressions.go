@@ -150,13 +150,9 @@ func (e *SimpleEvaluator) evaluateTagged(expr string, ctx map[string]interface{}
 
 // ---------- Package-level entrypoints ----------
 
-// Global default evaluator.
+// Global default evaluator — set once at package init (NewSimpleEvaluator),
+// read-only thereafter. Safe for concurrent use.
 var defaultEvaluator Evaluator = NewSimpleEvaluator()
-
-// SetDefaultEvaluator sets the global default evaluator.
-func SetDefaultEvaluator(e Evaluator) {
-	defaultEvaluator = e
-}
 
 // GetDefaultEvaluator returns the current default evaluator.
 func GetDefaultEvaluator() Evaluator { return defaultEvaluator }

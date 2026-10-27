@@ -33,14 +33,6 @@ func (e *yaqEval) register(name string, fn BuiltinFunc) {
 	e.builtins[name] = fn
 }
 
-// RegisterBuiltin allows external callers to inject additional functions.
-func RegisterBuiltin(name string, fn BuiltinFunc) {
-	// stored globally for now; we can scope later if needed
-	globalBuiltins[name] = fn
-}
-
-var globalBuiltins = map[string]BuiltinFunc{}
-
 func (e *yaqEval) registerStd() {
 	// task() → lookup task result from context["__task_results"] or single arg
 	e.register("task", yaqTask)
@@ -60,10 +52,6 @@ func (e *yaqEval) registerStd() {
 	e.register("abs", yaqAbs)
 	e.register("list", yaqList)
 	e.register("dict", yaqDict)
-	// plus any globally injected ones
-	for k, v := range globalBuiltins {
-		e.register(k, v)
-	}
 }
 
 // Eval is the top-level eval entry.
