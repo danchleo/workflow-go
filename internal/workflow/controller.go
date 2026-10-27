@@ -7,11 +7,11 @@ package workflow
 import (
 	"fmt"
 
-	"github.com/mistral/workflow/internal/commands"
-	"github.com/mistral/workflow/internal/db"
-	"github.com/mistral/workflow/internal/expressions"
-	v2 "github.com/mistral/workflow/internal/lang/v2"
-	"github.com/mistral/workflow/internal/states"
+	"github.com/danchleo/workflow-go/internal/commands"
+	"github.com/danchleo/workflow-go/internal/db"
+	"github.com/danchleo/workflow-go/internal/expressions"
+	v2 "github.com/danchleo/workflow-go/internal/lang/v2"
+	"github.com/danchleo/workflow-go/internal/states"
 )
 
 // WorkflowController determines the next tasks to run given the current state.
@@ -109,7 +109,9 @@ func BuildTaskResultMap(taskExecs []*db.TaskExecution) map[string]interface{} {
 //   - <% $.input.var_name %>      → workflow input
 //   - <% $.env.xxx %>             → environment variables
 //   - <% $.vars.xxx %>            → workflow variables
-func BuildFullContext(wfEx *db.WorkflowExecution, wfSpec *v2.WorkflowSpec, taskExecs []*db.TaskExecution) map[string]interface{} {
+func BuildFullContext(
+	wfEx *db.WorkflowExecution, wfSpec *v2.WorkflowSpec, taskExecs []*db.TaskExecution,
+) map[string]interface{} {
 	ctx := make(map[string]interface{})
 
 	// __task_results mirrors Python's task("name").result lookup.
@@ -228,7 +230,9 @@ type DirectWorkflowController struct {
 }
 
 // NewDirectWorkflowController creates a new direct workflow controller.
-func NewDirectWorkflowController(wfEx *db.WorkflowExecution, wfSpec *v2.WorkflowSpec, tasks []*db.TaskExecution) *DirectWorkflowController {
+func NewDirectWorkflowController(
+	wfEx *db.WorkflowExecution, wfSpec *v2.WorkflowSpec, tasks []*db.TaskExecution,
+) *DirectWorkflowController {
 	return &DirectWorkflowController{
 		wfEx:   wfEx,
 		wfSpec: wfSpec,
@@ -357,11 +361,13 @@ func (c *DirectWorkflowController) findNextCommands(taskEx *db.TaskExecution) []
 				continue
 			}
 
-			triggeredBy := []map[string]interface{}{{
-				"task_id":   taskEx.ID,
-				"task_name": taskEx.Name,
-				"event":     taskEx.State,
-			}}
+			triggeredBy := []map[string]interface{}{
+				{
+					"task_id":   taskEx.ID,
+					"task_name": taskEx.Name,
+					"event":     taskEx.State,
+				},
+			}
 
 			nextTaskSpec := c.wfSpec.GetTask(next.Task)
 			if nextTaskSpec == nil {
@@ -442,7 +448,9 @@ func (c *DirectWorkflowController) filterCompletedTasksForSpecs(specs []*v2.Task
 
 // calculateInboundContext builds the inbound context for a task, including
 // upstream task results under their task names (so $.upstream.result works).
-func (c *DirectWorkflowController) calculateInboundContext(taskSpec *v2.TaskSpec, triggerTask *db.TaskExecution) map[string]interface{} {
+func (c *DirectWorkflowController) calculateInboundContext(
+	taskSpec *v2.TaskSpec, triggerTask *db.TaskExecution,
+) map[string]interface{} {
 	ctx := make(map[string]interface{})
 
 	// Add upstream task results nested under task names.
@@ -603,8 +611,11 @@ func (c *DirectWorkflowController) GetLogicalTaskState(taskEx *db.TaskExecution)
 	}
 	if !joinIsAll && errorCnt > (totalInbound-joinRequirement) {
 		return &TaskLogicalState{
-			State:     states.ERROR,
-			StateInfo: fmt.Sprintf("Cannot satisfy join requirement: %d succeeded, %d failed (need %d)", successCnt, errorCnt, joinRequirement),
+			State: states.ERROR,
+			StateInfo: fmt.Sprintf(
+				"Cannot satisfy join requirement: %d succeeded, %d failed (need %d)", successCnt, errorCnt,
+				joinRequirement,
+			),
 		}, nil
 	}
 
@@ -630,7 +641,9 @@ func (c *DirectWorkflowController) GetLogicalTaskState(taskEx *db.TaskExecution)
 //
 // Cycle guard: visited map prevents infinite loops in DAG traversal.
 // Depth guard: 30 matches Python MAX_SEARCH_DEPTH.
-func (c *DirectWorkflowController) possibleRoute(spec *v2.TaskSpec, tExecByName map[string]*db.TaskExecution, visited map[string]bool, depth int) (bool, int) {
+func (c *DirectWorkflowController) possibleRoute(
+	spec *v2.TaskSpec, tExecByName map[string]*db.TaskExecution, visited map[string]bool, depth int,
+) (bool, int) {
 	const maxDepth = 30
 	if depth > maxDepth {
 		return true, depth // depth cap — assume possible to avoid false negatives
@@ -888,7 +901,9 @@ type ReverseWorkflowController struct {
 	tasks  []*db.TaskExecution
 }
 
-func NewReverseWorkflowController(wfEx *db.WorkflowExecution, wfSpec *v2.WorkflowSpec, tasks []*db.TaskExecution) *ReverseWorkflowController {
+func NewReverseWorkflowController(
+	wfEx *db.WorkflowExecution, wfSpec *v2.WorkflowSpec, tasks []*db.TaskExecution,
+) *ReverseWorkflowController {
 	return &ReverseWorkflowController{wfEx: wfEx, wfSpec: wfSpec, tasks: tasks}
 }
 

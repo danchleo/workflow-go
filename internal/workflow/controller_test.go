@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/mistral/workflow/internal/commands"
-	"github.com/mistral/workflow/internal/db"
-	v2 "github.com/mistral/workflow/internal/lang/v2"
-	"github.com/mistral/workflow/internal/states"
+	"github.com/danchleo/workflow-go/internal/commands"
+	"github.com/danchleo/workflow-go/internal/db"
+	v2 "github.com/danchleo/workflow-go/internal/lang/v2"
+	"github.com/danchleo/workflow-go/internal/states"
 )
 
 // makeWfSpec builds a WorkflowSpec from raw YAML-like data.

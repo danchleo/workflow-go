@@ -7,13 +7,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mistral/workflow/internal/db"
+	"github.com/danchleo/workflow-go/internal/db"
 )
 
 // WorkflowStarter abstracts the engine's StartWorkflow method.
 // Used only by CronRunner; the core Scheduler has no domain knowledge.
 type WorkflowStarter interface {
-	StartWorkflow(ctx context.Context, wfDefID, wfNamespace string, wfExID string, wfInput map[string]interface{}, description string, params map[string]interface{}) (*db.WorkflowExecution, error)
+	StartWorkflow(
+		ctx context.Context, wfDefID, wfNamespace string, wfExID string, wfInput map[string]interface{},
+		description string, params map[string]interface{},
+	) (*db.WorkflowExecution, error)
 }
 
 // CronRunner handles DB-backed cron triggers — it is a separate struct so
@@ -109,8 +112,10 @@ func (c *CronRunner) RunOnce() {
 			params = make(map[string]interface{})
 		}
 
-		wfEx, err := c.engine.StartWorkflow(context.Background(), wfDefID, wfNamespace, "", input,
-			fmt.Sprintf("cron trigger %s", ct.Name), params)
+		wfEx, err := c.engine.StartWorkflow(
+			context.Background(), wfDefID, wfNamespace, "", input,
+			fmt.Sprintf("cron trigger %s", ct.Name), params,
+		)
 		if err != nil {
 			log.Printf("cron-runner: trigger %s: StartWorkflow failed: %v", ct.Name, err)
 			continue

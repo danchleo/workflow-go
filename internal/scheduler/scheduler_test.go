@@ -5,19 +5,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mistral/workflow/internal/db"
+	"github.com/danchleo/workflow-go/internal/db"
 )
 
 // simpleHandler lets tests fire a simple job type without needing engine wiring.
 func registerSimpleHandler() (ch chan int, unreg func()) {
 	ch = make(chan int, 10)
 	var once sync.Once
-	once.Do(func() {
-		RegisterJobHandler("test_counter", func(args map[string]interface{}) {
-			v := db.CoerceInt(args["value"])
-			ch <- v
-		})
-	})
+	once.Do(
+		func() {
+			RegisterJobHandler(
+				"test_counter", func(args map[string]interface{}) {
+					v := db.CoerceInt(args["value"])
+					ch <- v
+				},
+			)
+		},
+	)
 	return ch, func() {}
 }
 

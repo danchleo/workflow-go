@@ -1,7 +1,7 @@
 package v2
 
 import (
-	"github.com/mistral/workflow/internal/lang"
+	"github.com/danchleo/workflow-go/internal/lang"
 )
 
 // Task type constants.

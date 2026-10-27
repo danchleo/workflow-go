@@ -3,7 +3,7 @@ package v2
 import (
 	"fmt"
 
-	"github.com/mistral/workflow/internal/lang"
+	"github.com/danchleo/workflow-go/internal/lang"
 )
 
 // WorkbookSpec represents a Mistral workbook (container for actions and workflows).
@@ -66,11 +66,11 @@ func NewWorkbookSpec(data map[string]interface{}) (*WorkbookSpec, error) {
 	return s, nil
 }
 
-func (s *WorkbookSpec) GetName() string                       { return s.name }
-func (s *WorkbookSpec) GetDescription() string                { return s.description }
-func (s *WorkbookSpec) GetTags() []string                     { return s.tags }
+func (s *WorkbookSpec) GetName() string                               { return s.name }
+func (s *WorkbookSpec) GetDescription() string                        { return s.description }
+func (s *WorkbookSpec) GetTags() []string                             { return s.tags }
 func (s *WorkbookSpec) GetActions() map[string]map[string]interface{} { return s.actions }
-func (s *WorkbookSpec) GetWorkflows() map[string]*WorkflowSpec { return s.workflows }
+func (s *WorkbookSpec) GetWorkflows() map[string]*WorkflowSpec        { return s.workflows }
 
 func (s *WorkbookSpec) ToMap() map[string]interface{} { return s.raw }
 
@@ -104,9 +104,9 @@ func NewActionSpec(name string, data map[string]interface{}) *ActionSpec {
 	return s
 }
 
-func (s *ActionSpec) GetName() string         { return s.name }
-func (s *ActionSpec) GetDescription() string  { return s.description }
-func (s *ActionSpec) GetActionClass() string  { return s.actionClass }
-func (s *ActionSpec) GetInput() map[string]interface{} { return s.input }
+func (s *ActionSpec) GetName() string                       { return s.name }
+func (s *ActionSpec) GetDescription() string                { return s.description }
+func (s *ActionSpec) GetActionClass() string                { return s.actionClass }
+func (s *ActionSpec) GetInput() map[string]interface{}      { return s.input }
 func (s *ActionSpec) GetAttributes() map[string]interface{} { return s.attributes }
-func (s *ActionSpec) ToMap() map[string]interface{} { return s.raw }
+func (s *ActionSpec) ToMap() map[string]interface{}         { return s.raw }

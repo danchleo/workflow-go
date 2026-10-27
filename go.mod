@@ -1,4 +1,4 @@
-module github.com/mistral/workflow
+module github.com/danchleo/workflow-go
 
 go 1.25.4
 

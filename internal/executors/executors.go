@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mistral/workflow/internal/actions"
-	"github.com/mistral/workflow/internal/db"
+	"github.com/danchleo/workflow-go/internal/actions"
+	"github.com/danchleo/workflow-go/internal/db"
 )
 
 // Executor is the interface that action executors must implement.
@@ -17,7 +17,10 @@ import (
 type Executor interface {
 	// RunAction runs an action and returns the result.
 	// async_: if true, run without blocking. For sync actions this still returns immediately.
-	RunAction(action actions.Action, actionExID string, safeRerun bool, execCtx map[string]interface{}, target string, async bool, timeout time.Duration) (*db.Result, error)
+	RunAction(
+		action actions.Action, actionExID string, safeRerun bool, execCtx map[string]interface{}, target string,
+		async bool, timeout time.Duration,
+	) (*db.Result, error)
 }
 
 // LocalExecutor runs actions in-process (synchronous).
@@ -27,7 +30,10 @@ type LocalExecutor struct{}
 // NewLocalExecutor creates a LocalExecutor.
 func NewLocalExecutor() *LocalExecutor { return &LocalExecutor{} }
 
-func (e *LocalExecutor) RunAction(action actions.Action, actionExID string, safeRerun bool, execCtx map[string]interface{}, target string, async bool, timeout time.Duration) (*db.Result, error) {
+func (e *LocalExecutor) RunAction(
+	action actions.Action, actionExID string, safeRerun bool, execCtx map[string]interface{}, target string, async bool,
+	timeout time.Duration,
+) (*db.Result, error) {
 	input := make(map[string]interface{})
 	if actionExID != "" {
 		// Input could come from the action execution — we keep it simple here.
@@ -71,7 +77,10 @@ func NewRemoteExecutor(endpoint string) *RemoteExecutor {
 	return &RemoteExecutor{endpoint: endpoint}
 }
 
-func (e *RemoteExecutor) RunAction(action actions.Action, actionExID string, safeRerun bool, execCtx map[string]interface{}, target string, async bool, timeout time.Duration) (*db.Result, error) {
+func (e *RemoteExecutor) RunAction(
+	action actions.Action, actionExID string, safeRerun bool, execCtx map[string]interface{}, target string, async bool,
+	timeout time.Duration,
+) (*db.Result, error) {
 	log.Printf("remote executor placeholder: action=%s, target=%s", action.Name(), target)
 	return &db.Result{Data: "placeholder — remote execution not available"}, nil
 }

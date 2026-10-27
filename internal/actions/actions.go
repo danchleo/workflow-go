@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mistral/workflow/internal/db"
-	"github.com/mistral/workflow/internal/expressions"
+	"github.com/danchleo/workflow-go/internal/db"
+	"github.com/danchleo/workflow-go/internal/expressions"
 )
 
 // Action is the interface that all Mistral actions must implement.
@@ -361,8 +361,10 @@ func (a *SSHProxiedAction) Run(input map[string]interface{}) (*db.Result, error)
 	}
 	proxyCommand, _ := input["proxy_command"].(string)
 
-	log.Printf("std.ssh_proxied (simulated) — command=%q target=%s via %s@%s",
-		command, host, gatewayUsername, gatewayHost)
+	log.Printf(
+		"std.ssh_proxied (simulated) — command=%q target=%s via %s@%s",
+		command, host, gatewayUsername, gatewayHost,
+	)
 
 	return &db.Result{
 		Data: map[string]interface{}{
@@ -557,122 +559,148 @@ func NewActionRegistry() *ActionRegistry {
 
 // RegisterBuiltinActions registers all standard built-in actions.
 func (r *ActionRegistry) RegisterBuiltinActions() {
-	r.Register(&ActionDescriptor{
-		Name:        "std.echo",
-		Description: "Returns configured output (testing helper)",
-		IsSystem:    true,
-		Factory: func() Action {
-			return NewEchoAction()
+	r.Register(
+		&ActionDescriptor{
+			Name:        "std.echo",
+			Description: "Returns configured output (testing helper)",
+			IsSystem:    true,
+			Factory: func() Action {
+				return NewEchoAction()
+			},
 		},
-	})
+	)
 
-	r.Register(&ActionDescriptor{
-		Name:        "std.noop",
-		Description: "Does nothing and returns nil",
-		IsSystem:    true,
-		Factory: func() Action {
-			return NewNoopAction()
+	r.Register(
+		&ActionDescriptor{
+			Name:        "std.noop",
+			Description: "Does nothing and returns nil",
+			IsSystem:    true,
+			Factory: func() Action {
+				return NewNoopAction()
+			},
 		},
-	})
+	)
 
-	r.Register(&ActionDescriptor{
-		Name:        "std.async_noop",
-		Description: "Async noop for testing",
-		IsSystem:    true,
-		Factory: func() Action {
-			return NewAsyncNoopAction()
+	r.Register(
+		&ActionDescriptor{
+			Name:        "std.async_noop",
+			Description: "Async noop for testing",
+			IsSystem:    true,
+			Factory: func() Action {
+				return NewAsyncNoopAction()
+			},
 		},
-	})
+	)
 
-	r.Register(&ActionDescriptor{
-		Name:        "std.fail",
-		Description: "Always fails",
-		IsSystem:    true,
-		Factory: func() Action {
-			return NewFailAction()
+	r.Register(
+		&ActionDescriptor{
+			Name:        "std.fail",
+			Description: "Always fails",
+			IsSystem:    true,
+			Factory: func() Action {
+				return NewFailAction()
+			},
 		},
-	})
+	)
 
-	r.Register(&ActionDescriptor{
-		Name:        "std.sleep",
-		Description: "Sleeps for N seconds",
-		IsSystem:    true,
-		Factory: func() Action {
-			return NewSleepAction()
+	r.Register(
+		&ActionDescriptor{
+			Name:        "std.sleep",
+			Description: "Sleeps for N seconds",
+			IsSystem:    true,
+			Factory: func() Action {
+				return NewSleepAction()
+			},
 		},
-	})
+	)
 
-	r.Register(&ActionDescriptor{
-		Name:        "std.wait_ssh",
-		Description: "Simulates SSH readiness wait",
-		IsSystem:    true,
-		Factory: func() Action {
-			return NewWaitSSHAction()
+	r.Register(
+		&ActionDescriptor{
+			Name:        "std.wait_ssh",
+			Description: "Simulates SSH readiness wait",
+			IsSystem:    true,
+			Factory: func() Action {
+				return NewWaitSSHAction()
+			},
 		},
-	})
+	)
 
-	r.Register(&ActionDescriptor{
-		Name:        "std.http",
-		Description: "Performs an HTTP request (method/url/body/headers/timeout)",
-		IsSystem:    true,
-		Factory: func() Action {
-			return NewHttpAction()
+	r.Register(
+		&ActionDescriptor{
+			Name:        "std.http",
+			Description: "Performs an HTTP request (method/url/body/headers/timeout)",
+			IsSystem:    true,
+			Factory: func() Action {
+				return NewHttpAction()
+			},
 		},
-	})
+	)
 
-	r.Register(&ActionDescriptor{
-		Name:        "std.mistral_http",
-		Description: "Triggers a workflow in this engine via HTTP POST /v2/executions",
-		IsSystem:    true,
-		Factory: func() Action {
-			return NewMistralHttpAction()
+	r.Register(
+		&ActionDescriptor{
+			Name:        "std.mistral_http",
+			Description: "Triggers a workflow in this engine via HTTP POST /v2/executions",
+			IsSystem:    true,
+			Factory: func() Action {
+				return NewMistralHttpAction()
+			},
 		},
-	})
+	)
 
-	r.Register(&ActionDescriptor{
-		Name:        "std.email",
-		Description: "Sends an email via SMTP (simulated: logs params)",
-		IsSystem:    true,
-		Factory: func() Action {
-			return NewEmailAction()
+	r.Register(
+		&ActionDescriptor{
+			Name:        "std.email",
+			Description: "Sends an email via SMTP (simulated: logs params)",
+			IsSystem:    true,
+			Factory: func() Action {
+				return NewEmailAction()
+			},
 		},
-	})
+	)
 
-	r.Register(&ActionDescriptor{
-		Name:        "std.ssh",
-		Description: "Runs a remote command via SSH (simulated: returns command as stdout)",
-		IsSystem:    true,
-		Factory: func() Action {
-			return NewSSHAction()
+	r.Register(
+		&ActionDescriptor{
+			Name:        "std.ssh",
+			Description: "Runs a remote command via SSH (simulated: returns command as stdout)",
+			IsSystem:    true,
+			Factory: func() Action {
+				return NewSSHAction()
+			},
 		},
-	})
+	)
 
-	r.Register(&ActionDescriptor{
-		Name:        "std.ssh_proxied",
-		Description: "Runs a remote SSH command through a bastion/gateway host (simulated)",
-		IsSystem:    true,
-		Factory: func() Action {
-			return NewSSHProxiedAction()
+	r.Register(
+		&ActionDescriptor{
+			Name:        "std.ssh_proxied",
+			Description: "Runs a remote SSH command through a bastion/gateway host (simulated)",
+			IsSystem:    true,
+			Factory: func() Action {
+				return NewSSHProxiedAction()
+			},
 		},
-	})
+	)
 
-	r.Register(&ActionDescriptor{
-		Name:        "std.javascript",
-		Description: "Evaluates a JavaScript expression (falls back to Mistral expressions)",
-		IsSystem:    true,
-		Factory: func() Action {
-			return NewJavaScriptAction()
+	r.Register(
+		&ActionDescriptor{
+			Name:        "std.javascript",
+			Description: "Evaluates a JavaScript expression (falls back to Mistral expressions)",
+			IsSystem:    true,
+			Factory: func() Action {
+				return NewJavaScriptAction()
+			},
 		},
-	})
+	)
 
-	r.Register(&ActionDescriptor{
-		Name:        "std.test_dict",
-		Description: "Returns a fixed test dict (standard Mistral testing helper)",
-		IsSystem:    true,
-		Factory: func() Action {
-			return NewTestDictAction()
+	r.Register(
+		&ActionDescriptor{
+			Name:        "std.test_dict",
+			Description: "Returns a fixed test dict (standard Mistral testing helper)",
+			IsSystem:    true,
+			Factory: func() Action {
+				return NewTestDictAction()
+			},
 		},
-	})
+	)
 }
 
 // Register registers an action descriptor.

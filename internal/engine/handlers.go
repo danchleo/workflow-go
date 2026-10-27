@@ -7,16 +7,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mistral/workflow/internal/actions"
-	"github.com/mistral/workflow/internal/commands"
-	"github.com/mistral/workflow/internal/db"
-	"github.com/mistral/workflow/internal/executors"
-	"github.com/mistral/workflow/internal/expressions"
-	"github.com/mistral/workflow/internal/lang"
-	v2 "github.com/mistral/workflow/internal/lang/v2"
-	"github.com/mistral/workflow/internal/scheduler"
-	"github.com/mistral/workflow/internal/states"
-	"github.com/mistral/workflow/internal/workflow"
+	"github.com/danchleo/workflow-go/internal/actions"
+	"github.com/danchleo/workflow-go/internal/commands"
+	"github.com/danchleo/workflow-go/internal/db"
+	"github.com/danchleo/workflow-go/internal/executors"
+	"github.com/danchleo/workflow-go/internal/expressions"
+	"github.com/danchleo/workflow-go/internal/lang"
+	v2 "github.com/danchleo/workflow-go/internal/lang/v2"
+	"github.com/danchleo/workflow-go/internal/scheduler"
+	"github.com/danchleo/workflow-go/internal/states"
+	"github.com/danchleo/workflow-go/internal/workflow"
 )
 
 // DefaultEngine is the main engine implementation.
@@ -51,115 +51,131 @@ var engineHandlersOnce sync.Once
 // registerEngineJobHandler registers engine-specific handlers for JobType
 // values. Called once by WithScheduler — idempotent via sync.Once.
 func registerEngineJobHandlers(e *DefaultEngine) {
-	engineHandlersOnce.Do(func() {
-		// fail_if_incomplete: scheduler fires → engine forces ActionExecution ERROR.
-		scheduler.RegisterJobHandler(scheduler.JobFailIfIncomplete, func(args map[string]interface{}) {
-			actionExID, _ := args["action_ex_id"].(string)
-			timeoutSec := db.CoerceInt(args["timeout_sec"])
-			e.failIfIncomplete(actionExID, timeoutSec)
-		})
+	engineHandlersOnce.Do(
+		func() {
+			// fail_if_incomplete: scheduler fires → engine forces ActionExecution ERROR.
+			scheduler.RegisterJobHandler(
+				scheduler.JobFailIfIncomplete, func(args map[string]interface{}) {
+					actionExID, _ := args["action_ex_id"].(string)
+					timeoutSec := db.CoerceInt(args["timeout_sec"])
+					e.failIfIncomplete(actionExID, timeoutSec)
+				},
+			)
 
-		// continue_task: generic deferred re-entry to StartTask.
-		//   wait-before  → just re-start the task (sets RUNNING_DELAYED → RUNNING).
-		//   retry delay  → re-set retry_attempts on taskEx BEFORE re-entering StartTask
-		//                  so the new ActionExecution carries the right attempt count.
-		scheduler.RegisterJobHandler(scheduler.JobContinueTask, func(args map[string]interface{}) {
-			taskExID, _ := args["task_ex_id"].(string)
-			if taskExID == "" {
-				return
-			}
-
-			if stashed, ok := args["stashed_retry_attempts"]; ok {
-				attempt := db.CoerceInt(stashed)
-				retryLimit := db.CoerceInt(args["retry_limit"])
-				te, _ := e.store.TaskExecutions().Get(taskExID)
-				if te != nil {
-					wfDef, _ := e.store.WorkflowDefinitions().Get(te.WorkflowID)
-					if wfDef != nil {
-						wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
-						taskSpec := wfSpec.GetTask(te.Name)
-						if taskSpec != nil {
-							input, _ := te.RuntimeContext["retry_action_input"].(map[string]interface{})
-							actionName, _ := te.RuntimeContext["retry_action_name"].(string)
-							idx := db.CoerceInt(te.RuntimeContext["retry_action_index"])
-							sync2 := true
-							newActionEx := &db.ActionExecution{
-								Name:              actionName,
-								State:             states.RUNNING,
-								Input:             input,
-								RuntimeContext:    map[string]interface{}{"index": idx, "safe_rerun": true, "retry_attempts": attempt},
-								WorkflowNamespace: te.WorkflowNamespace,
-								TaskExecutionID:   te.ID,
-								WorkflowName:      te.WorkflowName,
-								WorkflowID:        te.WorkflowID,
-								ProjectID:         te.ProjectID,
-								IsSync:            &sync2,
-							}
-							if err := e.store.ActionExecutions().Create(newActionEx); err == nil {
-								e.scheduleTaskTimeout(newActionEx, te, taskSpec)
-								log.Printf("scheduler: retry [delayed] attempt %d/%d fired → action_ex=%s",
-									attempt, retryLimit, newActionEx.ID)
-							}
-						}
+			// continue_task: generic deferred re-entry to StartTask.
+			//   wait-before  → just re-start the task (sets RUNNING_DELAYED → RUNNING).
+			//   retry delay  → re-set retry_attempts on taskEx BEFORE re-entering StartTask
+			//                  so the new ActionExecution carries the right attempt count.
+			scheduler.RegisterJobHandler(
+				scheduler.JobContinueTask, func(args map[string]interface{}) {
+					taskExID, _ := args["task_ex_id"].(string)
+					if taskExID == "" {
+						return
 					}
-					te.State = states.RUNNING
-					te.StateInfo = ""
-					_ = e.store.TaskExecutions().Update(te)
-				}
-				return
-			}
 
-			if err := e.StartTask(context.Background(), taskExID, false, false, nil, false, false); err != nil {
-				log.Printf("scheduler: JobContinueTask StartTask(%s) failed: %v", taskExID, err)
-			}
-		})
+					if stashed, ok := args["stashed_retry_attempts"]; ok {
+						attempt := db.CoerceInt(stashed)
+						retryLimit := db.CoerceInt(args["retry_limit"])
+						te, _ := e.store.TaskExecutions().Get(taskExID)
+						if te != nil {
+							wfDef, _ := e.store.WorkflowDefinitions().Get(te.WorkflowID)
+							if wfDef != nil {
+								wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
+								taskSpec := wfSpec.GetTask(te.Name)
+								if taskSpec != nil {
+									input, _ := te.RuntimeContext["retry_action_input"].(map[string]interface{})
+									actionName, _ := te.RuntimeContext["retry_action_name"].(string)
+									idx := db.CoerceInt(te.RuntimeContext["retry_action_index"])
+									sync2 := true
+									newActionEx := &db.ActionExecution{
+										Name:  actionName,
+										State: states.RUNNING,
+										Input: input,
+										RuntimeContext: map[string]interface{}{
+											"index": idx, "safe_rerun": true, "retry_attempts": attempt,
+										},
+										WorkflowNamespace: te.WorkflowNamespace,
+										TaskExecutionID:   te.ID,
+										WorkflowName:      te.WorkflowName,
+										WorkflowID:        te.WorkflowID,
+										ProjectID:         te.ProjectID,
+										IsSync:            &sync2,
+									}
+									if err := e.store.ActionExecutions().Create(newActionEx); err == nil {
+										e.scheduleTaskTimeout(newActionEx, te, taskSpec)
+										log.Printf(
+											"scheduler: retry [delayed] attempt %d/%d fired → action_ex=%s",
+											attempt, retryLimit, newActionEx.ID,
+										)
+									}
+								}
+							}
+							te.State = states.RUNNING
+							te.StateInfo = ""
+							_ = e.store.TaskExecutions().Update(te)
+						}
+						return
+					}
 
-		// complete_task: wait-after deferred final state change + advanceWorkflow.
-		scheduler.RegisterJobHandler("complete_task", func(args map[string]interface{}) {
-			wfExID, _ := args["wf_ex_id"].(string)
-			taskExID, _ := args["task_ex_id"].(string)
-			endState, _ := args["end_state"].(string)
-			endInfo, _ := args["end_info"].(string)
+					if err := e.StartTask(context.Background(), taskExID, false, false, nil, false, false); err != nil {
+						log.Printf("scheduler: JobContinueTask StartTask(%s) failed: %v", taskExID, err)
+					}
+				},
+			)
 
-			if wfExID == "" || taskExID == "" {
-				return
-			}
-			te, _ := e.store.TaskExecutions().Get(taskExID)
-			if te == nil {
-				return
-			}
-			te.State = endState
-			te.StateInfo = endInfo
-			te.Processed = true
-			if err := e.store.TaskExecutions().Update(te); err != nil {
-				log.Printf("scheduler: JobCompleteTask finalize failed: %v", err)
-				return
-			}
-			e.advanceWorkflow(wfExID, taskExID)
-		})
+			// complete_task: wait-after deferred final state change + advanceWorkflow.
+			scheduler.RegisterJobHandler(
+				"complete_task", func(args map[string]interface{}) {
+					wfExID, _ := args["wf_ex_id"].(string)
+					taskExID, _ := args["task_ex_id"].(string)
+					endState, _ := args["end_state"].(string)
+					endInfo, _ := args["end_info"].(string)
 
-		// refresh_task_state: join-task wakeup. Scheduled after any task completes,
-		// this handler re-evaluates a waiting join task's logical state and either
-		// (a) re-enters StartTask if RUNNING (calling continue_task / _refresh_task_state),
-		// (b) marks ERROR if dependencies are permanently broken, or
-		// (c) no-ops if still WAITING.
-		// Mirrors Python task_handler._refresh_task_state + _schedule_refresh_task_state.
-		scheduler.RegisterJobHandler(scheduler.JobRefreshTaskState, func(args map[string]interface{}) {
-			taskExID, _ := args["task_ex_id"].(string)
-			if taskExID == "" {
-				return
-			}
-			e.refreshTaskState(taskExID)
-		})
+					if wfExID == "" || taskExID == "" {
+						return
+					}
+					te, _ := e.store.TaskExecutions().Get(taskExID)
+					if te == nil {
+						return
+					}
+					te.State = endState
+					te.StateInfo = endInfo
+					te.Processed = true
+					if err := e.store.TaskExecutions().Update(te); err != nil {
+						log.Printf("scheduler: JobCompleteTask finalize failed: %v", err)
+						return
+					}
+					e.advanceWorkflow(wfExID, taskExID)
+				},
+			)
 
-		scheduler.RegisterJobHandler(scheduler.JobIntegrityCheck, func(args map[string]interface{}) {
-			wfExID, _ := args["wf_ex_id"].(string)
-			if wfExID == "" {
-				return
-			}
-			e.checkIntegrity(context.Background(), wfExID)
-		})
-	})
+			// refresh_task_state: join-task wakeup. Scheduled after any task completes,
+			// this handler re-evaluates a waiting join task's logical state and either
+			// (a) re-enters StartTask if RUNNING (calling continue_task / _refresh_task_state),
+			// (b) marks ERROR if dependencies are permanently broken, or
+			// (c) no-ops if still WAITING.
+			// Mirrors Python task_handler._refresh_task_state + _schedule_refresh_task_state.
+			scheduler.RegisterJobHandler(
+				scheduler.JobRefreshTaskState, func(args map[string]interface{}) {
+					taskExID, _ := args["task_ex_id"].(string)
+					if taskExID == "" {
+						return
+					}
+					e.refreshTaskState(taskExID)
+				},
+			)
+
+			scheduler.RegisterJobHandler(
+				scheduler.JobIntegrityCheck, func(args map[string]interface{}) {
+					wfExID, _ := args["wf_ex_id"].(string)
+					if wfExID == "" {
+						return
+					}
+					e.checkIntegrity(context.Background(), wfExID)
+				},
+			)
+		},
+	)
 }
 
 // scheduleTaskTimeout checks the task's timeout policy and, if set, fires
@@ -168,7 +184,9 @@ func registerEngineJobHandlers(e *DefaultEngine) {
 // it's still not completed. Mirrors Python TimeoutPolicy.before_task_start
 // (mistral/engine/policies.py ~line 412) which schedules _fail_if_incomplete
 // via the system scheduler.
-func (e *DefaultEngine) scheduleTaskTimeout(actionEx *db.ActionExecution, taskEx *db.TaskExecution, taskSpec *v2.TaskSpec) {
+func (e *DefaultEngine) scheduleTaskTimeout(
+	actionEx *db.ActionExecution, taskEx *db.TaskExecution, taskSpec *v2.TaskSpec,
+) {
 	if taskSpec == nil {
 		return
 	}
@@ -201,9 +219,11 @@ func (e *DefaultEngine) scheduleTaskTimeout(actionEx *db.ActionExecution, taskEx
 			time.AfterFunc(delay, func() { e.failIfIncomplete(actionEx.ID, timeoutSec) })
 		}
 	} else {
-		time.AfterFunc(delay, func() {
-			e.failIfIncomplete(actionEx.ID, timeoutSec)
-		})
+		time.AfterFunc(
+			delay, func() {
+				e.failIfIncomplete(actionEx.ID, timeoutSec)
+			},
+		)
 	}
 }
 
@@ -239,7 +259,10 @@ func (e *DefaultEngine) Store() db.Store { return e.store }
 func (e *DefaultEngine) Dispatcher() *Dispatcher { return e.dispatcher }
 
 // StartWorkflow creates a new workflow execution and starts processing.
-func (e *DefaultEngine) StartWorkflow(ctx context.Context, wfDefID, wfNamespace, wfExID string, wfInput map[string]interface{}, description string, params map[string]interface{}) (*db.WorkflowExecution, error) {
+func (e *DefaultEngine) StartWorkflow(
+	ctx context.Context, wfDefID, wfNamespace, wfExID string, wfInput map[string]interface{}, description string,
+	params map[string]interface{},
+) (*db.WorkflowExecution, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
@@ -298,11 +321,13 @@ func (e *DefaultEngine) StartWorkflow(ctx context.Context, wfDefID, wfNamespace,
 
 	// Initialize context with workflow variables.
 	for k, v := range wfSpec.GetVars() {
-		wfEx.Context[k] = expressions.EvaluateRecursively(v, map[string]interface{}{
-			"__env":  params["env"],
-			"input":  wfInput,
-			"params": params,
-		})
+		wfEx.Context[k] = expressions.EvaluateRecursively(
+			v, map[string]interface{}{
+				"__env":  params["env"],
+				"input":  wfInput,
+				"params": params,
+			},
+		)
 	}
 	for k, v := range wfInput {
 		wfEx.Context[k] = v
@@ -455,7 +480,9 @@ func (e *DefaultEngine) StopWorkflow(ctx context.Context, wfExID string, state s
 }
 
 // RerunWorkflow reruns a workflow from a specific task execution.
-func (e *DefaultEngine) RerunWorkflow(ctx context.Context, taskExID string, reset bool, skip bool, env map[string]interface{}) error {
+func (e *DefaultEngine) RerunWorkflow(
+	ctx context.Context, taskExID string, reset bool, skip bool, env map[string]interface{},
+) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -549,7 +576,10 @@ func (e *DefaultEngine) RerunWorkflow(ctx context.Context, taskExID string, rese
 }
 
 // StartTask runs a task execution.
-func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool, reset bool) error {
+func (e *DefaultEngine) StartTask(
+	ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool,
+	reset bool,
+) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -653,9 +683,11 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 					if err := e.store.TaskExecutions().Update(taskEx); err != nil {
 						log.Printf("wait-before: update taskEx to RUNNING_DELAYED failed: %v", err)
 					}
-					e.sched.Schedule(scheduler.JobContinueTask, map[string]interface{}{
-						"task_ex_id": taskExID,
-					}, delay)
+					e.sched.Schedule(
+						scheduler.JobContinueTask, map[string]interface{}{
+							"task_ex_id": taskExID,
+						}, delay,
+					)
 					log.Printf("wait-before: task %s delayed %ds → RUNNING_DELAYED", taskEx.Name, wbSec)
 					return nil
 				}
@@ -691,7 +723,9 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 		var wfDef *db.WorkflowDefinition
 		var err error
 		if parentWbName != "" {
-			wfDef, err = e.store.WorkflowDefinitions().GetByName(parentWbName+"."+subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID)
+			wfDef, err = e.store.WorkflowDefinitions().GetByName(
+				parentWbName+"."+subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID,
+			)
 		}
 		if wfDef == nil || err != nil {
 			wfDef, err = e.store.WorkflowDefinitions().GetByName(subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID)
@@ -720,8 +754,10 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 			"index":             0,
 		}
 
-		childEx, err := e.StartWorkflow(ctx, wfDef.ID, wfEx.WorkflowNamespace, "", childInput,
-			fmt.Sprintf("nested from %s/%s", wfEx.ID, taskEx.Name), childParams)
+		childEx, err := e.StartWorkflow(
+			ctx, wfDef.ID, wfEx.WorkflowNamespace, "", childInput,
+			fmt.Sprintf("nested from %s/%s", wfEx.ID, taskEx.Name), childParams,
+		)
 		if err != nil {
 			return fmt.Errorf("start sub-workflow %q: %w", subWfName, err)
 		}
@@ -770,7 +806,10 @@ func (e *DefaultEngine) StartTask(ctx context.Context, taskExID string, firstRun
 // startWithItemsTask launches parallel iterations — either ActionExecutions or
 // nested WorkflowExecutions, depending on whether the task has `action:` or `workflow:`.
 // Port of Python WithItemsTask → N×_build_action() (RegularAction or WorkflowAction).
-func (e *DefaultEngine) startWithItemsTask(ctx context.Context, taskEx *db.TaskExecution, taskSpec *v2.TaskSpec, wfEx *db.WorkflowExecution, withItems map[string]interface{}, baseInput map[string]interface{}) error {
+func (e *DefaultEngine) startWithItemsTask(
+	ctx context.Context, taskEx *db.TaskExecution, taskSpec *v2.TaskSpec, wfEx *db.WorkflowExecution,
+	withItems map[string]interface{}, baseInput map[string]interface{},
+) error {
 	// Evaluate each with-items expression to get the actual item lists.
 	ctxMap := workflow.BuildFullContext(wfEx, nil, nil)
 	withValues := make(map[string][]interface{})
@@ -785,7 +824,9 @@ func (e *DefaultEngine) startWithItemsTask(ctx context.Context, taskEx *db.TaskE
 			// Literal list form (Mistral YAML map syntax): with-items: {item: [a, b]}.
 			val = v
 		default:
-			return fmt.Errorf("with-items value for %q must be string expression or literal list, got %T", varName, rawExpr)
+			return fmt.Errorf(
+				"with-items value for %q must be string expression or literal list, got %T", varName, rawExpr,
+			)
 		}
 		var items []interface{}
 		switch v := val.(type) {
@@ -835,7 +876,9 @@ func (e *DefaultEngine) startWithItemsTask(ctx context.Context, taskEx *db.TaskE
 		parentWbName, _ := wfEx.RuntimeContext["wb_name"].(string)
 		var err error
 		if parentWbName != "" {
-			subWfDef, err = e.store.WorkflowDefinitions().GetByName(parentWbName+"."+subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID)
+			subWfDef, err = e.store.WorkflowDefinitions().GetByName(
+				parentWbName+"."+subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID,
+			)
 		}
 		if subWfDef == nil || err != nil {
 			subWfDef, err = e.store.WorkflowDefinitions().GetByName(subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID)
@@ -851,7 +894,9 @@ func (e *DefaultEngine) startWithItemsTask(ctx context.Context, taskEx *db.TaskE
 	initialBatch := concurrency
 	startedCount := 0
 	for i := 0; i < initialBatch; i++ {
-		if err := e.startWithItemsIter(ctx, i, minLen, taskEx, taskSpec, wfEx, subWfDef, withValues, baseInput, subWfName); err != nil {
+		if err := e.startWithItemsIter(
+			ctx, i, minLen, taskEx, taskSpec, wfEx, subWfDef, withValues, baseInput, subWfName,
+		); err != nil {
 			return err
 		}
 		startedCount++
@@ -862,7 +907,10 @@ func (e *DefaultEngine) startWithItemsTask(ctx context.Context, taskEx *db.TaskE
 		return err
 	}
 	if concurrency < minLen {
-		log.Printf("with-items task %s started (concurrency %d/%d, %d deferred)", taskEx.Name, concurrency, minLen, minLen-concurrency)
+		log.Printf(
+			"with-items task %s started (concurrency %d/%d, %d deferred)", taskEx.Name, concurrency, minLen,
+			minLen-concurrency,
+		)
 	} else {
 		log.Printf("with-items task %s started (%d parallel iterations)", taskEx.Name, minLen)
 	}
@@ -870,7 +918,11 @@ func (e *DefaultEngine) startWithItemsTask(ctx context.Context, taskEx *db.TaskE
 }
 
 // startWithItemsIter creates a single with-items iteration (ActionExecution or child WorkflowExecution).
-func (e *DefaultEngine) startWithItemsIter(ctx context.Context, i, total int, taskEx *db.TaskExecution, taskSpec *v2.TaskSpec, wfEx *db.WorkflowExecution, subWfDef *db.WorkflowDefinition, withValues map[string][]interface{}, baseInput map[string]interface{}, subWfName string) error {
+func (e *DefaultEngine) startWithItemsIter(
+	ctx context.Context, i, total int, taskEx *db.TaskExecution, taskSpec *v2.TaskSpec, wfEx *db.WorkflowExecution,
+	subWfDef *db.WorkflowDefinition, withValues map[string][]interface{}, baseInput map[string]interface{},
+	subWfName string,
+) error {
 	// Build per-iteration context — Python WithItemsTask re-evaluates input
 	// expressions with the iteration variables bound so that "<% $.vm_info %>"
 	// resolves to the current iteration item.
@@ -915,8 +967,10 @@ func (e *DefaultEngine) startWithItemsIter(ctx context.Context, i, total int, ta
 			"root_execution_id": rootExID,
 			"index":             i,
 		}
-		childEx, err := e.StartWorkflow(ctx, subWfDef.ID, wfEx.WorkflowNamespace, "", iterInput,
-			fmt.Sprintf("with-items iter %d/%d of %s", i+1, total, taskEx.Name), iterParams)
+		childEx, err := e.StartWorkflow(
+			ctx, subWfDef.ID, wfEx.WorkflowNamespace, "", iterInput,
+			fmt.Sprintf("with-items iter %d/%d of %s", i+1, total, taskEx.Name), iterParams,
+		)
 		if err != nil {
 			return fmt.Errorf("with-items iter %d sub-workflow: %w", i, err)
 		}
@@ -938,7 +992,9 @@ func (e *DefaultEngine) startWithItemsIter(ctx context.Context, i, total int, ta
 		if err := e.store.ActionExecutions().Create(actionEx); err != nil {
 			return fmt.Errorf("creating with-items action execution %d: %w", i, err)
 		}
-		log.Printf("with-items iter %d/%d action created for task %s (action_ex=%s)", i+1, total, taskEx.Name, actionEx.ID)
+		log.Printf(
+			"with-items iter %d/%d action created for task %s (action_ex=%s)", i+1, total, taskEx.Name, actionEx.ID,
+		)
 		// Timeout policy — each with-items iteration gets its own timer.
 		e.scheduleTaskTimeout(actionEx, taskEx, taskSpec)
 	}
@@ -946,7 +1002,9 @@ func (e *DefaultEngine) startWithItemsIter(ctx context.Context, i, total int, ta
 }
 
 // OnActionComplete handles action completion events.
-func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string, result *db.Result, wfAction bool) error {
+func (e *DefaultEngine) OnActionComplete(
+	ctx context.Context, actionExID string, result *db.Result, wfAction bool,
+) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -1109,10 +1167,14 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 								}
 								parentWbName, _ := wfEx.RuntimeContext["wb_name"].(string)
 								if parentWbName != "" {
-									subWfDef, _ = e.store.WorkflowDefinitions().GetByName(parentWbName+"."+subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID)
+									subWfDef, _ = e.store.WorkflowDefinitions().GetByName(
+										parentWbName+"."+subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID,
+									)
 								}
 								if subWfDef == nil {
-									subWfDef, _ = e.store.WorkflowDefinitions().GetByName(subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID)
+									subWfDef, _ = e.store.WorkflowDefinitions().GetByName(
+										subWfName, wfEx.WorkflowNamespace, wfEx.ProjectID,
+									)
 								}
 							}
 							withValues, _ := taskEx.RuntimeContext["with_items_values"].(map[string][]interface{})
@@ -1129,9 +1191,14 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 								}
 							}
 							// Load task input from wfSpec.
-							inputDict := evaluateTaskInput(taskSpec, workflow.BuildFullContext(wfEx, wfSpec2, nil), wfEx.Input, wfEx.Context)
+							inputDict := evaluateTaskInput(
+								taskSpec, workflow.BuildFullContext(wfEx, wfSpec2, nil), wfEx.Input, wfEx.Context,
+							)
 							for b := 0; b < capacity && startedCount < total; b++ {
-								if err := e.startWithItemsIter(ctx, startedCount, total, taskEx, taskSpec, wfEx, subWfDef, withValues, inputDict, subWfName); err != nil {
+								if err := e.startWithItemsIter(
+									ctx, startedCount, total, taskEx, taskSpec, wfEx, subWfDef, withValues, inputDict,
+									subWfName,
+								); err != nil {
 									return fmt.Errorf("with-items capacity launch iter %d: %w", startedCount, err)
 								}
 								startedCount++
@@ -1140,12 +1207,17 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 						}
 					}
 				}
-				log.Printf("with-items task %s capacity refill: launched %d new iters, started=%d/%d", taskEx.Name, min(capacity, total-startedCount), startedCount, total)
+				log.Printf(
+					"with-items task %s capacity refill: launched %d new iters, started=%d/%d", taskEx.Name,
+					min(capacity, total-startedCount), startedCount, total,
+				)
 			}
 		}
 
 		if doneCount < total {
-			log.Printf("with-items task %s: %d/%d iterations done (%d failed)", taskEx.Name, doneCount, total, failedCount)
+			log.Printf(
+				"with-items task %s: %d/%d iterations done (%d failed)", taskEx.Name, doneCount, total, failedCount,
+			)
 			return e.store.TaskExecutions().Update(taskEx)
 		}
 		// Aggregate final state — Python WithItemsTask rule.
@@ -1153,8 +1225,10 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 			newState = states.ERROR
 			stateInfo = fmt.Sprintf("%d of %d with-items iterations failed", failedCount, total)
 		}
-		log.Printf("with-items task %s: all %d iterations done (%d failed), final state=%s",
-			taskEx.Name, total, failedCount, newState)
+		log.Printf(
+			"with-items task %s: all %d iterations done (%d failed), final state=%s",
+			taskEx.Name, total, failedCount, newState,
+		)
 	}
 
 	// ================================================================
@@ -1187,14 +1261,18 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 							if err := e.store.TaskExecutions().Update(taskEx); err != nil {
 								log.Printf("wait-after: update taskEx to RUNNING_DELAYED failed: %v", err)
 							}
-							e.sched.Schedule("complete_task", map[string]interface{}{
-								"wf_ex_id":   wfEx.ID,
-								"task_ex_id": taskEx.ID,
-								"end_state":  newState,
-								"end_info":   stateInfo,
-							}, delay)
-							log.Printf("wait-after: task %s completion delayed %ds → RUNNING_DELAYED (will finish as %s)",
-								taskEx.Name, waSec, newState)
+							e.sched.Schedule(
+								"complete_task", map[string]interface{}{
+									"wf_ex_id":   wfEx.ID,
+									"task_ex_id": taskEx.ID,
+									"end_state":  newState,
+									"end_info":   stateInfo,
+								}, delay,
+							)
+							log.Printf(
+								"wait-after: task %s completion delayed %ds → RUNNING_DELAYED (will finish as %s)",
+								taskEx.Name, waSec, newState,
+							)
 							return nil
 						}
 					}
@@ -1329,7 +1407,9 @@ func (e *DefaultEngine) OnActionComplete(ctx context.Context, actionExID string,
 // Returns (retried, error): retried=true means a new ActionExecution will
 // be created (either now or later via scheduler) — caller must NOT advance
 // task state or with-items counters.
-func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExecution, taskEx *db.TaskExecution, wfEx *db.WorkflowExecution) (bool, error) {
+func (e *DefaultEngine) handleRetry(
+	ctx context.Context, actionEx *db.ActionExecution, taskEx *db.TaskExecution, wfEx *db.WorkflowExecution,
+) (bool, error) {
 	// Load taskSpec to find retry policy.
 	wfDef, _ := e.store.WorkflowDefinitions().Get(wfEx.WorkflowID)
 	if wfDef == nil {
@@ -1374,8 +1454,10 @@ func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExec
 
 	attempt := db.CoerceInt(actionEx.RuntimeContext["retry_attempts"])
 	if attempt >= retryCount {
-		log.Printf("retry: ActionExecution %s already attempted %d times (limit %d) — giving up",
-			actionEx.ID, attempt, retryCount)
+		log.Printf(
+			"retry: ActionExecution %s already attempted %d times (limit %d) — giving up",
+			actionEx.ID, attempt, retryCount,
+		)
 		return false, nil
 	}
 
@@ -1419,8 +1501,10 @@ func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExec
 		}
 		breakTriggered = isTruthy(boVal)
 		if breakTriggered {
-			log.Printf("retry: break-on triggered for actionEx %s (state_info=%v) — aborting retry",
-				actionEx.ID, actionEx.StateInfo)
+			log.Printf(
+				"retry: break-on triggered for actionEx %s (state_info=%v) — aborting retry",
+				actionEx.ID, actionEx.StateInfo,
+			)
 		}
 	}
 
@@ -1439,8 +1523,10 @@ func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExec
 			}
 			stopContinue = !isTruthy(coVal)
 			if stopContinue {
-				log.Printf("retry: continue-on evaluated falsy for actionEx %s — aborting retry",
-					actionEx.ID)
+				log.Printf(
+					"retry: continue-on evaluated falsy for actionEx %s — aborting retry",
+					actionEx.ID,
+				)
 			}
 		}
 	}
@@ -1486,14 +1572,18 @@ func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExec
 			log.Printf("retry: update taskEx to RUNNING_DELAYED failed: %v", err)
 		}
 
-		e.sched.Schedule(scheduler.JobContinueTask, map[string]interface{}{
-			"task_ex_id":             taskEx.ID,
-			"stashed_retry_attempts": attempt,
-			"retry_limit":            retryCount,
-		}, delay)
+		e.sched.Schedule(
+			scheduler.JobContinueTask, map[string]interface{}{
+				"task_ex_id":             taskEx.ID,
+				"stashed_retry_attempts": attempt,
+				"retry_limit":            retryCount,
+			}, delay,
+		)
 
-		log.Printf("retry: ActionExecution %s scheduled DELAYED retry attempt %d/%d (delay=%ds)",
-			actionEx.ID, attempt, retryCount, retryDelaySeconds)
+		log.Printf(
+			"retry: ActionExecution %s scheduled DELAYED retry attempt %d/%d (delay=%ds)",
+			actionEx.ID, attempt, retryCount, retryDelaySeconds,
+		)
 		return true, nil
 	}
 
@@ -1505,8 +1595,10 @@ func (e *DefaultEngine) handleRetry(ctx context.Context, actionEx *db.ActionExec
 
 	e.scheduleTaskTimeout(newActionEx, taskEx, taskSpec)
 
-	log.Printf("retry: ActionExecution %s scheduled retry attempt %d/%d → new action_ex=%s (state=RUNNING)",
-		actionEx.ID, attempt, retryCount, newActionEx.ID)
+	log.Printf(
+		"retry: ActionExecution %s scheduled retry attempt %d/%d → new action_ex=%s (state=RUNNING)",
+		actionEx.ID, attempt, retryCount, newActionEx.ID,
+	)
 
 	return true, nil
 }
@@ -1583,7 +1675,9 @@ func (e *DefaultEngine) advanceWorkflow(wfExID string, doneTaskExID string) {
 }
 
 // checkAndCompleteWorkflow checks if all tasks are done and the workflow should complete.
-func (e *DefaultEngine) checkAndCompleteWorkflow(wfEx *db.WorkflowExecution, ctrl workflow.WorkflowController, wfSpec *v2.WorkflowSpec) error {
+func (e *DefaultEngine) checkAndCompleteWorkflow(
+	wfEx *db.WorkflowExecution, ctrl workflow.WorkflowController, wfSpec *v2.WorkflowSpec,
+) error {
 	if states.IsPausedOrCompleted(wfEx.State) {
 		return nil
 	}
@@ -1651,7 +1745,9 @@ func (e *DefaultEngine) checkAndCompleteWorkflow(wfEx *db.WorkflowExecution, ctr
 		if err := e.OnActionComplete(context.Background(), wfEx.ID, result, true); err != nil {
 			log.Printf("  sub-workflow result callback to parent failed: %v", err)
 		} else {
-			log.Printf("  sub-workflow %s (%s) result sent to parent task %s", wfEx.Name, wfEx.State, wfEx.TaskExecutionID)
+			log.Printf(
+				"  sub-workflow %s (%s) result sent to parent task %s", wfEx.Name, wfEx.State, wfEx.TaskExecutionID,
+			)
 		}
 	}
 
@@ -1663,7 +1759,9 @@ func (e *DefaultEngine) checkAndCompleteWorkflow(wfEx *db.WorkflowExecution, ctr
 // first evaluates `workflow: <% $.wf_name %>` expressions against context
 // before doing the scope-aware lookup. Returns the raw string if it's not
 // an expression (backward-compat).
-func resolveWorkflowName(raw string, wfEx *db.WorkflowExecution, wfSpec *v2.WorkflowSpec, inContext map[string]interface{}) string {
+func resolveWorkflowName(
+	raw string, wfEx *db.WorkflowExecution, wfSpec *v2.WorkflowSpec, inContext map[string]interface{},
+) string {
 	if raw == "" {
 		return ""
 	}
@@ -1690,7 +1788,9 @@ func resolveWorkflowName(raw string, wfEx *db.WorkflowExecution, wfSpec *v2.Work
 }
 
 // evaluateTaskInput evaluates a task's input dictionary against context.
-func evaluateTaskInput(taskSpec *v2.TaskSpec, inContext map[string]interface{}, wfInput, wfContext map[string]interface{}) map[string]interface{} {
+func evaluateTaskInput(
+	taskSpec *v2.TaskSpec, inContext map[string]interface{}, wfInput, wfContext map[string]interface{},
+) map[string]interface{} {
 	inputSpec := taskSpec.GetInput()
 	if len(inputSpec) == 0 {
 		return make(map[string]interface{})
@@ -1801,8 +1901,10 @@ func (e *DefaultEngine) checkAffectedTasks(taskEx *db.TaskExecution, wfEx *db.Wo
 	for _, id := range affectedIDs {
 		e.scheduleRefreshTaskState(id)
 	}
-	log.Printf("checkAffectedTasks: task %s completed → scheduled refresh for %d join task(s)",
-		taskEx.Name, len(affectedIDs))
+	log.Printf(
+		"checkAffectedTasks: task %s completed → scheduled refresh for %d join task(s)",
+		taskEx.Name, len(affectedIDs),
+	)
 }
 
 // scheduleRefreshTaskState schedules a refresh for a single join taskEx via
@@ -1871,8 +1973,10 @@ func (e *DefaultEngine) refreshTaskState(taskExID string) {
 		e.advanceWorkflow(wfEx.ID, taskEx.ID)
 	default:
 		// Still WAITING — nothing to do.
-		log.Printf("refreshTaskState: join task %s still WAITING (cardinality=%d) — no-op",
-			taskEx.Name, logical.Cardinality)
+		log.Printf(
+			"refreshTaskState: join task %s still WAITING (cardinality=%d) — no-op",
+			taskEx.Name, logical.Cardinality,
+		)
 	}
 }
 
@@ -1923,8 +2027,10 @@ func (e *DefaultEngine) OnActionUpdate(wfExID string) error {
 		return nil
 	}
 
-	log.Printf("OnActionUpdate: child wfEx %s state=%s → parent taskEx %s state=%s",
-		childWfEx.ID, childWfEx.State, taskEx.ID, parentWfEx.State)
+	log.Printf(
+		"OnActionUpdate: child wfEx %s state=%s → parent taskEx %s state=%s",
+		childWfEx.ID, childWfEx.State, taskEx.ID, parentWfEx.State,
+	)
 
 	if states.IsPaused(childWfEx.State) {
 		// Cascade: parent workflow pauses.
@@ -2000,7 +2106,9 @@ func (e *DefaultEngine) DispatchAction(ctx context.Context, actionExID string) (
 	d, ok := action.Get(actionEx.Name)
 	if !ok {
 		// No such action — fail gracefully rather than panic.
-		if err := e.OnActionComplete(ctx, actionExID, &db.Result{Error: fmt.Errorf("unknown action %q", actionEx.Name)}, false); err != nil {
+		if err := e.OnActionComplete(
+			ctx, actionExID, &db.Result{Error: fmt.Errorf("unknown action %q", actionEx.Name)}, false,
+		); err != nil {
 			return nil, err
 		}
 		return e.store.ActionExecutions().Get(actionExID)
@@ -2130,8 +2238,10 @@ func (e *DefaultEngine) checkIntegrity(ctx context.Context, wfExID string) {
 		if lastFinished == nil {
 			continue
 		}
-		log.Printf("integrity_check: recovering stuck taskEx %s (wfEx %s) via child actionEx %s",
-			taskEx.ID, wfEx.ID, lastFinished.ID)
+		log.Printf(
+			"integrity_check: recovering stuck taskEx %s (wfEx %s) via child actionEx %s",
+			taskEx.ID, wfEx.ID, lastFinished.ID,
+		)
 
 		if err := e.OnActionComplete(ctx, lastFinished.ID, nil, false); err != nil {
 			log.Printf("integrity_check: OnActionComplete failed: %v", err)

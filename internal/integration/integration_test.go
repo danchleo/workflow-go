@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mistral/workflow/internal/db"
-	"github.com/mistral/workflow/internal/engine"
-	"github.com/mistral/workflow/internal/lang/parser"
-	"github.com/mistral/workflow/internal/scheduler"
-	"github.com/mistral/workflow/internal/services"
-	"github.com/mistral/workflow/internal/states"
+	"github.com/danchleo/workflow-go/internal/db"
+	"github.com/danchleo/workflow-go/internal/engine"
+	"github.com/danchleo/workflow-go/internal/lang/parser"
+	"github.com/danchleo/workflow-go/internal/scheduler"
+	"github.com/danchleo/workflow-go/internal/services"
+	"github.com/danchleo/workflow-go/internal/states"
 	"gopkg.in/yaml.v3"
 )
 
@@ -192,7 +192,10 @@ func runWorkflowFromYAML(t *testing.T, f fixture) (*db.WorkflowExecution, db.Sto
 					continue // already processed in a previous iter
 				}
 				attempt := db.CoerceInt(ae.RuntimeContext["retry_attempts"])
-				res := defaultResultWithAttempt(pending.Name, ae.Name, attempt, f.customResults, f.customResultsByAttempt, fmt.Sprintf("iter-%v-done", ae.RuntimeContext["index"]))
+				res := defaultResultWithAttempt(
+					pending.Name, ae.Name, attempt, f.customResults, f.customResultsByAttempt,
+					fmt.Sprintf("iter-%v-done", ae.RuntimeContext["index"]),
+				)
 				if err := eng.OnActionComplete(context.Background(), ae.ID, res, false); err != nil {
 					t.Fatalf("OnActionComplete with-items iter: %v", err)
 				}
@@ -237,7 +240,10 @@ func runWorkflowFromYAML(t *testing.T, f fixture) (*db.WorkflowExecution, db.Sto
 		res := defaultResult(pending.Name, f.customResults, fmt.Sprintf("result-of-%s", pending.Name))
 		if actionEx != nil {
 			attempt := db.CoerceInt(actionEx.RuntimeContext["retry_attempts"])
-			res = defaultResultWithAttempt(pending.Name, actionEx.Name, attempt, f.customResults, f.customResultsByAttempt, fmt.Sprintf("result-of-%s", pending.Name))
+			res = defaultResultWithAttempt(
+				pending.Name, actionEx.Name, attempt, f.customResults, f.customResultsByAttempt,
+				fmt.Sprintf("result-of-%s", pending.Name),
+			)
 			invokeID = actionEx.ID
 		}
 		if err := eng.OnActionComplete(context.Background(), invokeID, res, false); err != nil {
@@ -262,12 +268,14 @@ func runWorkflowFromYAML(t *testing.T, f fixture) (*db.WorkflowExecution, db.Sto
 // --- Individual tests (one per fixture) ---
 
 func TestIntegration_DirectSerial(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "direct_serial.yaml",
-		description:   "2-task serial workflow with publish + output expressions",
-		input:         map[string]interface{}{"greeting": "Hi", "name": "Integration"},
-		expectedState: states.SUCCESS,
-	})
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "direct_serial.yaml",
+			description:   "2-task serial workflow with publish + output expressions",
+			input:         map[string]interface{}{"greeting": "Hi", "name": "Integration"},
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	// Output expressions must be fully evaluated (no raw "<% ... %>" left).
 	if final.Output == nil {
@@ -304,12 +312,14 @@ func TestIntegration_DirectSerial(t *testing.T) {
 }
 
 func TestIntegration_WithItems_Fanout(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "with_items_fanout.yaml",
-		description:   "with-items creating 3 parallel iterations",
-		input:         map[string]interface{}{"items": []interface{}{"alpha", "beta", "gamma"}},
-		expectedState: states.SUCCESS,
-	})
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "with_items_fanout.yaml",
+			description:   "with-items creating 3 parallel iterations",
+			input:         map[string]interface{}{"items": []interface{}{"alpha", "beta", "gamma"}},
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	// Verify fanout actually happened: exactly 3 ActionExecutions under the fanout task.
 	fanoutTasks, _ := store.TaskExecutions().List(final.ID, "")
@@ -327,7 +337,10 @@ func TestIntegration_WithItems_Fanout(t *testing.T) {
 
 		indices := make(map[int]bool)
 		for _, ae := range actionExs {
-			t.Logf("  ae id=%s index=%v (type %T) state=%s", ae.ID, ae.RuntimeContext["index"], ae.RuntimeContext["index"], ae.State)
+			t.Logf(
+				"  ae id=%s index=%v (type %T) state=%s", ae.ID, ae.RuntimeContext["index"], ae.RuntimeContext["index"],
+				ae.State,
+			)
 			idxRaw := ae.RuntimeContext["index"]
 			var idx int
 			switch v := idxRaw.(type) {
@@ -357,21 +370,25 @@ func TestIntegration_WithItems_Fanout(t *testing.T) {
 }
 
 func TestIntegration_Reverse_RequiresChain(t *testing.T) {
-	runWorkflowFromYAML(t, fixture{
-		yamlPath:      "reverse_requires.yaml",
-		description:   "reverse workflow: requires dependency chain",
-		input:         nil,
-		expectedState: states.SUCCESS,
-	})
+	runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "reverse_requires.yaml",
+			description:   "reverse workflow: requires dependency chain",
+			input:         nil,
+			expectedState: states.SUCCESS,
+		},
+	)
 }
 
 func TestIntegration_Branching_FanoutJoin(t *testing.T) {
-	runWorkflowFromYAML(t, fixture{
-		yamlPath:      "branching_fanout_join.yaml",
-		description:   "one task fans out to 2, both fan into a join",
-		input:         nil,
-		expectedState: states.SUCCESS,
-	})
+	runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "branching_fanout_join.yaml",
+			description:   "one task fans out to 2, both fan into a join",
+			input:         nil,
+			expectedState: states.SUCCESS,
+		},
+	)
 }
 
 func TestIntegration_ErrorHandling_OnError(t *testing.T) {
@@ -381,8 +398,10 @@ func TestIntegration_ErrorHandling_OnError(t *testing.T) {
 	svc := services.NewWorkflowService(store)
 	wfDef, _ := svc.CreateWorkflow("err-test", string(yamlFile), "p", "")
 
-	wfEx, _ := eng.StartWorkflow(context.Background(), wfDef.ID, "", "",
-		nil, "", map[string]interface{}{"env": map[string]interface{}{}, "namespace": ""})
+	wfEx, _ := eng.StartWorkflow(
+		context.Background(), wfDef.ID, "", "",
+		nil, "", map[string]interface{}{"env": map[string]interface{}{}, "namespace": ""},
+	)
 
 	const maxIter = 20
 	for iter := 0; iter < maxIter; iter++ {
@@ -445,12 +464,14 @@ func TestIntegration_ErrorHandling_OnError(t *testing.T) {
 }
 
 func TestIntegration_Join_Parallel(t *testing.T) {
-	runWorkflowFromYAML(t, fixture{
-		yamlPath:      "join_parallel.yaml",
-		description:   "2 independent start tasks with join: all-before",
-		input:         nil,
-		expectedState: states.SUCCESS,
-	})
+	runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "join_parallel.yaml",
+			description:   "2 independent start tasks with join: all-before",
+			input:         nil,
+			expectedState: states.SUCCESS,
+		},
+	)
 }
 
 // --- helpers ---
@@ -483,7 +504,10 @@ func defaultResult(taskName string, overrides map[string]*db.Result, defaultData
 // defaultResultWithAttempt extends defaultResult with attempt-aware overrides.
 // Lookup order: byAttempt[taskName](attempt) → overrides[taskName] → default success.
 // attempt=0 means first (non-retry) execution. attempt=1 is first retry.
-func defaultResultWithAttempt(taskName, actionName string, attempt int, overrides map[string]*db.Result, byAttempt map[string]func(int) *db.Result, defaultData string) *db.Result {
+func defaultResultWithAttempt(
+	taskName, actionName string, attempt int, overrides map[string]*db.Result,
+	byAttempt map[string]func(int) *db.Result, defaultData string,
+) *db.Result {
 	if byAttempt != nil {
 		if fn, ok := byAttempt[taskName]; ok {
 			if r := fn(attempt); r != nil {
@@ -525,9 +549,11 @@ func TestIntegration_PauseResumeStop(t *testing.T) {
 	svc := services.NewWorkflowService(store)
 	wfDef, _ := svc.CreateWorkflow("pause-test", string(data), "p", "")
 
-	wfEx, _ := eng.StartWorkflow(context.Background(), wfDef.ID, "", "",
+	wfEx, _ := eng.StartWorkflow(
+		context.Background(), wfDef.ID, "", "",
 		map[string]interface{}{"greeting": "Hi", "name": "Pause"}, "",
-		map[string]interface{}{"env": map[string]interface{}{}, "namespace": ""})
+		map[string]interface{}{"env": map[string]interface{}{}, "namespace": ""},
+	)
 
 	// Pause mid-flight.
 	if err := eng.PauseWorkflow(context.Background(), wfEx.ID); err != nil {
@@ -579,27 +605,33 @@ func TestIntegration_DiamondJoin(t *testing.T) {
 	// Classic diamond: start → [left,right] → join_here.
 	// (No extra assertions beyond SUCCESS — fanout count is implicit in
 	// the controller join logic: join_here waits for both left and right.)
-	_, _ = runWorkflowFromYAML(t, fixture{
-		yamlPath:      "diamond_join.yaml",
-		expectedState: states.SUCCESS,
-	})
+	_, _ = runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "diamond_join.yaml",
+			expectedState: states.SUCCESS,
+		},
+	)
 }
 
 func TestIntegration_MultiLevelFanout(t *testing.T) {
-	_, _ = runWorkflowFromYAML(t, fixture{
-		yamlPath:      "multi_level_fanout.yaml",
-		expectedState: states.SUCCESS,
-	})
+	_, _ = runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "multi_level_fanout.yaml",
+			expectedState: states.SUCCESS,
+		},
+	)
 }
 
 func TestIntegration_ErrorRecovery_ChainContinues(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "error_recovery_chain.yaml",
-		expectedState: states.SUCCESS,
-		customResults: map[string]*db.Result{
-			"risky": {Error: "simulated boom"},
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "error_recovery_chain.yaml",
+			expectedState: states.SUCCESS,
+			customResults: map[string]*db.Result{
+				"risky": {Error: "simulated boom"},
+			},
 		},
-	})
+	)
 
 	tasks, err := store.TaskExecutions().List(final.ID, "")
 	if err != nil {
@@ -620,16 +652,20 @@ func TestIntegration_ErrorRecovery_ChainContinues(t *testing.T) {
 	}
 	// ... and its downstream must have continued — the key assertion!
 	if taskStates["continue_after_error"] != states.SUCCESS {
-		t.Errorf("continue_after_error state = %s, want SUCCESS (recovery didn't chain)", taskStates["continue_after_error"])
+		t.Errorf(
+			"continue_after_error state = %s, want SUCCESS (recovery didn't chain)", taskStates["continue_after_error"],
+		)
 	}
 	t.Logf("  task states: %v", taskStates)
 }
 
 func TestIntegration_PublishChain_4Levels(t *testing.T) {
-	final, _ := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "publish_chain.yaml",
-		expectedState: states.SUCCESS,
-	})
+	final, _ := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "publish_chain.yaml",
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	if final.Output == nil {
 		t.Fatal("expected output")
@@ -655,13 +691,15 @@ func TestIntegration_PublishChain_4Levels(t *testing.T) {
 }
 
 func TestIntegration_WithItems_ThenBranch(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath: "with_items_then_branch.yaml",
-		input: map[string]interface{}{
-			"items": []interface{}{"x", "y"},
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath: "with_items_then_branch.yaml",
+			input: map[string]interface{}{
+				"items": []interface{}{"x", "y"},
+			},
+			expectedState: states.SUCCESS,
 		},
-		expectedState: states.SUCCESS,
-	})
+	)
 
 	// Fanout must have exactly 2 iterations.
 	tasks, _ := store.TaskExecutions().List(final.ID, "")
@@ -684,11 +722,13 @@ func TestIntegration_WithItems_ThenBranch(t *testing.T) {
 // ============ Sub-workflow (nesting) tests ============
 
 func TestIntegration_Subworkflow_SimpleNesting(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "simple_subworkflow_parent.yaml",
-		extraYAMLs:    []string{"simple_subworkflow_child.yaml"},
-		expectedState: states.SUCCESS,
-	})
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "simple_subworkflow_parent.yaml",
+			extraYAMLs:    []string{"simple_subworkflow_child.yaml"},
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	// Verify parent workflow output.
 	if v, ok := final.Output["parent_msg"].(string); !ok || v == "" {
@@ -717,7 +757,9 @@ func TestIntegration_Subworkflow_SimpleNesting(t *testing.T) {
 	if subWfEx.TaskExecutionID == "" {
 		t.Error("child wfEx.TaskExecutionID is empty — parent linkage broken")
 	}
-	t.Logf("  child wfEx state=%s task_execution_id=%s output=%v", subWfEx.State, subWfEx.TaskExecutionID, subWfEx.Output)
+	t.Logf(
+		"  child wfEx state=%s task_execution_id=%s output=%v", subWfEx.State, subWfEx.TaskExecutionID, subWfEx.Output,
+	)
 
 	// Verify parent's call_sub task got SUCCESS (child result propagated back).
 	tasks, _ := store.TaskExecutions().List(final.ID, "")
@@ -734,11 +776,13 @@ func TestIntegration_Subworkflow_SimpleNesting(t *testing.T) {
 // ============ Workbook tests ============
 
 func TestIntegration_Workbook_ChainedNestedWorkflows(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		workbookPath:  "workbook_chained.yaml",
-		entryWorkflow: "wf_main",
-		expectedState: states.SUCCESS,
-	})
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			workbookPath:  "workbook_chained.yaml",
+			entryWorkflow: "wf_main",
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	tasks, _ := store.TaskExecutions().List(final.ID, "")
 	if len(tasks) == 0 {
@@ -788,17 +832,21 @@ func TestIntegration_Workbook_ChainedNestedWorkflows(t *testing.T) {
 			t.Errorf("sum state = %s, want SUCCESS", sumWf.State)
 		}
 	}
-	t.Logf("  3-level workbook chain: main=%v process=%v sum=%v all SUCCESS=%v",
-		mainWf != nil, processWf != nil, sumWf != nil, final.State)
+	t.Logf(
+		"  3-level workbook chain: main=%v process=%v sum=%v all SUCCESS=%v",
+		mainWf != nil, processWf != nil, sumWf != nil, final.State,
+	)
 }
 
 func TestIntegration_Subworkflow_ChildUsesWithItems(t *testing.T) {
 	// Scenario 1: parent calls sub-workflow, sub-workflow internally uses with-items.
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "sub_with_items_parent.yaml",
-		extraYAMLs:    []string{"sub_with_items_child.yaml"},
-		expectedState: states.SUCCESS,
-	})
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "sub_with_items_parent.yaml",
+			extraYAMLs:    []string{"sub_with_items_child.yaml"},
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	// 2 WorkflowExecutions: parent + child.
 	allWfExs, _ := store.WorkflowExecutions().List("")
@@ -846,23 +894,27 @@ func TestIntegration_Subworkflow_ChildUsesWithItems(t *testing.T) {
 		t.Errorf("delegate_to_sub state = %s, want SUCCESS", delegateTask.State)
 	}
 
-	t.Logf("  parent=%s child=%s fanout.total=%v fanout.state=%s all SUCCESS=%v",
-		final.State, childWfEx.State, fanoutTask.RuntimeContext["with_items_total"], fanoutTask.State, final.State)
+	t.Logf(
+		"  parent=%s child=%s fanout.total=%v fanout.state=%s all SUCCESS=%v",
+		final.State, childWfEx.State, fanoutTask.RuntimeContext["with_items_total"], fanoutTask.State, final.State,
+	)
 }
 
 func TestIntegration_Subworkflow_ErrorRecovery_ContinuesDownstream(t *testing.T) {
 	// Scenario 2: child workflow fails → parent catches on-error → recover → continue.
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "parent_error_recovery.yaml",
-		extraYAMLs:    []string{"failing_child.yaml"},
-		expectedState: states.SUCCESS,
-		customResults: map[string]*db.Result{
-			// Child workflow's only task — always fail it so the child
-			// workflow reaches ERROR and OnSubWorkflowComplete propagates it
-			// back to the parent attempt task.
-			"doomed": {Error: "child-doomed-by-test"},
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "parent_error_recovery.yaml",
+			extraYAMLs:    []string{"failing_child.yaml"},
+			expectedState: states.SUCCESS,
+			customResults: map[string]*db.Result{
+				// Child workflow's only task — always fail it so the child
+				// workflow reaches ERROR and OnSubWorkflowComplete propagates it
+				// back to the parent attempt task.
+				"doomed": {Error: "child-doomed-by-test"},
+			},
 		},
-	})
+	)
 
 	// Parent workflow overall SUCCESS because on-error recovery worked.
 	tasks, _ := store.TaskExecutions().List(final.ID, "")
@@ -879,8 +931,10 @@ func TestIntegration_Subworkflow_ErrorRecovery_ContinuesDownstream(t *testing.T)
 	}
 	// Most important: recovery chains to continue_after_recovery.
 	if taskStates["continue_after_recovery"] != states.SUCCESS {
-		t.Errorf("continue_after_recovery state = %s, want SUCCESS (recovery dead-ended)",
-			taskStates["continue_after_recovery"])
+		t.Errorf(
+			"continue_after_recovery state = %s, want SUCCESS (recovery dead-ended)",
+			taskStates["continue_after_recovery"],
+		)
 	}
 	t.Logf("  task states: %v", taskStates)
 }
@@ -888,11 +942,13 @@ func TestIntegration_Subworkflow_ErrorRecovery_ContinuesDownstream(t *testing.T)
 func TestIntegration_Workbook_WithItemsCallsSubworkflow(t *testing.T) {
 	// Scenario 3 (most complex!): Workbook wf_outer has a task that is BOTH
 	// with-items AND workflow — 2 iterations, each calling wf_inner.
-	final, store := runWorkflowFromYAML(t, fixture{
-		workbookPath:  "workbook_mixed.yaml",
-		entryWorkflow: "wf_outer",
-		expectedState: states.SUCCESS,
-	})
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			workbookPath:  "workbook_mixed.yaml",
+			entryWorkflow: "wf_outer",
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	allWfExs, _ := store.WorkflowExecutions().List("")
 
@@ -933,8 +989,10 @@ func TestIntegration_Workbook_WithItemsCallsSubworkflow(t *testing.T) {
 		t.Errorf("fanout_iter state = %s, want SUCCESS", fanoutIter.State)
 	}
 
-	t.Logf("  with-items+subworkflow: parent=%s, children(wf_inner)=%d, fanout.total=%v, final=%s",
-		parentWf.State, childCount, fanoutIter.RuntimeContext["with_items_total"], final.State)
+	t.Logf(
+		"  with-items+subworkflow: parent=%s, children(wf_inner)=%d, fanout.total=%v, final=%s",
+		parentWf.State, childCount, fanoutIter.RuntimeContext["with_items_total"], final.State,
+	)
 }
 
 // ================================================================
@@ -943,11 +1001,13 @@ func TestIntegration_Workbook_WithItemsCallsSubworkflow(t *testing.T) {
 // 2 child wfExs total, 6 ActionExecutions across them.
 // ================================================================
 func TestIntegration_NestedWithItems_TwoLevels(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "nested_with_items_parent.yaml",
-		extraYAMLs:    []string{"nested_with_items_child.yaml"},
-		expectedState: states.SUCCESS,
-	})
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "nested_with_items_parent.yaml",
+			extraYAMLs:    []string{"nested_with_items_child.yaml"},
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	allWfExs, _ := store.WorkflowExecutions().List("")
 	var parentWf *db.WorkflowExecution
@@ -1029,8 +1089,10 @@ func TestIntegration_NestedWithItems_TwoLevels(t *testing.T) {
 		t.Errorf("total ActionExecutions across children = %d, want 6 (2 children × 3 iters)", totalActionExs)
 	}
 
-	t.Logf("  nested with-items: parent=%s, children=%d, total ActionEx=%d, final=%s",
-		parentWf.State, childCount, totalActionExs, final.State)
+	t.Logf(
+		"  nested with-items: parent=%s, children=%d, total ActionEx=%d, final=%s",
+		parentWf.State, childCount, totalActionExs, final.State,
+	)
 }
 
 // ================================================================
@@ -1039,11 +1101,13 @@ func TestIntegration_NestedWithItems_TwoLevels(t *testing.T) {
 // should wait for both child callbacks before firing.
 // ================================================================
 func TestIntegration_SiblingSubworkflows_Join(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "sibling_join_parent.yaml",
-		extraYAMLs:    []string{"sibling_a.yaml", "sibling_b.yaml"},
-		expectedState: states.SUCCESS,
-	})
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "sibling_join_parent.yaml",
+			extraYAMLs:    []string{"sibling_a.yaml", "sibling_b.yaml"},
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	allWfExs, _ := store.WorkflowExecutions().List("")
 	var parentWf *db.WorkflowExecution
@@ -1085,8 +1149,10 @@ func TestIntegration_SiblingSubworkflows_Join(t *testing.T) {
 		t.Errorf("join_point state = %s, want SUCCESS — join didn't wait for both siblings!", taskStates["join_point"])
 	}
 
-	t.Logf("  sibling join: spawn_a=%s spawn_b=%s join_point=%s final=%s",
-		taskStates["spawn_a"], taskStates["spawn_b"], taskStates["join_point"], final.State)
+	t.Logf(
+		"  sibling join: spawn_a=%s spawn_b=%s join_point=%s final=%s",
+		taskStates["spawn_a"], taskStates["spawn_b"], taskStates["join_point"], final.State,
+	)
 }
 
 // ================================================================
@@ -1095,11 +1161,13 @@ func TestIntegration_SiblingSubworkflows_Join(t *testing.T) {
 // its parent via TaskExecutionID.
 // ================================================================
 func TestIntegration_DeepNesting_4Levels(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "deep_A.yaml",
-		extraYAMLs:    []string{"deep_B.yaml", "deep_C.yaml", "deep_D.yaml"},
-		expectedState: states.SUCCESS,
-	})
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "deep_A.yaml",
+			extraYAMLs:    []string{"deep_B.yaml", "deep_C.yaml", "deep_D.yaml"},
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	allWfExs, _ := store.WorkflowExecutions().List("")
 
@@ -1178,8 +1246,10 @@ func TestIntegration_DeepNesting_4Levels(t *testing.T) {
 		}
 	}
 
-	t.Logf("  4-level deep nesting: %d wfExs, all SUCCESS, parent chain verified, final=%s",
-		len(allWfExs), final.State)
+	t.Logf(
+		"  4-level deep nesting: %d wfExs, all SUCCESS, parent chain verified, final=%s",
+		len(allWfExs), final.State,
+	)
 }
 
 // ================================================================
@@ -1189,19 +1259,21 @@ func TestIntegration_DeepNesting_4Levels(t *testing.T) {
 // recovery → continue_after_recovery → workflow overall SUCCESS.
 // ================================================================
 func TestIntegration_WithItemsSubworkflow_PartialFailureRecovery(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "partial_parent.yaml",
-		extraYAMLs:    []string{"partial_child.yaml"},
-		expectedState: states.SUCCESS,
-		// All 3 child wfEx "do_work" tasks are overridden to ERROR — this is more
-		// extreme than 1/3 failure but still validates the core rules:
-		//   (a) Python WithItemsTask aggregation: any ERROR → parent task ERROR
-		//   (b) on-error fires recovery chain even when ALL iters fail
-		//   (c) recovery chain continues workflow to overall SUCCESS
-		customResults: map[string]*db.Result{
-			"do_work": {Error: "intentional-iter-failure"},
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "partial_parent.yaml",
+			extraYAMLs:    []string{"partial_child.yaml"},
+			expectedState: states.SUCCESS,
+			// All 3 child wfEx "do_work" tasks are overridden to ERROR — this is more
+			// extreme than 1/3 failure but still validates the core rules:
+			//   (a) Python WithItemsTask aggregation: any ERROR → parent task ERROR
+			//   (b) on-error fires recovery chain even when ALL iters fail
+			//   (c) recovery chain continues workflow to overall SUCCESS
+			customResults: map[string]*db.Result{
+				"do_work": {Error: "intentional-iter-failure"},
+			},
 		},
-	})
+	)
 
 	allWfExs, _ := store.WorkflowExecutions().List("")
 	var parentWf *db.WorkflowExecution
@@ -1250,23 +1322,29 @@ func TestIntegration_WithItemsSubworkflow_PartialFailureRecovery(t *testing.T) {
 
 	// Recovery chain MUST fire even when ALL 3 iters failed.
 	if taskStates["handle_some_failed"] != states.SUCCESS {
-		t.Errorf("handle_some_failed state = %s, want SUCCESS (on-error didn't fire)",
-			taskStates["handle_some_failed"])
+		t.Errorf(
+			"handle_some_failed state = %s, want SUCCESS (on-error didn't fire)",
+			taskStates["handle_some_failed"],
+		)
 	}
 	if taskStates["continue_after_error"] != states.SUCCESS {
-		t.Errorf("continue_after_error state = %s, want SUCCESS (recovery dead-ended)",
-			taskStates["continue_after_error"])
+		t.Errorf(
+			"continue_after_error state = %s, want SUCCESS (recovery dead-ended)",
+			taskStates["continue_after_error"],
+		)
 	}
 	// all_good must NOT have fired — we have failures!
 	if _, exists := taskStates["all_good"]; exists {
 		t.Error("all_good should NOT have fired — some iters failed!")
 	}
 
-	t.Logf("  all-fail recovery: children=%d (ERROR=%d), fanout=%s(failed=%d), recovery=%v, final=%s",
+	t.Logf(
+		"  all-fail recovery: children=%d (ERROR=%d), fanout=%s(failed=%d), recovery=%v, final=%s",
 		childCount, childErrorCount, fanoutTask.State,
 		db.CoerceInt(fanoutTask.RuntimeContext["with_items_failed_count"]),
 		taskStates["handle_some_failed"]+","+taskStates["continue_after_error"],
-		final.State)
+		final.State,
+	)
 }
 
 // filterWfExByName is a tiny helper used by the nested with-items test
@@ -1290,10 +1368,12 @@ func filterWfExByName(wfExs []*db.WorkflowExecution, name string) []*db.Workflow
 // final started=5, final done_count=5.
 // ================================================================
 func TestIntegration_WithItemsConcurrency_Limited(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "concurrency_limited.yaml",
-		expectedState: states.SUCCESS,
-	})
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "concurrency_limited.yaml",
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	tasks, _ := store.TaskExecutions().List(final.ID, "")
 	var launchTask *db.TaskExecution
@@ -1329,8 +1409,10 @@ func TestIntegration_WithItemsConcurrency_Limited(t *testing.T) {
 		t.Errorf("launch ActionExecutions = %d, want 5", len(actions))
 	}
 
-	t.Logf("  concurrency limit: total=%d concurrency=%d started(final)=%d actions=%d",
-		total, concurrency, started, len(actions))
+	t.Logf(
+		"  concurrency limit: total=%d concurrency=%d started(final)=%d actions=%d",
+		total, concurrency, started, len(actions),
+	)
 }
 
 // ================================================================
@@ -1339,21 +1421,23 @@ func TestIntegration_WithItemsConcurrency_Limited(t *testing.T) {
 // Assert 3 ActionExecutions created, task ends SUCCESS.
 // ================================================================
 func TestIntegration_RetryPolicy_SucceedsOnRetry(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "retry_policy.yaml",
-		expectedState: states.SUCCESS,
-		customResultsByAttempt: map[string]func(int) *db.Result{
-			// attempt=0: initial execution → ERROR
-			// attempt=1: first retry → ERROR
-			// attempt=2: second retry → SUCCESS
-			"flaky": func(attempt int) *db.Result {
-				if attempt < 2 {
-					return &db.Result{Error: fmt.Sprintf("flaky-fail-attempt-%d", attempt)}
-				}
-				return &db.Result{Data: "finally-worked"}
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "retry_policy.yaml",
+			expectedState: states.SUCCESS,
+			customResultsByAttempt: map[string]func(int) *db.Result{
+				// attempt=0: initial execution → ERROR
+				// attempt=1: first retry → ERROR
+				// attempt=2: second retry → SUCCESS
+				"flaky": func(attempt int) *db.Result {
+					if attempt < 2 {
+						return &db.Result{Error: fmt.Sprintf("flaky-fail-attempt-%d", attempt)}
+					}
+					return &db.Result{Data: "finally-worked"}
+				},
 			},
 		},
-	})
+	)
 
 	tasks, _ := store.TaskExecutions().List(final.ID, "")
 	var flakyTask *db.TaskExecution
@@ -1400,12 +1484,16 @@ func TestIntegration_RetryPolicy_SucceedsOnRetry(t *testing.T) {
 		}
 	}
 	if !zeroAttempt || !oneAttempt || !twoAttempt {
-		t.Errorf("retry_attempts distribution wrong: got zero=%v one=%v two=%v, want all true",
-			zeroAttempt, oneAttempt, twoAttempt)
+		t.Errorf(
+			"retry_attempts distribution wrong: got zero=%v one=%v two=%v, want all true",
+			zeroAttempt, oneAttempt, twoAttempt,
+		)
 	}
 
-	t.Logf("  retry success: task=%s, retries_done=%d, actions=%d",
-		flakyTask.State, db.CoerceInt(flakyTask.RuntimeContext["retry_attempts"]), len(actions))
+	t.Logf(
+		"  retry success: task=%s, retries_done=%d, actions=%d",
+		flakyTask.State, db.CoerceInt(flakyTask.RuntimeContext["retry_attempts"]), len(actions),
+	)
 }
 
 // ================================================================
@@ -1415,15 +1503,17 @@ func TestIntegration_RetryPolicy_SucceedsOnRetry(t *testing.T) {
 // ================================================================
 func TestIntegration_RetryPolicy_ExhaustedRemainingERROR(t *testing.T) {
 	// Reuse retry_policy fixture but make all 3 attempts fail.
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "retry_policy.yaml",
-		expectedState: states.ERROR,
-		customResultsByAttempt: map[string]func(int) *db.Result{
-			"flaky": func(attempt int) *db.Result {
-				return &db.Result{Error: fmt.Sprintf("always-fail-attempt-%d", attempt)}
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "retry_policy.yaml",
+			expectedState: states.ERROR,
+			customResultsByAttempt: map[string]func(int) *db.Result{
+				"flaky": func(attempt int) *db.Result {
+					return &db.Result{Error: fmt.Sprintf("always-fail-attempt-%d", attempt)}
+				},
 			},
 		},
-	})
+	)
 
 	tasks, _ := store.TaskExecutions().List(final.ID, "")
 	var flakyTask *db.TaskExecution
@@ -1445,8 +1535,10 @@ func TestIntegration_RetryPolicy_ExhaustedRemainingERROR(t *testing.T) {
 		t.Errorf("flaky ActionExecutions = %d, want 3 (initial + 2 retries exhausted)", len(actions))
 	}
 
-	t.Logf("  retry exhausted: task=%s, actions=%d, final_wf=%s",
-		flakyTask.State, len(actions), final.State)
+	t.Logf(
+		"  retry exhausted: task=%s, actions=%d, final_wf=%s",
+		flakyTask.State, len(actions), final.State,
+	)
 }
 
 // ================================================================
@@ -1456,19 +1548,21 @@ func TestIntegration_RetryPolicy_ExhaustedRemainingERROR(t *testing.T) {
 // reports SUCCESS → on-success: all_ok fires.
 // ================================================================
 func TestIntegration_RetryWithItems_AllRecover(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "retry_with_items.yaml",
-		expectedState: states.SUCCESS,
-		customResultsByAttempt: map[string]func(int) *db.Result{
-			// All 3 iterations fail twice then succeed on 3rd attempt.
-			"flaky_loop": func(attempt int) *db.Result {
-				if attempt < 2 {
-					return &db.Result{Error: fmt.Sprintf("iter-fail-attempt-%d", attempt)}
-				}
-				return &db.Result{Data: "finally-worked"}
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "retry_with_items.yaml",
+			expectedState: states.SUCCESS,
+			customResultsByAttempt: map[string]func(int) *db.Result{
+				// All 3 iterations fail twice then succeed on 3rd attempt.
+				"flaky_loop": func(attempt int) *db.Result {
+					if attempt < 2 {
+						return &db.Result{Error: fmt.Sprintf("iter-fail-attempt-%d", attempt)}
+					}
+					return &db.Result{Data: "finally-worked"}
+				},
 			},
 		},
-	})
+	)
 
 	tasks, _ := store.TaskExecutions().List(final.ID, "")
 	var flakyTask, allOkTask *db.TaskExecution
@@ -1499,8 +1593,10 @@ func TestIntegration_RetryWithItems_AllRecover(t *testing.T) {
 		t.Errorf("flaky_loop ActionExecutions = %d, want 9 (3 iters × 3 attempts)", len(actions))
 	}
 
-	t.Logf("  retry+with-items recover: flaky_loop=%s, actions=%d, all_ok=%s, final=%s",
-		flakyTask.State, len(actions), allOkTask.State, final.State)
+	t.Logf(
+		"  retry+with-items recover: flaky_loop=%s, actions=%d, all_ok=%s, final=%s",
+		flakyTask.State, len(actions), allOkTask.State, final.State,
+	)
 }
 
 // ================================================================
@@ -1510,16 +1606,18 @@ func TestIntegration_RetryWithItems_AllRecover(t *testing.T) {
 // ERROR → on-error recovery handler fires → overall workflow SUCCESS.
 // ================================================================
 func TestIntegration_RetryWithItems_AllExhausted(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "retry_with_items.yaml",
-		expectedState: states.SUCCESS, // on-error recovery brings wf back to SUCCESS
-		customResultsByAttempt: map[string]func(int) *db.Result{
-			// All 3 iterations always fail — retry budget fully exhausted.
-			"flaky_loop": func(attempt int) *db.Result {
-				return &db.Result{Error: fmt.Sprintf("always-fail-attempt-%d", attempt)}
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "retry_with_items.yaml",
+			expectedState: states.SUCCESS, // on-error recovery brings wf back to SUCCESS
+			customResultsByAttempt: map[string]func(int) *db.Result{
+				// All 3 iterations always fail — retry budget fully exhausted.
+				"flaky_loop": func(attempt int) *db.Result {
+					return &db.Result{Error: fmt.Sprintf("always-fail-attempt-%d", attempt)}
+				},
 			},
 		},
-	})
+	)
 
 	tasks, _ := store.TaskExecutions().List(final.ID, "")
 	var flakyTask, someFailedTask *db.TaskExecution
@@ -1550,8 +1648,10 @@ func TestIntegration_RetryWithItems_AllExhausted(t *testing.T) {
 		t.Errorf("flaky_loop ActionExecutions = %d, want 9 (3 iters × 3 attempts exhausted)", len(actions))
 	}
 
-	t.Logf("  retry+with-items exhausted: flaky_loop=%s, actions=%d, some_failed=%s, final=%s",
-		flakyTask.State, len(actions), someFailedTask.State, final.State)
+	t.Logf(
+		"  retry+with-items exhausted: flaky_loop=%s, actions=%d, some_failed=%s, final=%s",
+		flakyTask.State, len(actions), someFailedTask.State, final.State,
+	)
 }
 
 // ================================================================
@@ -1809,8 +1909,10 @@ func TestIntegration_TimeoutPolicy_ForcesError(t *testing.T) {
 		t.Errorf("final wf state = %s (info=%v), want SUCCESS", final.State, final.StateInfo)
 	}
 
-	t.Logf("  timeout: hanging=%s, recovered=%v, final=%s",
-		hangingTask.State, recoveredTask != nil, final.State)
+	t.Logf(
+		"  timeout: hanging=%s, recovered=%v, final=%s",
+		hangingTask.State, recoveredTask != nil, final.State,
+	)
 }
 
 // ================================================================
@@ -1878,8 +1980,10 @@ func TestIntegration_TimeoutRetry_RetryRecoversFromTimeout(t *testing.T) {
 		if pendingTe == nil {
 			break
 		}
-		t.Logf("  iter %d: driving %s attempt=%d", iter, pendingTe.Name,
-			db.CoerceInt(pendingAe.RuntimeContext["retry_attempts"]))
+		t.Logf(
+			"  iter %d: driving %s attempt=%d", iter, pendingTe.Name,
+			db.CoerceInt(pendingAe.RuntimeContext["retry_attempts"]),
+		)
 		if pendingTe.Name == "flaky_hungry" {
 			// Attempt 1: we drive it to SUCCESS (faster than its own 1s timeout).
 			res := &db.Result{Data: "retry-finally-worked"}
@@ -1929,8 +2033,10 @@ func TestIntegration_TimeoutRetry_RetryRecoversFromTimeout(t *testing.T) {
 		t.Errorf("actions = %d, want 2 (attempt 0 timed out + attempt 1 succeeded)", len(actions))
 	}
 
-	t.Logf("  timeout→retry→success: flaky_hungry=%s, done=%s, actions=%d, final=%s ✅",
-		timeoutTask.State, doneTask.State, len(actions), final.State)
+	t.Logf(
+		"  timeout→retry→success: flaky_hungry=%s, done=%s, actions=%d, final=%s ✅",
+		timeoutTask.State, doneTask.State, len(actions), final.State,
+	)
 }
 
 // ================================================================
@@ -2043,8 +2149,10 @@ func TestIntegration_TimeoutRetry_AllTimeout(t *testing.T) {
 		t.Errorf("actions = %d, want 3 (3 attempts all timed out)", len(actions))
 	}
 
-	t.Logf("  timeout×retry exhaustion: flaky=%s(actions=%d), recovered=%s, final=%s ✅",
-		flakyTask.State, len(actions), recoveredTask.State, final.State)
+	t.Logf(
+		"  timeout×retry exhaustion: flaky=%s(actions=%d), recovered=%s, final=%s ✅",
+		flakyTask.State, len(actions), recoveredTask.State, final.State,
+	)
 }
 
 // ================================================================
@@ -2216,8 +2324,10 @@ tasks:
 		t.Error("NextExecutionTime should be in the future after 3 fires")
 	}
 
-	t.Logf("  unlimited cron: 3 wfExs created, trigger alive (remaining=0), next=%v ✅",
-		ctFinal.NextExecutionTime)
+	t.Logf(
+		"  unlimited cron: 3 wfExs created, trigger alive (remaining=0), next=%v ✅",
+		ctFinal.NextExecutionTime,
+	)
 }
 
 // ================================================================
@@ -2238,9 +2348,11 @@ func TestIntegration_PauseBefore_PausesThenResumes(t *testing.T) {
 	data, _ := os.ReadFile("testdata/pause_before.yaml")
 	wfDef, _ := svc.CreateWorkflow("pb-test", string(data), "p", "")
 
-	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "",
+	wfEx, err := eng.StartWorkflow(
+		context.Background(), wfDef.ID, "", "",
 		map[string]interface{}{"greeting": "Hi"}, "",
-		map[string]interface{}{"env": map[string]interface{}{}, "namespace": ""})
+		map[string]interface{}{"env": map[string]interface{}{}, "namespace": ""},
+	)
 	if err != nil {
 		t.Fatalf("StartWorkflow: %v", err)
 	}
@@ -2282,8 +2394,10 @@ func TestIntegration_PauseBefore_PausesThenResumes(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		if err := eng.OnActionComplete(context.Background(), invokeID,
-			&db.Result{Data: fmt.Sprintf("ok-%s", pending.Name)}, false); err != nil {
+		if err := eng.OnActionComplete(
+			context.Background(), invokeID,
+			&db.Result{Data: fmt.Sprintf("ok-%s", pending.Name)}, false,
+		); err != nil {
 			t.Fatalf("OnActionComplete: %v", err)
 		}
 	}
@@ -2302,13 +2416,15 @@ func TestIntegration_PauseBefore_PausesThenResumes(t *testing.T) {
 // Mirror Python engine/policies.py RetryPolicy.after_task_complete break-on branch.
 // ================================================================
 func TestIntegration_RetryBreakOn_StopsEarly(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "retry_break_on.yaml",
-		expectedState: states.SUCCESS, // recover → downstream → success overall
-		customResults: map[string]*db.Result{
-			"flaky": {Error: "fatal-config-error"}, // 1st attempt → ERROR, break-on fires
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "retry_break_on.yaml",
+			expectedState: states.SUCCESS, // recover → downstream → success overall
+			customResults: map[string]*db.Result{
+				"flaky": {Error: "fatal-config-error"}, // 1st attempt → ERROR, break-on fires
+			},
 		},
-	})
+	)
 
 	tasks, _ := store.TaskExecutions().List(final.ID, "")
 	var flakyTask *db.TaskExecution
@@ -2352,15 +2468,17 @@ func TestIntegration_RetryBreakOn_StopsEarly(t *testing.T) {
 // in SUCCESS after attempt 2 (last one), on-success fires normally.
 // ================================================================
 func TestIntegration_RetryContinueOn_KeepsRetryingOnSuccess(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "retry_continue_on.yaml",
-		expectedState: states.SUCCESS,
-		customResultsByAttempt: map[string]func(int) *db.Result{
-			"loop_task": func(attempt int) *db.Result {
-				return &db.Result{Data: fmt.Sprintf("loop-attempt-%d", attempt)}
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "retry_continue_on.yaml",
+			expectedState: states.SUCCESS,
+			customResultsByAttempt: map[string]func(int) *db.Result{
+				"loop_task": func(attempt int) *db.Result {
+					return &db.Result{Data: fmt.Sprintf("loop-attempt-%d", attempt)}
+				},
 			},
 		},
-	})
+	)
 
 	tasks, _ := store.TaskExecutions().List(final.ID, "")
 	var loopTask *db.TaskExecution
@@ -2398,16 +2516,18 @@ func TestIntegration_RetryContinueOn_KeepsRetryingOnSuccess(t *testing.T) {
 // expressions on on-success clauses. With my_val=2, only mid_branch
 // should fire (not top_branch or bottom_branch).
 func TestIntegration_PythonNative_WhenConditions(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "when_join.yaml",
-		expectedState: states.SUCCESS,
-		expectedSubstrings: []string{
-			"all-joined",  // join: all fired
-			"two-joined",  // join: 2 fired
-			"one-joined",  // join: one fired
-			"my_val is 2", // entry task echoed
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "when_join.yaml",
+			expectedState: states.SUCCESS,
+			expectedSubstrings: []string{
+				"all-joined",  // join: all fired
+				"two-joined",  // join: 2 fired
+				"one-joined",  // join: one fired
+				"my_val is 2", // entry task echoed
+			},
 		},
-	})
+	)
 
 	// Verify branch routing:
 	// top_branch: when="<% $.my_val == 1 %>" → my_val=2 → SKIPPED
@@ -2433,10 +2553,12 @@ func TestIntegration_PythonNative_WhenConditions(t *testing.T) {
 // TestIntegration_PythonNative_JoinAllOneNumeric verifies all 3 join variants
 // (join: all, join: 2, join: one) produce correct logical states.
 func TestIntegration_PythonNative_JoinAllOneNumeric(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "when_join.yaml",
-		expectedState: states.SUCCESS,
-	})
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "when_join.yaml",
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	tasks, _ := store.TaskExecutions().List(final.ID, "")
 	for _, te := range tasks {
@@ -2453,13 +2575,15 @@ func TestIntegration_PythonNative_JoinAllOneNumeric(t *testing.T) {
 // TestIntegration_PythonNative_RetryWithExpressions verifies Python-native
 // retry with break-on YAQL expression — retry stops early when break-on fires.
 func TestIntegration_PythonNative_RetryWithExpressions(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "retry_expr.yaml",
-		expectedState: states.SUCCESS, // flaky_with_break ERROR → recovery SUCCESS → wfEx SUCCESS
-		customResults: map[string]*db.Result{
-			"flaky_with_break": {Error: "boom"}, // break-on fires immediately
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "retry_expr.yaml",
+			expectedState: states.SUCCESS, // flaky_with_break ERROR → recovery SUCCESS → wfEx SUCCESS
+			customResults: map[string]*db.Result{
+				"flaky_with_break": {Error: "boom"}, // break-on fires immediately
+			},
 		},
-	})
+	)
 
 	tasks, _ := store.TaskExecutions().List(final.ID, "")
 	for _, te := range tasks {
@@ -2487,13 +2611,15 @@ func TestIntegration_PythonNative_RetryWithExpressions(t *testing.T) {
 // TestIntegration_PythonNative_WithItemsParams verifies Python-native
 // with-items + concurrency + params expression evaluation.
 func TestIntegration_PythonNative_WithItemsParams(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		yamlPath:      "with_items_params.yaml",
-		expectedState: states.SUCCESS,
-		expectedSubstrings: []string{
-			"collected:", // collector echoes fanout's aggregated result
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "with_items_params.yaml",
+			expectedState: states.SUCCESS,
+			expectedSubstrings: []string{
+				"collected:", // collector echoes fanout's aggregated result
+			},
 		},
-	})
+	)
 
 	tasks, _ := store.TaskExecutions().List(final.ID, "")
 	for _, te := range tasks {
@@ -2528,17 +2654,19 @@ func TestIntegration_PythonNative_WithItemsParams(t *testing.T) {
 //	✅ task-defaults (retry + break-on YAQL expression + global on-*)
 //	✅ break-on YAQL expression stops retry early
 func TestIntegration_PythonNative_MyWorkbook(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		workbookPath:  "my_workbook.yaml",
-		entryWorkflow: "wf2", // workbook-relative name (prefix auto-added as "my_wb.wf2")
-		input: map[string]interface{}{
-			"my_val": 2, // matches wf2.input default; routes task3 → task5
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			workbookPath:  "my_workbook.yaml",
+			entryWorkflow: "wf2", // workbook-relative name (prefix auto-added as "my_wb.wf2")
+			input: map[string]interface{}{
+				"my_val": 2, // matches wf2.input default; routes task3 → task5
+			},
+			expectedState: states.SUCCESS,
+			expectedSubstrings: []string{
+				"matched my_val=2", // task5 fired (my_val==2 when condition)
+			},
 		},
-		expectedState: states.SUCCESS,
-		expectedSubstrings: []string{
-			"matched my_val=2", // task5 fired (my_val==2 when condition)
-		},
-	})
+	)
 
 	// Walk all tasks and log states — my_workbook has MANY tasks because of
 	// with-items fanout (task7: 3 iterations, task8: 3*2=6 iterations,
@@ -2607,11 +2735,13 @@ func TestIntegration_PythonNative_MyWorkbook(t *testing.T) {
 // become explicit input: dict; Python task_name='task2' dropped (Go reverse
 // starts from no-requires task naturally).
 func TestIntegration_Nested_ReverseCalledByDirect(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		workbookPath:  "nested_reverse.yaml",
-		entryWorkflow: "wf2",
-		expectedState: states.SUCCESS,
-	})
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			workbookPath:  "nested_reverse.yaml",
+			entryWorkflow: "wf2",
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	// Walk all WorkflowExecutions — should have 2: wf2 (direct) + wf1 (reverse).
 	allWfExs, _ := store.WorkflowExecutions().List("")
@@ -2664,8 +2794,10 @@ func TestIntegration_Nested_ReverseCalledByDirect(t *testing.T) {
 		}
 	}
 
-	t.Logf("  nested reverse-by-direct: parent=%v child=%v final_state=%s",
-		parentWf.State, childWf.State, final.State)
+	t.Logf(
+		"  nested reverse-by-direct: parent=%v child=%v final_state=%s",
+		parentWf.State, childWf.State, final.State,
+	)
 }
 
 // TestIntegration_Nested_ChildErrorPropagates ports Python WB2: parent wf1
@@ -2673,14 +2805,16 @@ func TestIntegration_Nested_ReverseCalledByDirect(t *testing.T) {
 // because its only task fails.
 func TestIntegration_Nested_ChildErrorPropagates(t *testing.T) {
 	failRes := &db.Result{Error: "intentional failure"}
-	final, store := runWorkflowFromYAML(t, fixture{
-		workbookPath:  "nested_error.yaml",
-		entryWorkflow: "wf1",
-		expectedState: states.ERROR,
-		customResults: map[string]*db.Result{
-			"fail_task": failRes, // unique name — no collision
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			workbookPath:  "nested_error.yaml",
+			entryWorkflow: "wf1",
+			expectedState: states.ERROR,
+			customResults: map[string]*db.Result{
+				"fail_task": failRes, // unique name — no collision
+			},
 		},
-	})
+	)
 
 	allWfExs, _ := store.WorkflowExecutions().List("")
 	var parentWf, childWf *db.WorkflowExecution
@@ -2723,11 +2857,13 @@ func TestIntegration_Nested_ChildErrorPropagates(t *testing.T) {
 // workbook nested fixture (wb_with_nested_wf.yaml): wrapping_wf → inner_wf
 // with one echo task. Verifies basic subworkflow execution inside a workbook.
 func TestIntegration_Nested_SimplePortsPythonFixture(t *testing.T) {
-	_, store := runWorkflowFromYAML(t, fixture{
-		workbookPath:  "nested_simple.yaml",
-		entryWorkflow: "wrapping_wf",
-		expectedState: states.SUCCESS,
-	})
+	_, store := runWorkflowFromYAML(
+		t, fixture{
+			workbookPath:  "nested_simple.yaml",
+			entryWorkflow: "wrapping_wf",
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	allWfExs, _ := store.WorkflowExecutions().List("")
 	var parentWf, childWf *db.WorkflowExecution
@@ -2765,11 +2901,13 @@ func TestIntegration_Nested_SimplePortsPythonFixture(t *testing.T) {
 // point back to wf1.ID as their root. Mirror Python test_subworkflows.py
 // test_subworkflow_root_execution_id.
 func TestIntegration_Nested_DeepChainRootExecutionID(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		workbookPath:  "nested_deep_chain.yaml",
-		entryWorkflow: "wf1",
-		expectedState: states.SUCCESS,
-	})
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			workbookPath:  "nested_deep_chain.yaml",
+			entryWorkflow: "wf1",
+			expectedState: states.SUCCESS,
+		},
+	)
 
 	allWfExs, _ := store.WorkflowExecutions().List("")
 	var wf1, wf2, wf3 *db.WorkflowExecution
@@ -2812,8 +2950,10 @@ func TestIntegration_Nested_DeepChainRootExecutionID(t *testing.T) {
 	if wf3.RootExecutionID != wf1.ID {
 		t.Errorf("wf3 RootExecutionID=%s, want wf1.ID=%s", wf3.RootExecutionID, wf1.ID)
 	}
-	t.Logf("  RootExecutionID chain: wf1.root=%v wf2.root=%s wf3.root=%s (all → wf1.ID=%s) ✅",
-		wf1.RootExecutionID, wf2.RootExecutionID, wf3.RootExecutionID, wf1.ID)
+	t.Logf(
+		"  RootExecutionID chain: wf1.root=%v wf2.root=%s wf3.root=%s (all → wf1.ID=%s) ✅",
+		wf1.RootExecutionID, wf2.RootExecutionID, wf3.RootExecutionID, wf1.ID,
+	)
 
 	t.Logf("  deep chain (3 levels): 3 WfExs all SUCCESS, root chain correct ✅")
 	_ = final
@@ -2825,14 +2965,16 @@ func TestIntegration_Nested_DeepChainRootExecutionID(t *testing.T) {
 // test_dynamic_subworkflow_wf2.
 func TestIntegration_Nested_DynamicWorkflowName(t *testing.T) {
 	// First: launch wf1 with wf_name="wf2" → child should be wf2, output=wf2_out
-	final, store := runWorkflowFromYAML(t, fixture{
-		workbookPath:  "nested_dynamic_wf.yaml",
-		entryWorkflow: "wf1",
-		input: map[string]interface{}{
-			"wf_name": "wf2",
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			workbookPath:  "nested_dynamic_wf.yaml",
+			entryWorkflow: "wf1",
+			input: map[string]interface{}{
+				"wf_name": "wf2",
+			},
+			expectedState: states.SUCCESS,
 		},
-		expectedState: states.SUCCESS,
-	})
+	)
 
 	allWfExs, _ := store.WorkflowExecutions().List("")
 	var parentWf, childWf *db.WorkflowExecution
@@ -2868,14 +3010,16 @@ func TestIntegration_Nested_DynamicWorkflowName(t *testing.T) {
 	t.Logf("  dynamic wf2: ✅ (wf1→wf2 resolved via $.wf_name expr)")
 
 	// Second run with wf_name="wf3" — verify it picks different child.
-	_, store2 := runWorkflowFromYAML(t, fixture{
-		workbookPath:  "nested_dynamic_wf.yaml",
-		entryWorkflow: "wf1",
-		input: map[string]interface{}{
-			"wf_name": "wf3",
+	_, store2 := runWorkflowFromYAML(
+		t, fixture{
+			workbookPath:  "nested_dynamic_wf.yaml",
+			entryWorkflow: "wf1",
+			input: map[string]interface{}{
+				"wf_name": "wf3",
+			},
+			expectedState: states.SUCCESS,
 		},
-		expectedState: states.SUCCESS,
-	})
+	)
 
 	allWfExs2, _ := store2.WorkflowExecutions().List("")
 	var childWf3 *db.WorkflowExecution
@@ -2900,15 +3044,17 @@ func TestIntegration_Nested_DynamicWorkflowName(t *testing.T) {
 // a resolved value down into the subworkflow. Mirrors Python
 // test_dynamic_subworkflow_with_generic_input.
 func TestIntegration_Nested_DynamicInputDict(t *testing.T) {
-	final, store := runWorkflowFromYAML(t, fixture{
-		workbookPath:  "nested_dynamic_input.yaml",
-		entryWorkflow: "wf1",
-		input: map[string]interface{}{
-			"wf_name": "wf2",
-			"inp":     "dynamic-value",
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			workbookPath:  "nested_dynamic_input.yaml",
+			entryWorkflow: "wf1",
+			input: map[string]interface{}{
+				"wf_name": "wf2",
+				"inp":     "dynamic-value",
+			},
+			expectedState: states.SUCCESS,
 		},
-		expectedState: states.SUCCESS,
-	})
+	)
 
 	allWfExs, _ := store.WorkflowExecutions().List("")
 	var parentWf, childWf *db.WorkflowExecution

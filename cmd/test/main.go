@@ -1,4 +1,4 @@
-// Command mistral is the main entry point for the Mistral Go workflow engine.
+// Command test is the main entry point for the Go workflow engine.
 //
 // Run without arguments to start the REST API server.
 // Run with `--demo` to execute an example workflow and print results.
@@ -15,13 +15,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mistral/workflow/internal/db"
-	"github.com/mistral/workflow/internal/engine"
-	"github.com/mistral/workflow/internal/lang/parser"
-	v2 "github.com/mistral/workflow/internal/lang/v2"
-	"github.com/mistral/workflow/internal/services"
-	"github.com/mistral/workflow/internal/states"
-	"github.com/mistral/workflow/pkg/api"
+	"github.com/danchleo/workflow-go/internal/db"
+	"github.com/danchleo/workflow-go/internal/engine"
+	"github.com/danchleo/workflow-go/internal/lang/parser"
+	v2 "github.com/danchleo/workflow-go/internal/lang/v2"
+	"github.com/danchleo/workflow-go/internal/services"
+	"github.com/danchleo/workflow-go/internal/states"
+	"github.com/danchleo/workflow-go/pkg/api"
 )
 
 func main() {
@@ -68,7 +68,7 @@ func main() {
 }
 
 func runDemoDirect(store db.Store, eng *engine.DefaultEngine) {
-	fmt.Println("=== Mistral Go Engine — Direct Workflow Demo ===")
+	fmt.Println("=== Workflow Go Engine — Direct Workflow Demo ===")
 	fmt.Println()
 
 	wfYAML := api.NewDemoWorkflowDef()
@@ -86,8 +86,10 @@ func runDemoDirect(store db.Store, eng *engine.DefaultEngine) {
 	if err != nil {
 		log.Fatalf("parsing workflow spec: %v", err)
 	}
-	fmt.Printf("[2] Validated workflow spec: name=%s, type=%s, tasks=%d\n",
-		wfSpec.GetName(), wfSpec.GetType(), len(wfSpec.GetTasks()))
+	fmt.Printf(
+		"[2] Validated workflow spec: name=%s, type=%s, tasks=%d\n",
+		wfSpec.GetName(), wfSpec.GetType(), len(wfSpec.GetTasks()),
+	)
 	for name, t := range wfSpec.GetTasks() {
 		fmt.Printf("    - task %q: action=%s\n", name, t.GetActionName())
 	}
@@ -99,7 +101,7 @@ func runDemoDirect(store db.Store, eng *engine.DefaultEngine) {
 	}
 	input := map[string]interface{}{
 		"greeting": "Hi",
-		"name":     "Mistral",
+		"name":     "Dinozzo",
 	}
 
 	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", input, "demo execution", params)
@@ -163,7 +165,7 @@ func runDemoDirect(store db.Store, eng *engine.DefaultEngine) {
 }
 
 func runDemoReverse(store db.Store, eng *engine.DefaultEngine) {
-	fmt.Println("=== Mistral Go Engine — Reverse Workflow Demo ===")
+	fmt.Println("=== Workflow Go Engine — Reverse Workflow Demo ===")
 	fmt.Println()
 
 	wfYAML := api.NewReverseDemoWorkflowDef()

@@ -4,7 +4,7 @@
 package commands
 
 import (
-	"github.com/mistral/workflow/internal/states"
+	"github.com/danchleo/workflow-go/internal/states"
 )
 
 // WorkflowCommand is the base interface for all workflow commands.
@@ -31,10 +31,10 @@ type BaseCommand struct {
 	handlesError bool
 }
 
-func (b *BaseCommand) TaskName() string                    { return b.taskSpecName }
-func (b *BaseCommand) Ctx() map[string]interface{}         { return b.ctx }
+func (b *BaseCommand) TaskName() string                      { return b.taskSpecName }
+func (b *BaseCommand) Ctx() map[string]interface{}           { return b.ctx }
 func (b *BaseCommand) TriggeredBy() []map[string]interface{} { return b.triggeredBy }
-func (b *BaseCommand) HandlesError() bool                  { return b.handlesError }
+func (b *BaseCommand) HandlesError() bool                    { return b.handlesError }
 
 // Noop is a no-operation command.
 type Noop struct {
@@ -60,7 +60,9 @@ type RunTask struct {
 	uniqueKey string
 }
 
-func NewRunTask(taskName string, ctx map[string]interface{}, triggeredBy []map[string]interface{}, handlesError bool) *RunTask {
+func NewRunTask(
+	taskName string, ctx map[string]interface{}, triggeredBy []map[string]interface{}, handlesError bool,
+) *RunTask {
 	return &RunTask{
 		BaseCommand: BaseCommand{
 			taskSpecName: taskName,
@@ -71,19 +73,19 @@ func NewRunTask(taskName string, ctx map[string]interface{}, triggeredBy []map[s
 	}
 }
 
-func (c *RunTask) IsWaiting() bool   { return c.wait }
-func (c *RunTask) UniqueKey() string { return c.uniqueKey }
-func (c *RunTask) SetWait(v bool)    { c.wait = v }
+func (c *RunTask) IsWaiting() bool       { return c.wait }
+func (c *RunTask) UniqueKey() string     { return c.uniqueKey }
+func (c *RunTask) SetWait(v bool)        { c.wait = v }
 func (c *RunTask) SetUniqueKey(k string) { c.uniqueKey = k }
 
 func (c *RunTask) ToDict() map[string]interface{} {
 	return map[string]interface{}{
-		"cmd_name":   c.taskSpecName,
-		"task_name":  c.taskSpecName,
-		"ctx":        c.ctx,
+		"cmd_name":     c.taskSpecName,
+		"task_name":    c.taskSpecName,
+		"ctx":          c.ctx,
 		"triggered_by": c.triggeredBy,
-		"wait":       c.wait,
-		"unique_key": c.uniqueKey,
+		"wait":         c.wait,
+		"unique_key":   c.uniqueKey,
 	}
 }
 
@@ -96,7 +98,10 @@ type RunExistingTask struct {
 	rerun     bool
 }
 
-func NewRunExistingTask(taskExID, taskName string, ctx map[string]interface{}, reset bool, rerun bool, triggeredBy []map[string]interface{}, handlesError bool) *RunExistingTask {
+func NewRunExistingTask(
+	taskExID, taskName string, ctx map[string]interface{}, reset bool, rerun bool, triggeredBy []map[string]interface{},
+	handlesError bool,
+) *RunExistingTask {
 	return &RunExistingTask{
 		BaseCommand: BaseCommand{
 			taskSpecName: taskName,
@@ -104,9 +109,9 @@ func NewRunExistingTask(taskExID, taskName string, ctx map[string]interface{}, r
 			triggeredBy:  triggeredBy,
 			handlesError: handlesError,
 		},
-		taskExID:  taskExID,
-		reset:     reset,
-		rerun:     rerun,
+		taskExID: taskExID,
+		reset:    reset,
+		rerun:    rerun,
 	}
 }
 
@@ -116,12 +121,12 @@ func (c *RunExistingTask) Rerun() bool      { return c.rerun }
 
 func (c *RunExistingTask) ToDict() map[string]interface{} {
 	return map[string]interface{}{
-		"cmd_name":   "run_existing_task",
-		"task_name":  c.taskSpecName,
-		"task_ex_id": c.taskExID,
-		"ctx":        c.ctx,
+		"cmd_name":     "run_existing_task",
+		"task_name":    c.taskSpecName,
+		"task_ex_id":   c.taskExID,
+		"ctx":          c.ctx,
 		"triggered_by": c.triggeredBy,
-		"reset":      c.reset,
+		"reset":        c.reset,
 	}
 }
 
@@ -132,7 +137,9 @@ type SkipTask struct {
 	uniqueKey string
 }
 
-func NewSkipTask(taskExID, taskName string, ctx map[string]interface{}, triggeredBy []map[string]interface{}, handlesError bool) *SkipTask {
+func NewSkipTask(
+	taskExID, taskName string, ctx map[string]interface{}, triggeredBy []map[string]interface{}, handlesError bool,
+) *SkipTask {
 	return &SkipTask{
 		BaseCommand: BaseCommand{
 			taskSpecName: taskName,
@@ -148,10 +155,10 @@ func (c *SkipTask) TaskExID() string { return c.taskExID }
 
 func (c *SkipTask) ToDict() map[string]interface{} {
 	return map[string]interface{}{
-		"cmd_name":  "skip_task",
-		"task_name": c.taskSpecName,
-		"task_ex_id": c.taskExID,
-		"ctx":       c.ctx,
+		"cmd_name":     "skip_task",
+		"task_name":    c.taskSpecName,
+		"task_ex_id":   c.taskExID,
+		"ctx":          c.ctx,
 		"triggered_by": c.triggeredBy,
 	}
 }
@@ -164,7 +171,7 @@ type SetWorkflowState struct {
 }
 
 func (c *SetWorkflowState) NewState() string { return c.newState }
-func (c *SetWorkflowState) Msg() string       { return c.msg }
+func (c *SetWorkflowState) Msg() string      { return c.msg }
 
 func (c *SetWorkflowState) ToDict() map[string]interface{} {
 	return map[string]interface{}{
@@ -179,12 +186,18 @@ func (c *SetWorkflowState) ToDict() map[string]interface{} {
 // FailWorkflow fails a workflow.
 type FailWorkflow struct{ SetWorkflowState }
 
-func NewFailWorkflow(taskName string, ctx map[string]interface{}, msg string, triggeredBy []map[string]interface{}, handlesError bool) *FailWorkflow {
-	return &FailWorkflow{SetWorkflowState{
-		BaseCommand: BaseCommand{taskSpecName: taskName, ctx: ctx, triggeredBy: triggeredBy, handlesError: handlesError},
-		newState:    states.ERROR,
-		msg:         msg,
-	}}
+func NewFailWorkflow(
+	taskName string, ctx map[string]interface{}, msg string, triggeredBy []map[string]interface{}, handlesError bool,
+) *FailWorkflow {
+	return &FailWorkflow{
+		SetWorkflowState{
+			BaseCommand: BaseCommand{
+				taskSpecName: taskName, ctx: ctx, triggeredBy: triggeredBy, handlesError: handlesError,
+			},
+			newState: states.ERROR,
+			msg:      msg,
+		},
+	}
 }
 
 func (c *FailWorkflow) ToDict() map[string]interface{} {
@@ -196,12 +209,18 @@ func (c *FailWorkflow) ToDict() map[string]interface{} {
 // SucceedWorkflow succeeds a workflow.
 type SucceedWorkflow struct{ SetWorkflowState }
 
-func NewSucceedWorkflow(taskName string, ctx map[string]interface{}, msg string, triggeredBy []map[string]interface{}, handlesError bool) *SucceedWorkflow {
-	return &SucceedWorkflow{SetWorkflowState{
-		BaseCommand: BaseCommand{taskSpecName: taskName, ctx: ctx, triggeredBy: triggeredBy, handlesError: handlesError},
-		newState:    states.SUCCESS,
-		msg:         msg,
-	}}
+func NewSucceedWorkflow(
+	taskName string, ctx map[string]interface{}, msg string, triggeredBy []map[string]interface{}, handlesError bool,
+) *SucceedWorkflow {
+	return &SucceedWorkflow{
+		SetWorkflowState{
+			BaseCommand: BaseCommand{
+				taskSpecName: taskName, ctx: ctx, triggeredBy: triggeredBy, handlesError: handlesError,
+			},
+			newState: states.SUCCESS,
+			msg:      msg,
+		},
+	}
 }
 
 func (c *SucceedWorkflow) ToDict() map[string]interface{} {
@@ -213,12 +232,18 @@ func (c *SucceedWorkflow) ToDict() map[string]interface{} {
 // PauseWorkflow pauses a workflow.
 type PauseWorkflow struct{ SetWorkflowState }
 
-func NewPauseWorkflow(taskName string, ctx map[string]interface{}, msg string, triggeredBy []map[string]interface{}, handlesError bool) *PauseWorkflow {
-	return &PauseWorkflow{SetWorkflowState{
-		BaseCommand: BaseCommand{taskSpecName: taskName, ctx: ctx, triggeredBy: triggeredBy, handlesError: handlesError},
-		newState:    states.PAUSED,
-		msg:         msg,
-	}}
+func NewPauseWorkflow(
+	taskName string, ctx map[string]interface{}, msg string, triggeredBy []map[string]interface{}, handlesError bool,
+) *PauseWorkflow {
+	return &PauseWorkflow{
+		SetWorkflowState{
+			BaseCommand: BaseCommand{
+				taskSpecName: taskName, ctx: ctx, triggeredBy: triggeredBy, handlesError: handlesError,
+			},
+			newState: states.PAUSED,
+			msg:      msg,
+		},
+	}
 }
 
 func (c *PauseWorkflow) ToDict() map[string]interface{} {

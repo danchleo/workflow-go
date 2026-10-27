@@ -1,0 +1,41 @@
+# --- macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# --- IDE / Editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- Go build / test ---
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+
+# --- Generated code / vendored deps ---
+/vendor/
+
+# --- Env & secrets ---
+.env
+.env.local
+*.pem
+*.key
+
+# --- Logs ---
+*.log
+
+# --- Temp / scratch ---
+/tmp/
+*.bak
+*.tmp

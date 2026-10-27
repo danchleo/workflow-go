@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mistral/workflow/internal/db"
+	"github.com/danchleo/workflow-go/internal/db"
 )
 
 // ------------------------------------------------------------

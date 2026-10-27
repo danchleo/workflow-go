@@ -12,14 +12,20 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mistral/workflow/internal/db"
-	"github.com/mistral/workflow/internal/engine"
+	"github.com/danchleo/workflow-go/internal/db"
+	"github.com/danchleo/workflow-go/internal/engine"
 )
 
 // EngineClient is the client side of engine RPC.
 type EngineClient interface {
-	StartWorkflow(ctx context.Context, wfDefID, wfNamespace string, wfExID string, wfInput map[string]interface{}, description string, params map[string]interface{}) (*db.WorkflowExecution, error)
-	StartTask(ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool, reset bool) error
+	StartWorkflow(
+		ctx context.Context, wfDefID, wfNamespace string, wfExID string, wfInput map[string]interface{},
+		description string, params map[string]interface{},
+	) (*db.WorkflowExecution, error)
+	StartTask(
+		ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{},
+		rerun bool, reset bool,
+	) error
 	OnActionComplete(ctx context.Context, actionExID string, result *db.Result, wfAction bool) error
 	PauseWorkflow(ctx context.Context, wfExID string) error
 	ResumeWorkflow(ctx context.Context, wfExID string, env map[string]interface{}) error
@@ -35,15 +41,23 @@ func NewLocalEngineClient(e engine.Engine) *LocalEngineClient {
 	return &LocalEngineClient{engine: e}
 }
 
-func (c *LocalEngineClient) StartWorkflow(ctx context.Context, wfDefID, wfNamespace string, wfExID string, wfInput map[string]interface{}, description string, params map[string]interface{}) (*db.WorkflowExecution, error) {
+func (c *LocalEngineClient) StartWorkflow(
+	ctx context.Context, wfDefID, wfNamespace string, wfExID string, wfInput map[string]interface{}, description string,
+	params map[string]interface{},
+) (*db.WorkflowExecution, error) {
 	return c.engine.StartWorkflow(ctx, wfDefID, wfNamespace, wfExID, wfInput, description, params)
 }
 
-func (c *LocalEngineClient) StartTask(ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool, reset bool) error {
+func (c *LocalEngineClient) StartTask(
+	ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool,
+	reset bool,
+) error {
 	return c.engine.StartTask(ctx, taskExID, firstRun, waiting, triggeredBy, rerun, reset)
 }
 
-func (c *LocalEngineClient) OnActionComplete(ctx context.Context, actionExID string, result *db.Result, wfAction bool) error {
+func (c *LocalEngineClient) OnActionComplete(
+	ctx context.Context, actionExID string, result *db.Result, wfAction bool,
+) error {
 	return c.engine.OnActionComplete(ctx, actionExID, result, wfAction)
 }
 
@@ -117,35 +131,49 @@ type startWorkflowRequest struct {
 	Params      map[string]interface{} `json:"params"`
 }
 
-func (c *HttpEngineClient) StartWorkflow(ctx context.Context, wfDefID, wfNamespace string, wfExID string, wfInput map[string]interface{}, description string, params map[string]interface{}) (*db.WorkflowExecution, error) {
+func (c *HttpEngineClient) StartWorkflow(
+	ctx context.Context, wfDefID, wfNamespace string, wfExID string, wfInput map[string]interface{}, description string,
+	params map[string]interface{},
+) (*db.WorkflowExecution, error) {
 	var result db.WorkflowExecution
-	err := c.rpcCall(ctx, "start_workflow", startWorkflowRequest{
-		WFDefID: wfDefID, WFNamespace: wfNamespace, WFExID: wfExID,
-		WFInput: wfInput, Description: description, Params: params,
-	}, &result)
+	err := c.rpcCall(
+		ctx, "start_workflow", startWorkflowRequest{
+			WFDefID: wfDefID, WFNamespace: wfNamespace, WFExID: wfExID,
+			WFInput: wfInput, Description: description, Params: params,
+		}, &result,
+	)
 	if err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (c *HttpEngineClient) StartTask(ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool, reset bool) error {
-	return c.rpcCall(ctx, "start_task", map[string]interface{}{
-		"task_ex_id":   taskExID,
-		"first_run":    firstRun,
-		"waiting":      waiting,
-		"triggered_by": triggeredBy,
-		"rerun":        rerun,
-		"reset":        reset,
-	}, nil)
+func (c *HttpEngineClient) StartTask(
+	ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool,
+	reset bool,
+) error {
+	return c.rpcCall(
+		ctx, "start_task", map[string]interface{}{
+			"task_ex_id":   taskExID,
+			"first_run":    firstRun,
+			"waiting":      waiting,
+			"triggered_by": triggeredBy,
+			"rerun":        rerun,
+			"reset":        reset,
+		}, nil,
+	)
 }
 
-func (c *HttpEngineClient) OnActionComplete(ctx context.Context, actionExID string, result *db.Result, wfAction bool) error {
-	return c.rpcCall(ctx, "on_action_complete", map[string]interface{}{
-		"action_ex_id": actionExID,
-		"result":       result.ToDict(),
-		"wf_action":    wfAction,
-	}, nil)
+func (c *HttpEngineClient) OnActionComplete(
+	ctx context.Context, actionExID string, result *db.Result, wfAction bool,
+) error {
+	return c.rpcCall(
+		ctx, "on_action_complete", map[string]interface{}{
+			"action_ex_id": actionExID,
+			"result":       result.ToDict(),
+			"wf_action":    wfAction,
+		}, nil,
+	)
 }
 
 func (c *HttpEngineClient) PauseWorkflow(ctx context.Context, wfExID string) error {
@@ -157,5 +185,7 @@ func (c *HttpEngineClient) ResumeWorkflow(ctx context.Context, wfExID string, en
 }
 
 func (c *HttpEngineClient) StopWorkflow(ctx context.Context, wfExID string, state string, message string) error {
-	return c.rpcCall(ctx, "stop_workflow", map[string]interface{}{"wf_ex_id": wfExID, "state": state, "message": message}, nil)
+	return c.rpcCall(
+		ctx, "stop_workflow", map[string]interface{}{"wf_ex_id": wfExID, "state": state, "message": message}, nil,
+	)
 }

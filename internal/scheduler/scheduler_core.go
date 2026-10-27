@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mistral/workflow/internal/db"
+	"github.com/danchleo/workflow-go/internal/db"
 )
 
 // JobType identifies the kind of delayed work — must match the registry.
@@ -131,7 +131,9 @@ type DefaultScheduler struct {
 //	                  eligible for DB pickup. Gives heapDispatcher priority
 //	                  for recently-due jobs. (Python pickup_job_after; default 60s)
 //	batchSize       — max jobs per GetDueJobs poll (Python batch_size; default 0=unlimited)
-func NewDefaultScheduler(store db.Store, pollInterval, randomDelay, captureTimeout, pickupJobAfter time.Duration, batchSize int) *DefaultScheduler {
+func NewDefaultScheduler(
+	store db.Store, pollInterval, randomDelay, captureTimeout, pickupJobAfter time.Duration, batchSize int,
+) *DefaultScheduler {
 	if pollInterval <= 0 {
 		pollInterval = 500 * time.Millisecond
 	}
@@ -211,7 +213,9 @@ func (s *DefaultScheduler) Schedule(jobType JobType, args map[string]interface{}
 // ScheduleWithKey is like Schedule but associates a dedup key.
 // If key != "" and HasScheduledJobs(key) is true, the call is a no-op
 // (returns empty id, nil error). Matches Python's schedule + key dedup.
-func (s *DefaultScheduler) ScheduleWithKey(jobType JobType, args map[string]interface{}, delay time.Duration, key string) (string, error) {
+func (s *DefaultScheduler) ScheduleWithKey(
+	jobType JobType, args map[string]interface{}, delay time.Duration, key string,
+) (string, error) {
 	if key != "" && s.HasScheduledJobs(key) {
 		return "", nil // dedup hit — skip (Python schedule() doesn't skip, but callers can)
 	}
@@ -233,12 +237,14 @@ func (s *DefaultScheduler) ScheduleWithKey(jobType JobType, args map[string]inte
 
 	s.mu.Lock()
 	s.seq++
-	heap.Push(&s.heap, &jobHeapElem{
-		executeAt: executeAt,
-		seq:       s.seq,
-		dbJobID:   id,
-		key:       key,
-	})
+	heap.Push(
+		&s.heap, &jobHeapElem{
+			executeAt: executeAt,
+			seq:       s.seq,
+			dbJobID:   id,
+			key:       key,
+		},
+	)
 	if key != "" {
 		if s.keyIndex[key] == nil {
 			s.keyIndex[key] = make(map[string]bool)
@@ -307,17 +313,19 @@ func (s *DefaultScheduler) pokeLocked() {
 
 // Start begins both goroutines. Safe to call multiple times.
 func (s *DefaultScheduler) Start() {
-	s.once.Do(func() {
-		s.started = true
-		s.dispatcherStop = make(chan struct{})
-		s.checkerStop = make(chan struct{})
+	s.once.Do(
+		func() {
+			s.started = true
+			s.dispatcherStop = make(chan struct{})
+			s.checkerStop = make(chan struct{})
 
-		s.wg.Add(1)
-		go s.heapDispatcher()
+			s.wg.Add(1)
+			go s.heapDispatcher()
 
-		s.wg.Add(1)
-		go s.jobStoreChecker()
-	})
+			s.wg.Add(1)
+			go s.jobStoreChecker()
+		},
+	)
 }
 
 // Stop halts both goroutines. In-memory heap jobs are dropped; DB jobs survive

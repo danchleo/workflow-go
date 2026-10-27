@@ -3,31 +3,31 @@ package v2
 import (
 	"fmt"
 
-	"github.com/mistral/workflow/internal/lang"
+	"github.com/danchleo/workflow-go/internal/lang"
 )
 
 // Standard engine command names used in workflow DSL.
 const (
-	NoopCommand   = "noop"
-	FailCommand   = "fail"
+	NoopCommand    = "noop"
+	FailCommand    = "fail"
 	SucceedCommand = "succeed"
-	PauseCommand  = "pause"
+	PauseCommand   = "pause"
 )
 
 // WorkflowSpec represents a workflow definition (either direct or reverse).
 // Ported from mistral-master/mistral/lang/v2/workflows.py
 type WorkflowSpec struct {
-	name            string
-	description     string
-	tags            []string
-	workflowType    string // "direct" or "reverse"
-	input           map[string]interface{}
-	output          map[string]interface{}
-	outputOnError   map[string]interface{}
-	vars            map[string]interface{}
-	taskDefaults    *TaskDefaultsSpec
-	tasks           map[string]*TaskSpec
-	raw             map[string]interface{}
+	name          string
+	description   string
+	tags          []string
+	workflowType  string // "direct" or "reverse"
+	input         map[string]interface{}
+	output        map[string]interface{}
+	outputOnError map[string]interface{}
+	vars          map[string]interface{}
+	taskDefaults  *TaskDefaultsSpec
+	tasks         map[string]*TaskSpec
+	raw           map[string]interface{}
 }
 
 // NewWorkflowSpec creates a WorkflowSpec from raw YAML data.
@@ -149,17 +149,17 @@ func parseInput(data interface{}) map[string]interface{} {
 
 // Accessor methods.
 
-func (s *WorkflowSpec) GetName() string                 { return s.name }
-func (s *WorkflowSpec) GetDescription() string          { return s.description }
-func (s *WorkflowSpec) GetTags() []string               { return s.tags }
-func (s *WorkflowSpec) GetType() string                 { return s.workflowType }
-func (s *WorkflowSpec) GetInput() map[string]interface{} { return s.input }
-func (s *WorkflowSpec) GetOutput() map[string]interface{} { return s.output }
+func (s *WorkflowSpec) GetName() string                          { return s.name }
+func (s *WorkflowSpec) GetDescription() string                   { return s.description }
+func (s *WorkflowSpec) GetTags() []string                        { return s.tags }
+func (s *WorkflowSpec) GetType() string                          { return s.workflowType }
+func (s *WorkflowSpec) GetInput() map[string]interface{}         { return s.input }
+func (s *WorkflowSpec) GetOutput() map[string]interface{}        { return s.output }
 func (s *WorkflowSpec) GetOutputOnError() map[string]interface{} { return s.outputOnError }
-func (s *WorkflowSpec) GetVars() map[string]interface{}  { return s.vars }
-func (s *WorkflowSpec) GetTaskDefaults() *TaskDefaultsSpec { return s.taskDefaults }
-func (s *WorkflowSpec) GetTasks() map[string]*TaskSpec { return s.tasks }
-func (s *WorkflowSpec) GetTask(name string) *TaskSpec  { return s.tasks[name] }
+func (s *WorkflowSpec) GetVars() map[string]interface{}          { return s.vars }
+func (s *WorkflowSpec) GetTaskDefaults() *TaskDefaultsSpec       { return s.taskDefaults }
+func (s *WorkflowSpec) GetTasks() map[string]*TaskSpec           { return s.tasks }
+func (s *WorkflowSpec) GetTask(name string) *TaskSpec            { return s.tasks[name] }
 
 // ToMap returns the raw spec as a map.
 func (s *WorkflowSpec) ToMap() map[string]interface{} { return s.raw }

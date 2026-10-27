@@ -5,7 +5,7 @@ package policies
 import (
 	"time"
 
-	"github.com/mistral/workflow/internal/db"
+	"github.com/danchleo/workflow-go/internal/db"
 )
 
 // Policy is a hook applied before/after task execution.
@@ -39,8 +39,8 @@ type TimeoutPolicy struct {
 	Duration time.Duration
 }
 
-func (p *TimeoutPolicy) Name() string                            { return "timeout" }
-func (p *TimeoutPolicy) BeforeTaskStart(task *db.TaskExecution) error { return nil }
+func (p *TimeoutPolicy) Name() string                                   { return "timeout" }
+func (p *TimeoutPolicy) BeforeTaskStart(task *db.TaskExecution) error   { return nil }
 func (p *TimeoutPolicy) AfterTaskComplete(task *db.TaskExecution) error { return nil }
 
 // ConcurrencyPolicy limits the number of concurrent task executions.
@@ -48,8 +48,8 @@ type ConcurrencyPolicy struct {
 	Max int
 }
 
-func (p *ConcurrencyPolicy) Name() string                               { return "concurrency" }
-func (p *ConcurrencyPolicy) BeforeTaskStart(task *db.TaskExecution) error { return nil }
+func (p *ConcurrencyPolicy) Name() string                                   { return "concurrency" }
+func (p *ConcurrencyPolicy) BeforeTaskStart(task *db.TaskExecution) error   { return nil }
 func (p *ConcurrencyPolicy) AfterTaskComplete(task *db.TaskExecution) error { return nil }
 
 // BuildPolicies builds policies from task spec policy definitions.

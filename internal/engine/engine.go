@@ -18,17 +18,20 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/mistral/workflow/internal/commands"
-	"github.com/mistral/workflow/internal/db"
-	v2 "github.com/mistral/workflow/internal/lang/v2"
-	"github.com/mistral/workflow/internal/states"
+	"github.com/danchleo/workflow-go/internal/commands"
+	"github.com/danchleo/workflow-go/internal/db"
+	v2 "github.com/danchleo/workflow-go/internal/lang/v2"
+	"github.com/danchleo/workflow-go/internal/states"
 )
 
 // Engine is the main entry point for workflow execution. All operations accept
 // a context.Context so callers can cancel or time out long-running flows.
 type Engine interface {
 	// StartWorkflow creates a new workflow execution and begins processing.
-	StartWorkflow(ctx context.Context, wfDefID, wfNamespace, wfExID string, wfInput map[string]interface{}, description string, params map[string]interface{}) (*db.WorkflowExecution, error)
+	StartWorkflow(
+		ctx context.Context, wfDefID, wfNamespace, wfExID string, wfInput map[string]interface{}, description string,
+		params map[string]interface{},
+	) (*db.WorkflowExecution, error)
 	// PauseWorkflow pauses a running workflow.
 	PauseWorkflow(ctx context.Context, wfExID string) error
 	// ResumeWorkflow resumes a paused workflow.
@@ -39,7 +42,10 @@ type Engine interface {
 	RerunWorkflow(ctx context.Context, taskExID string, reset bool, skip bool, env map[string]interface{}) error
 
 	// StartTask starts processing a task execution.
-	StartTask(ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool, reset bool) error
+	StartTask(
+		ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{},
+		rerun bool, reset bool,
+	) error
 	// OnActionComplete handles action completion events.
 	OnActionComplete(ctx context.Context, actionExID string, result *db.Result, wfAction bool) error
 }
@@ -165,7 +171,10 @@ func WithPostTx(fn func() error) error {
 // Ported from mistral-master/mistral/engine/dispatcher.py
 // TaskStarter is a subset of Engine that dispatcher needs to kick off tasks.
 type TaskStarter interface {
-	StartTask(ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool, reset bool) error
+	StartTask(
+		ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{},
+		rerun bool, reset bool,
+	) error
 }
 
 // Dispatcher creates task executions from workflow commands and kicks them off.
@@ -300,9 +309,11 @@ func (d *Dispatcher) processCommands(wfEx *db.WorkflowExecution, cmds []commands
 	// prevent deadlock under concurrent task execution. Go doesn't use DB-level
 	// named locks yet, but sorting gives deterministic dispatch order which is
 	// a prerequisite for future lock-based concurrency control.
-	sort.SliceStable(cmds, func(i, j int) bool {
-		return cmdKey(cmds[i]) < cmdKey(cmds[j])
-	})
+	sort.SliceStable(
+		cmds, func(i, j int) bool {
+			return cmdKey(cmds[i]) < cmdKey(cmds[j])
+		},
+	)
 
 	for _, cmd := range cmds {
 		if states.IsCompleted(wfEx.State) {

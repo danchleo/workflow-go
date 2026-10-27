@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	v2 "github.com/mistral/workflow/internal/lang/v2"
+	v2 "github.com/danchleo/workflow-go/internal/lang/v2"
 )
 
 const (

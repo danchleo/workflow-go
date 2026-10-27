@@ -5,9 +5,9 @@ package services
 import (
 	"fmt"
 
-	"github.com/mistral/workflow/internal/db"
-	"github.com/mistral/workflow/internal/lang/parser"
-	v2 "github.com/mistral/workflow/internal/lang/v2"
+	"github.com/danchleo/workflow-go/internal/db"
+	"github.com/danchleo/workflow-go/internal/lang/parser"
+	v2 "github.com/danchleo/workflow-go/internal/lang/v2"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,7 +22,9 @@ func NewWorkflowService(store db.Store) *WorkflowService {
 }
 
 // CreateWorkflow parses and saves a workflow definition.
-func (s *WorkflowService) CreateWorkflow(name string, definition string, projectID, namespace string) (*db.WorkflowDefinition, error) {
+func (s *WorkflowService) CreateWorkflow(
+	name string, definition string, projectID, namespace string,
+) (*db.WorkflowDefinition, error) {
 	data, err := parser.ParseYAML(definition)
 	if err != nil {
 		return nil, fmt.Errorf("invalid YAML: %w", err)
@@ -107,7 +109,9 @@ func NewWorkbookService(store db.Store) *WorkbookService {
 // workflow definitions as separate DB records. Mirrors Python
 // mistral.services.workbooks._create_or_update_workflows: each workflow
 // is registered as "<wb_name>.<wf_name>" with WorkbookName stamped.
-func (s *WorkbookService) CreateWorkbook(name string, definition string, projectID, namespace string) (*db.Workbook, error) {
+func (s *WorkbookService) CreateWorkbook(name string, definition string, projectID, namespace string) (
+	*db.Workbook, error,
+) {
 	data, err := parser.ParseYAML(definition)
 	if err != nil {
 		return nil, fmt.Errorf("invalid YAML: %w", err)

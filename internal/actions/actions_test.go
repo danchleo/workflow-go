@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mistral/workflow/internal/db"
+	"github.com/danchleo/workflow-go/internal/db"
 )
 
 // ------------------------------------------------------------
@@ -108,11 +108,13 @@ func TestActionRegistry_List(t *testing.T) {
 
 func TestActionRegistry_RegisterCustom(t *testing.T) {
 	r := NewActionRegistry()
-	r.Register(&ActionDescriptor{
-		Name:     "my.custom",
-		Factory:  func() Action { return NewEchoAction() },
-		IsSystem: false,
-	})
+	r.Register(
+		&ActionDescriptor{
+			Name:     "my.custom",
+			Factory:  func() Action { return NewEchoAction() },
+			IsSystem: false,
+		},
+	)
 	d, ok := r.Get("my.custom")
 	if !ok {
 		t.Fatal("custom not registered")
@@ -130,10 +132,12 @@ func TestActionRegistry_RegisterCustom(t *testing.T) {
 func TestTestActionProvider_FindAndInstantiate(t *testing.T) {
 	p := NewTestActionProvider()
 	called := 0
-	p.RegisterFunc("test.counter", func() Action {
-		called++
-		return &countingAction{}
-	})
+	p.RegisterFunc(
+		"test.counter", func() Action {
+			called++
+			return &countingAction{}
+		},
+	)
 
 	d, ok := p.Find("test.counter", "")
 	if !ok || d == nil {
@@ -185,13 +189,17 @@ func (c *countingAction) IsSync() bool { return true }
 func TestCompositeActionProvider_FirstHit(t *testing.T) {
 	sys := NewActionRegistry()
 	custom := NewTestActionProvider()
-	custom.RegisterFunc("test.only", func() Action {
-		return &failActionForTest{}
-	})
+	custom.RegisterFunc(
+		"test.only", func() Action {
+			return &failActionForTest{}
+		},
+	)
 	// same name in both: custom shadows sys.
-	custom.RegisterFunc("std.echo", func() Action {
-		return &countingAction{}
-	})
+	custom.RegisterFunc(
+		"std.echo", func() Action {
+			return &countingAction{}
+		},
+	)
 
 	comp := NewCompositeActionProvider(
 		RegistryAsProvider(sys),
