@@ -1310,8 +1310,9 @@ func (e *DefaultEngine) OnActionComplete(
 		wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
 		taskSpec := wfSpec.GetTask(taskEx.Name)
 		if taskSpec != nil {
-			publish := taskSpec.GetPublish()
-			if len(publish) > 0 {
+			global := taskSpec.GetPublishGlobal()
+			branch := taskSpec.GetPublishBranch()
+			if len(global) > 0 || len(branch) > 0 {
 				// Build context using in-memory current taskEx (Output already
 				// set above) instead of the stale store version.
 				allTasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
@@ -1322,9 +1323,35 @@ func (e *DefaultEngine) OnActionComplete(
 					}
 				}
 				ctx := workflow.BuildFullContext(wfEx, wfSpec, allTasks)
-				evaluated := expressions.EvaluateRecursively(publish, ctx)
-				if m, ok := evaluated.(map[string]interface{}); ok {
-					taskEx.Published = m
+
+				// Branch publish — stays on the task execution, private scope.
+				if len(branch) > 0 {
+					if bm, ok := expressions.EvaluateRecursively(branch, ctx).(map[string]interface{}); ok {
+						taskEx.Published = bm
+					}
+				}
+
+				// Global publish — merges into wfEx.Context (cumulative,
+				// later tasks naturally overwrite earlier ones for shared keys).
+				var wfExDirty bool
+				if len(global) > 0 {
+					if gm, ok := expressions.EvaluateRecursively(global, ctx).(map[string]interface{}); ok {
+						if wfEx.Context == nil {
+							wfEx.Context = make(map[string]interface{})
+						}
+						for k, v := range gm {
+							wfEx.Context[k] = v
+							wfExDirty = true
+						}
+					}
+				}
+
+				// Persist wfEx.Context if global publish changed it — downstream
+				// tasks and output evaluation read from the store copy.
+				if wfExDirty {
+					if err := e.store.WorkflowExecutions().Update(wfEx); err != nil {
+						return err
+					}
 				}
 			}
 

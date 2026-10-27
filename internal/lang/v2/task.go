@@ -20,7 +20,9 @@ type TaskSpec struct {
 	tags           []string
 	input          map[string]interface{}
 	withItems      map[string]interface{}
-	publish        map[string]interface{}
+	publish        map[string]interface{} // Shorthand: all keys → global
+	publishGlobal  map[string]interface{} // {global: {...}} explicit
+	publishBranch  map[string]interface{} // {branch: {...}} explicit
 	publishOnError map[string]interface{}
 	publishOnSkip  map[string]interface{}
 	policies       *PoliciesSpec
@@ -119,9 +121,35 @@ func NewTaskSpec(name string, data map[string]interface{}, taskType string) *Tas
 		}
 	}
 
-	// Publish.
+	// Publish — three forms supported (mirrors Python mistral):
+	//   1. Shorthand: publish: {k: v, k2: v2}          → all keys treated as global
+	//   2. Explicit:  publish: {global: {...}, branch: {...}}
+	//   3. Mixed:     publish: {global: {...}, extra_key: expr}  (rare)
 	if v, ok := data["publish"].(map[string]interface{}); ok {
-		s.publish = v
+		_, hasGlobal := v["global"]
+		_, hasBranch := v["branch"]
+		if hasGlobal || hasBranch {
+			if g, ok := v["global"].(map[string]interface{}); ok {
+				s.publishGlobal = g
+			}
+			if b, ok := v["branch"].(map[string]interface{}); ok {
+				s.publishBranch = b
+			}
+			// Any top-level keys besides global/branch → global (backward compat).
+			rest := make(map[string]interface{})
+			for k, val := range v {
+				if k == "global" || k == "branch" {
+					continue
+				}
+				rest[k] = val
+			}
+			if len(rest) > 0 {
+				s.publishGlobal = mergeMaps(s.publishGlobal, rest)
+			}
+		} else {
+			s.publish = v // shorthand → publish field kept for backward-compat accessor
+			s.publishGlobal = v
+		}
 	}
 	if v, ok := data["publish-on-error"].(map[string]interface{}); ok {
 		s.publishOnError = v
@@ -200,6 +228,28 @@ func NewTaskSpec(name string, data map[string]interface{}, taskType string) *Tas
 	}
 
 	return s
+}
+
+// mergeMaps shallowly merges b into a, returning a new map.
+func mergeMaps(a, b map[string]interface{}) map[string]interface{} {
+	if a == nil {
+		if b == nil {
+			return nil
+		}
+		out := make(map[string]interface{}, len(b))
+		for k, v := range b {
+			out[k] = v
+		}
+		return out
+	}
+	out := make(map[string]interface{}, len(a)+len(b))
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
 }
 
 // parseWithItems parses the 'with-items' expression.
@@ -322,6 +372,8 @@ func (s *TaskSpec) GetTags() []string                         { return s.tags }
 func (s *TaskSpec) GetInput() map[string]interface{}          { return s.input }
 func (s *TaskSpec) GetWithItems() map[string]interface{}      { return s.withItems }
 func (s *TaskSpec) GetPublish() map[string]interface{}        { return s.publish }
+func (s *TaskSpec) GetPublishGlobal() map[string]interface{}  { return s.publishGlobal }
+func (s *TaskSpec) GetPublishBranch() map[string]interface{}  { return s.publishBranch }
 func (s *TaskSpec) GetPublishOnError() map[string]interface{} { return s.publishOnError }
 func (s *TaskSpec) GetPublishOnSkip() map[string]interface{}  { return s.publishOnSkip }
 func (s *TaskSpec) GetPolicies() *PoliciesSpec                { return s.policies }

@@ -114,8 +114,25 @@ func BuildFullContext(
 ) map[string]interface{} {
 	ctx := make(map[string]interface{})
 
-	// __task_results mirrors Python's task("name").result lookup.
-	// This is also used by $.task_name.result dot-access.
+	// Priority order (mirrors Python ContextView priority chain — lower priority
+	// dicts are written FIRST so higher priority later writes naturally overwrite):
+	//   1. wfEx.Input    (lowest — workflow input params, never change)
+	//   2. wfEx.Context  (global publish cumulative + vars — grows as tasks complete)
+	//   3. task layers   (ctx[taskName] = {...} per-task scoped view — highest)
+	//   4. env + __execution + __task_results
+
+	// Layer 1: Input (flatten + nested ctx["input"]).
+	for k, v := range wfEx.Input {
+		ctx[k] = v
+	}
+	ctx["input"] = wfEx.Input
+
+	// Layer 2: wfEx.Context (global publish cumulative + workflow vars).
+	for k, v := range wfEx.Context {
+		ctx[k] = v
+	}
+
+	// Layer 3: Per-task views (task output + branch publish + state).
 	taskResults := make(map[string]interface{})
 	for _, te := range taskExecs {
 		if !states.IsCompleted(te.State) {
@@ -133,13 +150,6 @@ func BuildFullContext(
 
 		if len(te.Published) > 0 {
 			taskData["published"] = te.Published
-			for k, v := range te.Published {
-				if _, exists := taskData[k]; !exists {
-					taskData[k] = v
-				}
-				// Also flatten to top level. Later tasks can overwrite earlier ones.
-				ctx[k] = v
-			}
 		}
 
 		taskData["state"] = te.State
@@ -148,21 +158,6 @@ func BuildFullContext(
 		taskResults[te.Name] = taskData
 	}
 	ctx["__task_results"] = taskResults
-
-	// Workflow context vars.
-	for k, v := range wfEx.Context {
-		ctx[k] = v
-	}
-
-	// Input.
-	ctx["input"] = wfEx.Input
-	// Python ContextView also flattens wf_ex.input keys to top level so
-	// that <% $.name %> works directly (not requiring <% $.input.name %>).
-	for k, v := range wfEx.Input {
-		if _, exists := ctx[k]; !exists {
-			ctx[k] = v
-		}
-	}
 
 	// Env — Python mistral calls this __env; we expose both.
 	var envMap map[string]interface{}
