@@ -58,6 +58,17 @@ func (s *Server) Router() http.Handler {
 	return mux
 }
 
+// RouterEngineOnly returns a minimal handler with /health + /rpc/* only.
+// Used by the standalone engine process (cmd/engine) which does NOT need
+// the full REST surface (workflow CRUD, execution listing, etc.) — those
+// live in the API process.
+func (s *Server) RouterEngineOnly() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/rpc/", s.handleRPC)
+	return mux
+}
+
 // Start starts the HTTP server on the given address.
 func (s *Server) Start(addr string) error {
 	s.httpServer = &http.Server{
