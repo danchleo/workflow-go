@@ -2301,19 +2301,15 @@ func (e *DefaultEngine) DispatchAction(ctx context.Context, actionExID string) (
 		safeRerun = true
 	}
 
-	// Python: executor.run_action(...) → self._engine_client.on_action_complete(...)
-	// Go:      executor.RunAction(..., onCompleteCb) → Executor 负责调 callback
-	// DispatchAction 不再手动调 OnActionComplete — Executor 是 completion 链路的 owner。
-	_, _ = exec.RunAction(
-		inst, input, actionEx.ID, safeRerun, execCtx, "", timeoutDur,
-		executors.OnCompleteCallback(func(actionExID string, result *db.Result, wfAction bool) {
-			if err := e.OnActionComplete(ctx, actionExID, result, wfAction); err != nil {
-				log.Printf("DispatchAction: executor callback OnActionComplete failed: %v", err)
-			}
-		}),
+	// Python: executor.run_action(...)  ← 无 callback 参数！
+	//   DefaultExecutor 内部 self._engine_client.on_action_complete(...)
+	// Go 现在完全对齐：DefaultExecutor 构造时持有 engineClient，
+	// RunAction 内部自己回调。DispatchAction 只负责调 RunAction，不手动回调。
+	exec.RunAction(
+		ctx, inst, input, actionEx.ID, safeRerun, execCtx, "", timeoutDur,
 	)
 
-	// OnActionComplete (called via executor callback) already updates actionEx state.
+	// DefaultExecutor 内部已经通过 engineClient.OnActionComplete 更新了状态。
 	return e.store.ActionExecutions().Get(actionExID)
 }
 

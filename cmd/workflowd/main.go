@@ -3,8 +3,9 @@
 // and Docker single-container deployments.
 //
 // Mirrors Python mistral's mistral/cmd/launch.py:
-//   LAUNCH_OPTIONS = { 'api': launch_api, 'engine': launch_engine,
-//                      'executor': launch_executor, ... }
+//
+//	LAUNCH_OPTIONS = { 'api': launch_api, 'engine': launch_engine,
+//	                   'executor': launch_executor, ... }
 //
 // You specify which components to run with --server (comma-separated):
 //
@@ -43,10 +44,10 @@ import (
 	"github.com/danchleo/workflow-go/internal/db"
 	"github.com/danchleo/workflow-go/internal/engine"
 	"github.com/danchleo/workflow-go/internal/executors"
+	"github.com/danchleo/workflow-go/internal/rpc"
 	"github.com/danchleo/workflow-go/internal/scheduler"
 	"github.com/danchleo/workflow-go/pkg/api"
 	"github.com/danchleo/workflow-go/pkg/executorapi"
-	"github.com/danchleo/workflow-go/internal/rpc"
 )
 
 // config holds flag values parsed once at startup.
@@ -130,20 +131,13 @@ func run(cfg config) error {
 		}
 	}
 
-	// --- Executor setup (shared global in executors package) ---
-	switch cfg.executorType {
-	case "local":
-		executors.SetDefaultExecutor(executors.NewLocalExecutor())
-	case "remote":
-		if cfg.executorURL == "" {
-			return fmt.Errorf("--executor-url required with --executor=remote")
-		}
-		executors.SetDefaultExecutor(executors.NewRemoteExecutor(cfg.executorURL))
-	}
-
-	// --- Engine (in-process, unless api-only + engine-url set) ---
+	// --- Engine + Executor setup ---
+	// Python: exe.get_executor() → DefaultExecutor(rpc.get_engine_client())
+	// DefaultExecutor 在构造时就持有 engine client。
+	// 所以必须先有 engine，再有 DefaultExecutor。
 	var eng *engine.DefaultEngine
 	var engClient rpc.EngineClient
+
 	if has(cfg.servers, "engine") || has(cfg.servers, "api") && cfg.engineURL == "" {
 		eng = engine.NewDefaultEngine(store)
 		if has(cfg.servers, "engine") {
@@ -152,13 +146,26 @@ func run(cfg config) error {
 			eng.WithScheduler(sched)
 			defer sched.Stop()
 		}
-		engClient = rpc.NewLocalEngineClient(eng)
+		engClient = engine.NewLocalEngineClient(eng)
 	}
 	if cfg.engineURL != "" {
 		engClient = rpc.NewHttpEngineClient(cfg.engineURL)
 	}
 	if engClient == nil {
 		return fmt.Errorf("no engine configured — either include 'engine' in --server or set --engine-url")
+	}
+
+	// --- Executor (必须在 engine client 有了之后) ---
+	switch cfg.executorType {
+	case "local":
+		// DefaultExecutor 持有 engine client，RunAction 内部回调 engine
+		executors.SetDefaultExecutor(executors.NewDefaultExecutor(engClient))
+	case "remote":
+		// RemoteExecutor 只做 HTTP transport，不负责回调
+		if cfg.executorURL == "" {
+			return fmt.Errorf("--executor-url required with --executor=remote")
+		}
+		executors.SetDefaultExecutor(executors.NewRemoteExecutor(cfg.executorURL))
 	}
 
 	// --- HTTP servers ---

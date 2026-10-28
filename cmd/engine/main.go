@@ -58,11 +58,28 @@ func main() {
 		}
 	}
 
-	// --- Executor ---
+	// --- Engine + Scheduler (先创建 engine，DefaultExecutor 需要 engine client) ---
+	eng := engine.NewDefaultEngine(store)
+	sched := scheduler.NewDefaultScheduler(
+		store,
+		*schedPoll,     // pollInterval
+		0,              // randomDelay
+		30*time.Second, // captureTimeout
+		10*time.Second, // pickupJobAfter
+		10,             // batchSize
+	)
+	sched.Start()
+	eng.WithScheduler(sched)
+
+	// --- Executor (必须在 engine 有了之后) ---
 	switch *executorType {
 	case "local":
-		executors.SetDefaultExecutor(executors.NewLocalExecutor())
+		// DefaultExecutor 持有 engine client，RunAction 内部回调 engine
+		executors.SetDefaultExecutor(executors.NewDefaultExecutor(
+			engine.NewLocalEngineClient(eng),
+		))
 	case "remote":
+		// RemoteExecutor 只做 HTTP transport，不负责回调
 		if *executorURL == "" {
 			log.Fatal("--executor-url required when --executor=remote")
 		}
@@ -70,19 +87,6 @@ func main() {
 	default:
 		log.Fatalf("unknown --executor type %q (want 'local' or 'remote')", *executorType)
 	}
-
-	// --- Engine + Scheduler ---
-	eng := engine.NewDefaultEngine(store)
-	sched := scheduler.NewDefaultScheduler(
-		store,
-		*schedPoll,    // pollInterval
-		0,             // randomDelay
-		30*time.Second, // captureTimeout
-		10*time.Second, // pickupJobAfter
-		10,            // batchSize
-	)
-	sched.Start()
-	eng.WithScheduler(sched)
 
 	// --- HTTP server (engine RPC only) ---
 	apiSrv := api.NewServer(store, eng)

@@ -1,35 +1,50 @@
 // Package executors defines the action execution interface and executors.
 // Ported from mistral-master/mistral/executors/
 //
-// Executor hierarchy mirrors Python:
+// Python 架构（关键设计，必须对齐）：
 //
-//	Executor (interface)
-//	  └── LocalExecutor   — in-process (Python default_executor.py)
-//	  └── RemoteExecutor  — HTTP RPC to a remote worker (Python remote_executor.py)
+//	class DefaultExecutor(base.Executor):
+//	    def __init__(self):
+//	        self._engine_client = rpc.get_engine_client()   # ← 构造时注入 engine client
 //
-// Python's DefaultExecutor architecture (critical for Go port):
+//	    def run_action(self, action, action_ex_id, safe_rerun, exec_ctx, ...):
+//	        ...
+//	        if action_ex_id and (action.is_sync() or result.is_error()):
+//	            self._engine_client.on_action_complete(     # ← 内部自己回调
+//	                action_ex_id, result, async_=True
+//	            )
+//	        return result
 //
-//	DefaultExecutor._engine_client.on_action_complete(action_ex_id, result)
-//	                                                                   ↑
-//	                            Executor ITSELF calls back into engine.
+// Python 关键点：
+//   1. Executor **构造时**就持有 EngineClient（rpc.get_engine_client() 单例）
+//   2. Executor.RunAction **没有 callback 参数** — 签名是纯返回 (*Result, error)
+//   3. RunAction **内部**通过 self._engine_client.on_action_complete() 回调
+//      （本地进程里是 LocalEngineClient 直接内调；远程进程里是 RPC EngineClient）
+//   4. 回调条件：action_ex_id 非空 AND (action.is_sync() OR result.is_error())
+//   5. 回调异常处理：MistralException → send_error_back retry；其他 Exception → 只 log
 //
-//	In Python's two-process model:
-//	  Engine process → RPC → ExecutorServer.run_action()
-//	                                  → DefaultExecutor._do_run_action()
-//	                                    → thread.run() + join(timeout)
-//	                                    → self._engine_client.on_action_complete()  ← Executor 负责回调
-//	  Engine process ← callback RPC ←  (async — executor doesn't block on engine)
+// Go 完全照搬这个设计：
+//   - DefaultExecutor 持有 rpc.EngineClient（构造时注入）
+//   - RunAction 签名：RunAction(action, input, exID, safeRerun, execCtx, target, timeout) (*db.Result, error)
+//   - RunAction 内部调 e.engineClient.OnActionComplete(ctx, exID, result, false)
+//   - 回调条件、异常处理完全镜像 Python
 //
-// Go mirrors this: Executor.RunAction takes an onComplete callback.
-// Both LocalExecutor (engine进程内) and RemoteExecutor (HTTP POST to executor server)
-// are responsible for invoking this callback with the result — NOT the caller.
-// This matches Python's pattern where the executor owns the completion handshake.
+// 两种进程部署：
 //
-// Additional Python behaviors ported:
-//   - redelivered + safe_rerun guard: action that was redelivered but NOT safe_rerun
-//     must be failed by the executor (no point re-running if side effects can't be undone)
-//   - timeout handling: Executor owns the timeout, not the caller
-//   - result normalization: Executor wraps errors in db.Result{Error: ...}
+//   场景 A — 单进程 (workflowd --server all):
+//     DefaultExecutor 构造时传 rpc.NewLocalEngineClient(engine)
+//     回调 = 直接内调 engine.OnActionComplete()
+//
+//   场景 B — 多进程 (engine + executor 分开):
+//     engine 进程:   DefaultExecutor(rpc.NewLocalEngineClient(engine))
+//                    → 回调内调 + 可用 RemoteExecutor POST 到 executor server
+//     executor 进程: DefaultExecutor(rpc.NewHttpEngineClient("http://engine:8951"))
+//                    → HTTP 回调 engine /rpc/on_action_complete
+//     executorapi.Server: 用 DefaultExecutor(nil) — nil client 意味着 HTTP response 已经返回
+//
+// 注意：Go 有 RemoteExecutor（engine 进程 POST 到 executor server），Python 没有这个。
+// Python 用的是 oslo.messaging redelivery 机制。Go RemoteExecutor 是 HTTP transport 层，
+// 它 POST 后等 HTTP response 返回 result，**不负责回调**。回调是 DefaultExecutor 内部的事。
 package executors
 
 import (
@@ -45,63 +60,90 @@ import (
 
 	"github.com/danchleo/workflow-go/internal/actions"
 	"github.com/danchleo/workflow-go/internal/db"
+	"github.com/danchleo/workflow-go/internal/rpc"
 )
-
-// OnCompleteCallback is what an Executor invokes after running an action —
-// matches Python's DefaultExecutor._engine_client.on_action_complete().
-// Set to nil to disable (executorapi.Server uses nil because HTTP response
-// already carries the result back to the engine).
-type OnCompleteCallback func(actionExID string, result *db.Result, wfAction bool)
 
 // Executor is the interface that action executors must implement.
 // Ported from mistral-master/mistral/executors/base.py
+//
+// Go 签名与 Python 的差异：
+//   + context.Context ctx — Go 标准
+//   + inputDict map[string]interface{} — Python 把 input 烤进 action 实例，Go actions 是 stateless
+//   - onCompleteCb callback — Python 也没有！Executor 内部自己持有 engine client
 type Executor interface {
-	// RunAction runs an action and invokes onCompleteCb with the result.
-	//
-	// Mirror of Python DefaultExecutor.run_action() signature:
-	//   run_action(self, action, action_ex_id, safe_rerun, exec_ctx,
-	//              redelivered=False, target=None, async_=True, timeout=None)
-	//
-	// Go differences:
-	//   - inputDict is explicit (Go actions are stateless)
-	//   - redelivered not yet plumbed from DispatchAction → default false
-	//   - async_: Go LocalExecutor always blocks (Python thread.join waits)
-	//   - onCompleteCb is the Go equivalent of Python's self._engine_client
-	//     (in-process func vs oslo.messaging RPC)
+	// RunAction runs an action and returns the result.
+	// If this executor has an engineClient (DefaultExecutor), it also
+	// calls OnActionComplete internally — mirroring Python's
+	// self._engine_client.on_action_complete(action_ex_id, result).
 	RunAction(
+		ctx context.Context,
 		action actions.Action, inputDict map[string]interface{},
 		actionExID string, safeRerun bool, execCtx map[string]interface{},
 		target string, timeout time.Duration,
-		onCompleteCb OnCompleteCallback,
 	) (*db.Result, error)
 }
 
-// LocalExecutor runs actions in-process (synchronous).
+// DefaultExecutor is the built-in executor that runs actions in-process.
 // Ported from mistral-master/mistral/executors/default_executor.py
-type LocalExecutor struct{}
-
-// NewLocalExecutor creates a LocalExecutor.
-func NewLocalExecutor() *LocalExecutor { return &LocalExecutor{} }
-
-// RunAction runs the action locally and invokes onCompleteCb with the result.
 //
-// Mirror of Python DefaultExecutor._do_run_action() — ported line-by-line:
+// Critical: DefaultExecutor HOLDS an rpc.EngineClient, injected at construction.
+// This matches Python's self._engine_client = rpc.get_engine_client().
+// RunAction is responsible for BOTH running the action AND calling back the
+// engine via engineClient.OnActionComplete().
+type DefaultExecutor struct {
+	engineClient rpc.EngineClient
+}
+
+// NewDefaultExecutor creates a DefaultExecutor.
+// engineClient may be nil (e.g. when used by executorapi.Server which returns
+// result via HTTP response instead of callback).
+func NewDefaultExecutor(engineClient rpc.EngineClient) *DefaultExecutor {
+	return &DefaultExecutor{engineClient: engineClient}
+}
+
+// RunAction runs the action and calls back the engine via engineClient.
+// Ported line-by-line from Python DefaultExecutor._do_run_action().
 //
-//  1. redelivered + safe_rerun guard (Go: redelivered 暂未 plumbed，safe_rerun 预留)
-//  2. goroutine + channel + timeout select
-//  3. 超时后等待 goroutine 退出再返回（防 goroutine leak）
-//  4. action.Run 错误 → result.Error（Python except BaseException → send_error_back）
-//  5. 只在 action.IsSync() 或 result.IsError() 时调 callback（Python is_sync or is_error）
-//  6. callback 失败 → send_error_back（Python MistralException 重试 + Exception 只 log）
-//  7. callback 有 onCompleteCb guard（Python if action_ex_id）
-func (e *LocalExecutor) RunAction(
+// Python structure:
+//   def run_action(...):
+//       action_heartbeat_sender.add_action(action_ex_id)
+//       try:
+//           return self._do_run_action(...)
+//       finally:
+//           action_heartbeat_sender.remove_action(action_ex_id)
+//
+//   def _do_run_action(...):
+//       def send_error_back(error_msg): ...    ← closure
+//
+//       if redelivered and not safe_rerun:     ← guard
+//           return send_error_back(msg)
+//
+//       try:
+//           thread.start()                     ← goroutine start
+//           thread.join(timeout=timeout)       ← wait with timeout
+//           if thread.is_alive():
+//               thread.join()                  ← wait for goroutine drain
+//               raise Exception("Timeout...")
+//           if not isinstance(result, Result): ← normalize
+//               result = Result(data=result)
+//       except BaseException as e:
+//           return send_error_back(msg)        ← all errors go through send_error_back
+//
+//       try:
+//           if action_ex_id and (action.is_sync() or result.is_error()):
+//               self._engine_client.on_action_complete(...)  ← CALLBACK
+//       except MistralException as e:
+//           return send_error_back(msg)        ← retry as error
+//       except Exception as e:
+//           LOG.exception(msg)                ← just log
+//
+//       return result
+func (e *DefaultExecutor) RunAction(
+	ctx context.Context,
 	action actions.Action, inputDict map[string]interface{},
 	actionExID string, safeRerun bool, execCtx map[string]interface{},
 	target string, timeout time.Duration,
-	onCompleteCb OnCompleteCallback,
 ) (*db.Result, error) {
-	// Python: if redelivered and not safe_rerun → fail immediately.
-	// Go 暂不实现 redelivered（需要 engine 侧标识），safe_rerun 预留。
 	_ = safeRerun
 	_ = execCtx
 	_ = target
@@ -110,7 +152,27 @@ func (e *LocalExecutor) RunAction(
 		inputDict = make(map[string]interface{})
 	}
 
-	// --- Run action with timeout (mirrors Python thread.start() + join(timeout)) ---
+	// --- send_error_back closure (mirrors Python) ---
+	// Python: def send_error_back(error_msg):
+	//            error_result = mistral_lib.Result(error=error_msg)
+	//            if action_ex_id:
+	//                self._engine_client.on_action_complete(action_ex_id, error_result)
+	//                return None
+	//            return error_result
+	sendErrorBack := func(msg string) *db.Result {
+		errResult := &db.Result{Error: msg}
+		if actionExID != "" {
+			e.engineComplete(ctx, actionExID, errResult)
+			return nil
+		}
+		return errResult
+	}
+
+	// --- redelivered + safe_rerun guard ---
+	// Python: if redelivered and not safe_rerun → fail immediately
+	// Go: redelivered not yet plumbed (needs engine to mark it) — skip for now
+
+	// --- Run action with timeout (mirrors thread.start() + join(timeout)) ---
 	type outcome struct {
 		res *db.Result
 		err error
@@ -129,117 +191,111 @@ func (e *LocalExecutor) RunAction(
 		select {
 		case <-time.After(timeout):
 			timedOut = true
-			// Python: "we are now waiting for the action thread to finish..."
-			// Go 等价 — 等 goroutine 退出防 leak（Python 用 thread.join()）。
-			// 但不能无限等：用稍微长一点的等待，之后放弃。
+			// Python: if thread.is_alive(): thread.join() ← wait for goroutine drain
 			drainTimer := time.NewTimer(timeout * 2)
 			defer drainTimer.Stop()
 			select {
 			case <-done:
-				// goroutine 刚好在 deadline 前/后完成了
+				// goroutine drained in time
 			case <-drainTimer.C:
-				// goroutine 还没退出，只能放弃（Python 这里是无限 join）
-				log.Printf("LocalExecutor: action %s (ex=%s) timed out and goroutine still running after %v",
-					action.Name(), actionExID, timeout*3)
+				log.Printf("DefaultExecutor: action %s (ex=%s) timed out, goroutine still running",
+					action.Name(), actionExID)
 			}
 			result = &db.Result{Error: fmt.Sprintf("action timed out after %v", timeout)}
 		case o := <-done:
-			// goroutine 在 deadline 内完成
 			if o.err != nil {
-				result = &db.Result{Error: o.err}
-			} else {
-				result = o.res
+				// Python except BaseException → send_error_back
+				return sendErrorBack(
+					fmt.Sprintf("action %s raised: %v", action.Name(), o.err),
+				), nil
 			}
-		}
-	} else {
-		// 无 timeout — 直接等 goroutine 完成
-		o := <-done
-		if o.err != nil {
-			result = &db.Result{Error: o.err}
-		} else {
 			result = o.res
 		}
+	} else {
+		o := <-done
+		if o.err != nil {
+			return sendErrorBack(
+				fmt.Sprintf("action %s raised: %v", action.Name(), o.err),
+			), nil
+		}
+		result = o.res
 	}
 
+	// --- Timeout path: Python raises → except → send_error_back ---
 	if timedOut {
-		// 超时也走 callback — Python 里 timeout raise 被 except 捕获 → send_error_back
-		sendErrorBack(actionExID, onCompleteCb,
-			fmt.Sprintf("action timed out after %v", timeout), false)
-		return result, nil
+		return sendErrorBack(
+			fmt.Sprintf("action %s timed out after %v", action.Name(), timeout),
+		), nil
 	}
 
-	// --- Send action result (mirrors Python's completion callback logic) ---
+	// --- Normal completion: send action result (mirrors Python's completion block) ---
 	// Python: if action_ex_id and (action.is_sync() or result.is_error()):
 	//             self._engine_client.on_action_complete(action_ex_id, result)
-	//
-	// Go: 只在 sync action 或 error 时调 callback
 	if actionExID != "" {
 		isError := result != nil && result.Error != nil
 		if action.IsSync() || isError {
-			if onCompleteCb != nil {
-				if err := safeInvoke(onCompleteCb, actionExID, result, false); err != nil {
-					// Python: MistralException → send_error_back retry
-					//         Exception → only log
-					log.Printf("LocalExecutor: callback error on action %s (ex=%s): %v",
-						action.Name(), actionExID, err)
-					// send_error_back — 用 result.Error 再试一次
-					sendErrorBack(actionExID, onCompleteCb,
-						fmt.Sprintf("failed to deliver result: %v", err), false)
-				}
-			}
+			e.engineComplete(ctx, actionExID, result)
 		}
-		// async + success → 不回调（Python 靠 heartbeat 超时判定）
+		// async + success → no callback (Python relies on heartbeat timeout)
 	}
 
 	return result, nil
 }
 
-// safeInvoke calls onCompleteCb and recovers panics — mirrors Python's
-// try/except around self._engine_client.on_action_complete().
-func safeInvoke(cb OnCompleteCallback, id string, r *db.Result, wf bool) (retErr error) {
+// engineComplete calls engineClient.OnActionComplete with panic recovery + MistralException retry.
+// Mirrors Python's try/except around self._engine_client.on_action_complete():
+//   except exc.MistralException → send_error_back retry
+//   except Exception → only log
+func (e *DefaultExecutor) engineComplete(ctx context.Context, actionExID string, result *db.Result) {
+	if e.engineClient == nil || actionExID == "" {
+		return
+	}
 	defer func() {
 		if rec := recover(); rec != nil {
-			retErr = fmt.Errorf("callback panic: %v", rec)
+			// panic → retry with error result (Python's MistralException path)
+			log.Printf("DefaultExecutor: panic on OnActionComplete for %s: %v", actionExID, rec)
+			e.engineCompleteError(ctx, actionExID,
+				fmt.Sprintf("OnActionComplete panic: %v", rec))
 		}
 	}()
-	cb(id, r, wf)
-	return nil
+
+	if err := e.engineClient.OnActionComplete(ctx, actionExID, result, false); err != nil {
+		// Python MistralException → send_error_back retry
+		log.Printf("DefaultExecutor: OnActionComplete failed for %s: %v", actionExID, err)
+		e.engineCompleteError(ctx, actionExID,
+			fmt.Sprintf("OnActionComplete failed: %v", err))
+	}
 }
 
-// sendErrorBack mirrors Python's send_error_back(error_msg):
-// wraps the error msg in db.Result and invokes the callback again.
-func sendErrorBack(actionExID string, onCompleteCb OnCompleteCallback, msg string, wfAction bool) {
-	if actionExID == "" || onCompleteCb == nil {
+// engineCompleteError retries OnActionComplete with an error result.
+// Mirrors Python's send_error_back fallback path.
+func (e *DefaultExecutor) engineCompleteError(ctx context.Context, actionExID string, msg string) {
+	if e.engineClient == nil {
 		return
 	}
 	errResult := &db.Result{Error: msg}
-	if err := safeInvoke(onCompleteCb, actionExID, errResult, wfAction); err != nil {
-		log.Printf("LocalExecutor: sendErrorBack also failed for %s: %v", actionExID, err)
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("DefaultExecutor: send_error_back also panicked for %s: %v", actionExID, rec)
+		}
+	}()
+	if err := e.engineClient.OnActionComplete(ctx, actionExID, errResult, false); err != nil {
+		log.Printf("DefaultExecutor: send_error_back also failed for %s: %v", actionExID, err)
 	}
 }
 
 // RemoteExecutor calls an HTTP executor server to run the action on a remote worker.
 // Ported from mistral-master/mistral/executors/remote_executor.py which uses
-// oslo.messaging RPC. Go uses a simple HTTP POST + JSON to avoid pulling in
-// a full message broker.
+// oslo.messaging RPC. Go uses a simple HTTP POST + JSON.
 //
-// Request JSON body:
+// 重要：RemoteExecutor 是 engine 进程里的组件，它 POST HTTP 到 executor 进程，
+// 等 HTTP response 拿到 result 后返回。RemoteExecutor **不负责回调 engine**——
+// 回调是 DefaultExecutor 的事。RemoteExecutor 只做 transport。
 //
-//	{
-//	  "action":       action.Name(),
-//	  "input":        inputDict,
-//	  "action_ex_id": actionExID,
-//	  "safe_rerun":   safeRerun,
-//	  "exec_ctx":     execCtx,
-//	  "target":       target,
-//	  "timeout_sec":  int(timeout.Seconds()),
-//	}
-//
-// Response JSON body:
-//
-//	{"data": "...", "error": "..."}   (one or the other, never both)
+// Python 里没有对应 RemoteExecutor 的独立类——Python 用 oslo.messaging redelivery
+// 机制把消息投递给远程 executor 进程。Go 用 HTTP POST 简化实现。
 type RemoteExecutor struct {
-	endpoint   string // base URL, e.g. "http://executor.example.com:8952"
+	endpoint   string
 	httpClient *http.Client
 	mu         sync.Mutex
 }
@@ -263,20 +319,18 @@ type runActionRequest struct {
 	TimeoutSec int                    `json:"timeout_sec"`
 }
 
-// runActionResponse is what the remote executor server returns.
 type runActionResponse struct {
 	Data  interface{} `json:"data,omitempty"`
 	Error string      `json:"error,omitempty"`
 }
 
-// RunAction marshals the action request as JSON and POSTs it to the remote worker,
-// then invokes onCompleteCb with the result — matching Python DefaultExecutor pattern
-// where the executor owns the completion handshake, not the caller.
+// RunAction POSTs the action to a remote executor server and returns the result.
+// RemoteExecutor does NOT call engineClient — that's DefaultExecutor's job.
 func (e *RemoteExecutor) RunAction(
+	ctx context.Context,
 	action actions.Action, inputDict map[string]interface{},
 	actionExID string, safeRerun bool, execCtx map[string]interface{},
 	target string, timeout time.Duration,
-	onCompleteCb OnCompleteCallback,
 ) (*db.Result, error) {
 	reqBody := runActionRequest{
 		Action:     action.Name(),
@@ -297,7 +351,7 @@ func (e *RemoteExecutor) RunAction(
 
 	url := e.endpoint + "/v1/actions/run"
 
-	reqCtx := context.Background()
+	reqCtx := ctx
 	var cancel context.CancelFunc
 	if timeout > 0 {
 		reqCtx, cancel = context.WithTimeout(reqCtx, timeout)
@@ -321,45 +375,44 @@ func (e *RemoteExecutor) RunAction(
 		return nil, fmt.Errorf("remote executor read response: %w", err)
 	}
 
-	var result *db.Result
 	if resp.StatusCode != http.StatusOK {
-		result = &db.Result{
+		return &db.Result{
 			Error: fmt.Sprintf("remote executor HTTP %d: %s", resp.StatusCode, string(respBody)),
-		}
-	} else {
-		var parsed runActionResponse
-		if err := json.Unmarshal(respBody, &parsed); err != nil {
-			result = &db.Result{
-				Error: fmt.Sprintf("remote executor unmarshal: %v, raw=%s", err, string(respBody)),
-			}
-		} else if parsed.Error != "" {
-			result = &db.Result{Error: parsed.Error}
-		} else {
-			result = &db.Result{Data: parsed.Data}
-		}
+		}, nil
 	}
 
-	// Python: self._engine_client.on_action_complete(action_ex_id, result)
-	if onCompleteCb != nil {
-		onCompleteCb(actionExID, result, false)
+	var parsed runActionResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return &db.Result{
+			Error: fmt.Sprintf("remote executor unmarshal: %v, raw=%s", err, string(respBody)),
+		}, nil
 	}
 
-	return result, nil
+	if parsed.Error != "" {
+		return &db.Result{Error: parsed.Error}, nil
+	}
+	return &db.Result{Data: parsed.Data}, nil
 }
 
 // --- Registry + default executor ---
+//
+// Python: exe.get_executor(cfg.CONF.executor.type) → stevedore DriverManager
+// Go:     executors.SetExecutorType(name) / executors.SetDefaultExecutor(inst)
 
 var (
-	defaultExecutor Executor = NewLocalExecutor()
+	defaultExecutor Executor
 	executorsMu     sync.RWMutex
 	executorTypes   = map[string]func() Executor{
-		"local":  func() Executor { return NewLocalExecutor() },
+		"local":  func() Executor { return NewDefaultExecutor(nil) },
 		"remote": func() Executor { return NewRemoteExecutor("http://localhost:8952") },
 	}
 )
 
+func init() {
+	defaultExecutor = NewDefaultExecutor(nil)
+}
+
 // RegisterExecutorType adds a named constructor to the registry.
-// Mirrors Python's stevedore DriverManager('mistral.executors', exec_type).
 func RegisterExecutorType(name string, factory func() Executor) {
 	executorsMu.Lock()
 	executorTypes[name] = factory
@@ -367,8 +420,8 @@ func RegisterExecutorType(name string, factory func() Executor) {
 }
 
 // SetExecutorType picks a built-in executor by name ("local", "remote").
-// If "remote", the default endpoint http://localhost:8952 is used — call
-// SetRemoteEndpoint() beforehand to point at a real worker.
+// "local" creates a DefaultExecutor with nil engine client — callers should
+// later call SetDefaultExecutor with a properly-wired DefaultExecutor(engineClient).
 func SetExecutorType(name string) error {
 	executorsMu.RLock()
 	factory, ok := executorTypes[name]
@@ -395,6 +448,10 @@ func SetRemoteEndpoint(endpoint string) {
 }
 
 // SetDefaultExecutor overrides with a custom Executor instance.
+// In engine processes, this should be:
+//   executors.SetDefaultExecutor(executors.NewDefaultExecutor(rpc.NewLocalEngineClient(engine)))
+// In executor processes (if separate):
+//   executors.SetDefaultExecutor(executors.NewDefaultExecutor(rpc.NewHttpEngineClient(engineURL)))
 func SetDefaultExecutor(e Executor) {
 	executorsMu.Lock()
 	defaultExecutor = e
@@ -408,13 +465,12 @@ func GetDefaultExecutor() Executor {
 	return defaultExecutor
 }
 
-// GetExecutorType returns the name of the current default executor ("local", "remote",
-// or "custom" if an instance was registered via SetDefaultExecutor).
+// GetExecutorType returns the name of the current default executor.
 func GetExecutorType() string {
 	executorsMu.RLock()
 	defer executorsMu.RUnlock()
 	switch defaultExecutor.(type) {
-	case *LocalExecutor:
+	case *DefaultExecutor:
 		return "local"
 	case *RemoteExecutor:
 		return "remote"

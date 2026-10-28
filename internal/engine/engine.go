@@ -21,6 +21,7 @@ import (
 	"github.com/danchleo/workflow-go/internal/commands"
 	"github.com/danchleo/workflow-go/internal/db"
 	v2 "github.com/danchleo/workflow-go/internal/lang/v2"
+	"github.com/danchleo/workflow-go/internal/rpc"
 	"github.com/danchleo/workflow-go/internal/states"
 )
 
@@ -461,4 +462,70 @@ func (d *Dispatcher) setWorkflowState(wfEx *db.WorkflowExecution, cmd commands.W
 // generateUniqueKey creates a unique key for a task execution.
 func generateUniqueKey(wfExID, taskName string) string {
 	return wfExID + "-" + taskName
+}
+
+// ================================================================
+// LocalEngineClient — in-process implementation of rpc.EngineClient.
+// Ported from mistral-master/mistral/rpc/clients.py LocalEngineClient.
+//
+// 为什么在 engine 包而不是 rpc 包？
+//   循环依赖问题：rpc 包 import engine → executors import rpc → 循环！
+//   LocalEngineClient 需要引用 engine.Engine，所以必须放 engine 包。
+//   rpc 包只保留 EngineClient interface + HttpEngineClient（后者不依赖 engine）。
+//
+// 用法：
+//   eng := engine.NewDefaultEngine(store)
+//   exec := executors.NewDefaultExecutor(engine.NewLocalEngineClient(eng))
+//   executors.SetDefaultExecutor(exec)
+//   → DefaultExecutor.RunAction 内部调 engineClient.OnActionComplete
+//     → LocalEngineClient.OnActionComplete → eng.OnActionComplete()
+//     ✅ 进程内直接调用，无 RPC 开销
+// ================================================================
+
+// LocalEngineClient is an in-process implementation of rpc.EngineClient.
+// It calls engine.Engine methods directly without any RPC serialization.
+// This matches Python's LocalEngineClient which uses oslo.messaging's
+// in-process transport when engine and executor share a process.
+type LocalEngineClient struct {
+	engine Engine
+}
+
+// NewLocalEngineClient creates a LocalEngineClient wrapping the given Engine.
+func NewLocalEngineClient(e Engine) *LocalEngineClient {
+	return &LocalEngineClient{engine: e}
+}
+
+// compile-time check: LocalEngineClient implements rpc.EngineClient.
+var _ rpc.EngineClient = (*LocalEngineClient)(nil)
+
+func (c *LocalEngineClient) StartWorkflow(
+	ctx context.Context, wfDefID, wfNamespace string, wfExID string, wfInput map[string]interface{}, description string,
+	params map[string]interface{},
+) (*db.WorkflowExecution, error) {
+	return c.engine.StartWorkflow(ctx, wfDefID, wfNamespace, wfExID, wfInput, description, params)
+}
+
+func (c *LocalEngineClient) StartTask(
+	ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool,
+	reset bool,
+) error {
+	return c.engine.StartTask(ctx, taskExID, firstRun, waiting, triggeredBy, rerun, reset)
+}
+
+func (c *LocalEngineClient) OnActionComplete(
+	ctx context.Context, actionExID string, result *db.Result, wfAction bool,
+) error {
+	return c.engine.OnActionComplete(ctx, actionExID, result, wfAction)
+}
+
+func (c *LocalEngineClient) PauseWorkflow(ctx context.Context, wfExID string) error {
+	return c.engine.PauseWorkflow(ctx, wfExID)
+}
+
+func (c *LocalEngineClient) ResumeWorkflow(ctx context.Context, wfExID string, env map[string]interface{}) error {
+	return c.engine.ResumeWorkflow(ctx, wfExID, env)
+}
+
+func (c *LocalEngineClient) StopWorkflow(ctx context.Context, wfExID string, state string, message string) error {
+	return c.engine.StopWorkflow(ctx, wfExID, state, message)
 }
