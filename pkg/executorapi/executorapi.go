@@ -112,15 +112,16 @@ func (s *Server) handleRunAction(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("executor: running action=%s action_ex_id=%s timeout=%v", body.Action, body.ActionExID, timeout)
 
-	result, err := s.executor.RunAction(
+	// executorapi.Server 是独立的 executor 进程 — 它不知道 engine 在哪，
+	// 所以传 nil callback。Executor server 的作用就是跑 action 然后通过 HTTP response
+	// 把 result 返回给 engine（engine 进程拿到 result 后自己调 OnActionComplete）。
+	// 这跟 Python ExecutorServer 不同——Python 的 ExecutorServer 持有 engine RPC client，
+	// 能自己回调。Go 的 HTTP 协议是同步 request/response，所以 engine 通过 RemoteExecutor
+	// 等 HTTP 返回后调 callback。
+	result, _ := s.executor.RunAction(
 		actionInstance, body.Input, body.ActionExID, body.SafeRerun,
-		body.ExecCtx, body.Target, timeout,
+		body.ExecCtx, body.Target, timeout, nil,
 	)
-
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, fmt.Errorf("executor error: %w", err))
-		return
-	}
 
 	resp := runActionResponse{}
 	if result.Error != nil {

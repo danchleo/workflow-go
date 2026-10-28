@@ -2300,15 +2300,20 @@ func (e *DefaultEngine) DispatchAction(ctx context.Context, actionExID string) (
 	if v, _ := actionEx.RuntimeContext["safe_rerun"].(bool); v {
 		safeRerun = true
 	}
-	result, runErr := exec.RunAction(inst, input, actionEx.ID, safeRerun, execCtx, "", timeoutDur)
-	if runErr != nil {
-		// Executor returned Go error — wrap in db.Result{Error: ...}.
-		result = &db.Result{Error: runErr}
-	}
 
-	if err := e.OnActionComplete(ctx, actionExID, result, false); err != nil {
-		return nil, err
-	}
+	// Python: executor.run_action(...) → self._engine_client.on_action_complete(...)
+	// Go:      executor.RunAction(..., onCompleteCb) → Executor 负责调 callback
+	// DispatchAction 不再手动调 OnActionComplete — Executor 是 completion 链路的 owner。
+	_, _ = exec.RunAction(
+		inst, input, actionEx.ID, safeRerun, execCtx, "", timeoutDur,
+		executors.OnCompleteCallback(func(actionExID string, result *db.Result, wfAction bool) {
+			if err := e.OnActionComplete(ctx, actionExID, result, wfAction); err != nil {
+				log.Printf("DispatchAction: executor callback OnActionComplete failed: %v", err)
+			}
+		}),
+	)
+
+	// OnActionComplete (called via executor callback) already updates actionEx state.
 	return e.store.ActionExecutions().Get(actionExID)
 }
 

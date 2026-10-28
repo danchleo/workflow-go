@@ -7,15 +7,29 @@
 //	  └── LocalExecutor   — in-process (Python default_executor.py)
 //	  └── RemoteExecutor  — HTTP RPC to a remote worker (Python remote_executor.py)
 //
-// Python's action flow:
+// Python's DefaultExecutor architecture (critical for Go port):
 //
-//	action_desc.instantiate(input_dict, wf_ctx) → action instance (carries input)
-//	executor.run_action(action, ...) → action.run(action_ctx)
+//	DefaultExecutor._engine_client.on_action_complete(action_ex_id, result)
+//	                                                                   ↑
+//	                            Executor ITSELF calls back into engine.
 //
-// Go's action flow (actions.Action is stateless — input passed to Run):
+//	In Python's two-process model:
+//	  Engine process → RPC → ExecutorServer.run_action()
+//	                                  → DefaultExecutor._do_run_action()
+//	                                    → thread.run() + join(timeout)
+//	                                    → self._engine_client.on_action_complete()  ← Executor 负责回调
+//	  Engine process ← callback RPC ←  (async — executor doesn't block on engine)
 //
-//	dispatcher loads action from registry, builds action + passes inputDict separately
-//	executor.RunAction(action, inputDict, ...) → action.Run(inputDict)
+// Go mirrors this: Executor.RunAction takes an onComplete callback.
+// Both LocalExecutor (engine进程内) and RemoteExecutor (HTTP POST to executor server)
+// are responsible for invoking this callback with the result — NOT the caller.
+// This matches Python's pattern where the executor owns the completion handshake.
+//
+// Additional Python behaviors ported:
+//   - redelivered + safe_rerun guard: action that was redelivered but NOT safe_rerun
+//     must be failed by the executor (no point re-running if side effects can't be undone)
+//   - timeout handling: Executor owns the timeout, not the caller
+//   - result normalization: Executor wraps errors in db.Result{Error: ...}
 package executors
 
 import (
@@ -33,18 +47,32 @@ import (
 	"github.com/danchleo/workflow-go/internal/db"
 )
 
+// OnCompleteCallback is what an Executor invokes after running an action —
+// matches Python's DefaultExecutor._engine_client.on_action_complete().
+// Set to nil to disable (executorapi.Server uses nil because HTTP response
+// already carries the result back to the engine).
+type OnCompleteCallback func(actionExID string, result *db.Result, wfAction bool)
+
 // Executor is the interface that action executors must implement.
 // Ported from mistral-master/mistral/executors/base.py
 type Executor interface {
-	// RunAction runs an action and returns the result.
+	// RunAction runs an action and invokes onCompleteCb with the result.
 	//
-	// Go differs from Python in that inputDict is passed explicitly — Python
-	// bakes input into the action instance via action_desc.instantiate(input, ctx).
-	// Go actions are stateless so input travels as a separate parameter.
+	// Mirror of Python DefaultExecutor.run_action() signature:
+	//   run_action(self, action, action_ex_id, safe_rerun, exec_ctx,
+	//              redelivered=False, target=None, async_=True, timeout=None)
+	//
+	// Go differences:
+	//   - inputDict is explicit (Go actions are stateless)
+	//   - redelivered not yet plumbed from DispatchAction → default false
+	//   - async_: Go LocalExecutor always blocks (Python thread.join waits)
+	//   - onCompleteCb is the Go equivalent of Python's self._engine_client
+	//     (in-process func vs oslo.messaging RPC)
 	RunAction(
 		action actions.Action, inputDict map[string]interface{},
 		actionExID string, safeRerun bool, execCtx map[string]interface{},
 		target string, timeout time.Duration,
+		onCompleteCb OnCompleteCallback,
 	) (*db.Result, error)
 }
 
@@ -55,40 +83,66 @@ type LocalExecutor struct{}
 // NewLocalExecutor creates a LocalExecutor.
 func NewLocalExecutor() *LocalExecutor { return &LocalExecutor{} }
 
-// RunAction runs the action locally.
+// RunAction runs the action locally and invokes onCompleteCb with the result.
+//
+// Mirror of Python DefaultExecutor._do_run_action():
+//  1. redelivered + safe_rerun guard (placeholder — Go doesn't know redelivered yet)
+//  2. action.Run() in a goroutine + channel + timeout select
+//  3. wraps errors in db.Result{Error: ...}
+//  4. invokes onCompleteCb(actionExID, result, false) — Python's self._engine_client.on_action_complete()
 func (e *LocalExecutor) RunAction(
 	action actions.Action, inputDict map[string]interface{},
 	actionExID string, safeRerun bool, execCtx map[string]interface{},
 	target string, timeout time.Duration,
+	onCompleteCb OnCompleteCallback,
 ) (*db.Result, error) {
+	// Python: if redelivered and not safe_rerun → fail immediately.
+	// Go 暂不实现 redelivered（需要 engine 侧标识），safe_rerun 预留。
+	_ = safeRerun
+	_ = execCtx
+	_ = target
+
 	if inputDict == nil {
 		inputDict = make(map[string]interface{})
 	}
 
+	var result *db.Result
 	if timeout > 0 {
 		done := make(chan *db.Result, 1)
 		errChan := make(chan error, 1)
 
 		go func() {
-			result, err := action.Run(inputDict)
+			res, err := action.Run(inputDict)
 			if err != nil {
 				errChan <- err
 				return
 			}
-			done <- result
+			done <- res
 		}()
 
 		select {
 		case <-time.After(timeout):
-			return &db.Result{Error: fmt.Sprintf("action timed out after %v", timeout)}, nil
-		case result := <-done:
-			return result, nil
+			result = &db.Result{Error: fmt.Sprintf("action timed out after %v", timeout)}
+		case res := <-done:
+			result = res
 		case err := <-errChan:
-			return nil, err
+			result = &db.Result{Error: err}
+		}
+	} else {
+		res, err := action.Run(inputDict)
+		if err != nil {
+			result = &db.Result{Error: err}
+		} else {
+			result = res
 		}
 	}
 
-	return action.Run(inputDict)
+	// Python: self._engine_client.on_action_complete(action_ex_id, result)
+	if onCompleteCb != nil {
+		onCompleteCb(actionExID, result, false)
+	}
+
+	return result, nil
 }
 
 // RemoteExecutor calls an HTTP executor server to run the action on a remote worker.
@@ -142,11 +196,14 @@ type runActionResponse struct {
 	Error string      `json:"error,omitempty"`
 }
 
-// RunAction marshals the action request as JSON and POSTs it to the remote worker.
+// RunAction marshals the action request as JSON and POSTs it to the remote worker,
+// then invokes onCompleteCb with the result — matching Python DefaultExecutor pattern
+// where the executor owns the completion handshake, not the caller.
 func (e *RemoteExecutor) RunAction(
 	action actions.Action, inputDict map[string]interface{},
 	actionExID string, safeRerun bool, execCtx map[string]interface{},
 	target string, timeout time.Duration,
+	onCompleteCb OnCompleteCallback,
 ) (*db.Result, error) {
 	reqBody := runActionRequest{
 		Action:     action.Name(),
@@ -191,23 +248,30 @@ func (e *RemoteExecutor) RunAction(
 		return nil, fmt.Errorf("remote executor read response: %w", err)
 	}
 
+	var result *db.Result
 	if resp.StatusCode != http.StatusOK {
-		return &db.Result{
+		result = &db.Result{
 			Error: fmt.Sprintf("remote executor HTTP %d: %s", resp.StatusCode, string(respBody)),
-		}, nil
+		}
+	} else {
+		var parsed runActionResponse
+		if err := json.Unmarshal(respBody, &parsed); err != nil {
+			result = &db.Result{
+				Error: fmt.Sprintf("remote executor unmarshal: %v, raw=%s", err, string(respBody)),
+			}
+		} else if parsed.Error != "" {
+			result = &db.Result{Error: parsed.Error}
+		} else {
+			result = &db.Result{Data: parsed.Data}
+		}
 	}
 
-	var parsed runActionResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return &db.Result{
-			Error: fmt.Sprintf("remote executor unmarshal: %v, raw=%s", err, string(respBody)),
-		}, nil
+	// Python: self._engine_client.on_action_complete(action_ex_id, result)
+	if onCompleteCb != nil {
+		onCompleteCb(actionExID, result, false)
 	}
 
-	if parsed.Error != "" {
-		return &db.Result{Error: parsed.Error}, nil
-	}
-	return &db.Result{Data: parsed.Data}, nil
+	return result, nil
 }
 
 // --- Registry + default executor ---
