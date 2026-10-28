@@ -85,11 +85,15 @@ func NewLocalExecutor() *LocalExecutor { return &LocalExecutor{} }
 
 // RunAction runs the action locally and invokes onCompleteCb with the result.
 //
-// Mirror of Python DefaultExecutor._do_run_action():
-//  1. redelivered + safe_rerun guard (placeholder — Go doesn't know redelivered yet)
-//  2. action.Run() in a goroutine + channel + timeout select
-//  3. wraps errors in db.Result{Error: ...}
-//  4. invokes onCompleteCb(actionExID, result, false) — Python's self._engine_client.on_action_complete()
+// Mirror of Python DefaultExecutor._do_run_action() — ported line-by-line:
+//
+//  1. redelivered + safe_rerun guard (Go: redelivered 暂未 plumbed，safe_rerun 预留)
+//  2. goroutine + channel + timeout select
+//  3. 超时后等待 goroutine 退出再返回（防 goroutine leak）
+//  4. action.Run 错误 → result.Error（Python except BaseException → send_error_back）
+//  5. 只在 action.IsSync() 或 result.IsError() 时调 callback（Python is_sync or is_error）
+//  6. callback 失败 → send_error_back（Python MistralException 重试 + Exception 只 log）
+//  7. callback 有 onCompleteCb guard（Python if action_ex_id）
 func (e *LocalExecutor) RunAction(
 	action actions.Action, inputDict map[string]interface{},
 	actionExID string, safeRerun bool, execCtx map[string]interface{},
@@ -106,43 +110,112 @@ func (e *LocalExecutor) RunAction(
 		inputDict = make(map[string]interface{})
 	}
 
+	// --- Run action with timeout (mirrors Python thread.start() + join(timeout)) ---
+	type outcome struct {
+		res *db.Result
+		err error
+	}
+	done := make(chan outcome, 1)
+
+	go func() {
+		res, err := action.Run(inputDict)
+		done <- outcome{res: res, err: err}
+	}()
+
 	var result *db.Result
+	var timedOut bool
+
 	if timeout > 0 {
-		done := make(chan *db.Result, 1)
-		errChan := make(chan error, 1)
-
-		go func() {
-			res, err := action.Run(inputDict)
-			if err != nil {
-				errChan <- err
-				return
-			}
-			done <- res
-		}()
-
 		select {
 		case <-time.After(timeout):
+			timedOut = true
+			// Python: "we are now waiting for the action thread to finish..."
+			// Go 等价 — 等 goroutine 退出防 leak（Python 用 thread.join()）。
+			// 但不能无限等：用稍微长一点的等待，之后放弃。
+			drainTimer := time.NewTimer(timeout * 2)
+			defer drainTimer.Stop()
+			select {
+			case <-done:
+				// goroutine 刚好在 deadline 前/后完成了
+			case <-drainTimer.C:
+				// goroutine 还没退出，只能放弃（Python 这里是无限 join）
+				log.Printf("LocalExecutor: action %s (ex=%s) timed out and goroutine still running after %v",
+					action.Name(), actionExID, timeout*3)
+			}
 			result = &db.Result{Error: fmt.Sprintf("action timed out after %v", timeout)}
-		case res := <-done:
-			result = res
-		case err := <-errChan:
-			result = &db.Result{Error: err}
+		case o := <-done:
+			// goroutine 在 deadline 内完成
+			if o.err != nil {
+				result = &db.Result{Error: o.err}
+			} else {
+				result = o.res
+			}
 		}
 	} else {
-		res, err := action.Run(inputDict)
-		if err != nil {
-			result = &db.Result{Error: err}
+		// 无 timeout — 直接等 goroutine 完成
+		o := <-done
+		if o.err != nil {
+			result = &db.Result{Error: o.err}
 		} else {
-			result = res
+			result = o.res
 		}
 	}
 
-	// Python: self._engine_client.on_action_complete(action_ex_id, result)
-	if onCompleteCb != nil {
-		onCompleteCb(actionExID, result, false)
+	if timedOut {
+		// 超时也走 callback — Python 里 timeout raise 被 except 捕获 → send_error_back
+		sendErrorBack(actionExID, onCompleteCb,
+			fmt.Sprintf("action timed out after %v", timeout), false)
+		return result, nil
+	}
+
+	// --- Send action result (mirrors Python's completion callback logic) ---
+	// Python: if action_ex_id and (action.is_sync() or result.is_error()):
+	//             self._engine_client.on_action_complete(action_ex_id, result)
+	//
+	// Go: 只在 sync action 或 error 时调 callback
+	if actionExID != "" {
+		isError := result != nil && result.Error != nil
+		if action.IsSync() || isError {
+			if onCompleteCb != nil {
+				if err := safeInvoke(onCompleteCb, actionExID, result, false); err != nil {
+					// Python: MistralException → send_error_back retry
+					//         Exception → only log
+					log.Printf("LocalExecutor: callback error on action %s (ex=%s): %v",
+						action.Name(), actionExID, err)
+					// send_error_back — 用 result.Error 再试一次
+					sendErrorBack(actionExID, onCompleteCb,
+						fmt.Sprintf("failed to deliver result: %v", err), false)
+				}
+			}
+		}
+		// async + success → 不回调（Python 靠 heartbeat 超时判定）
 	}
 
 	return result, nil
+}
+
+// safeInvoke calls onCompleteCb and recovers panics — mirrors Python's
+// try/except around self._engine_client.on_action_complete().
+func safeInvoke(cb OnCompleteCallback, id string, r *db.Result, wf bool) (retErr error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			retErr = fmt.Errorf("callback panic: %v", rec)
+		}
+	}()
+	cb(id, r, wf)
+	return nil
+}
+
+// sendErrorBack mirrors Python's send_error_back(error_msg):
+// wraps the error msg in db.Result and invokes the callback again.
+func sendErrorBack(actionExID string, onCompleteCb OnCompleteCallback, msg string, wfAction bool) {
+	if actionExID == "" || onCompleteCb == nil {
+		return
+	}
+	errResult := &db.Result{Error: msg}
+	if err := safeInvoke(onCompleteCb, actionExID, errResult, wfAction); err != nil {
+		log.Printf("LocalExecutor: sendErrorBack also failed for %s: %v", actionExID, err)
+	}
 }
 
 // RemoteExecutor calls an HTTP executor server to run the action on a remote worker.
