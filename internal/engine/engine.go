@@ -52,55 +52,62 @@ type Engine interface {
 
 // --- PostTxQueue ---
 
-// PostTxQueue collects callbacks that should run after a transaction completes.
-// This is the Go equivalent of the post_tx_queue Python module.
-// Ported from mistral-master/mistral/engine/post_tx_queue.py
+// PostTxQueue collects callbacks that should run after an engine entry
+// method returns. This is the Go equivalent of the @post_tx_queue.run
+// decorator in mistral-master/mistral/engine/post_tx_queue.py.
+//
+// Each engine entry method creates its OWN PostTxQueue as a local variable
+// and defers q.Drain() — after the method returns, Drain() starts a fresh
+// goroutine that runs all registered callbacks. This mirrors Python's
+// thread-local queue + Thread(target=_within_new_thread).start() pattern:
+//
+//	@run decorator:
+//	  queue = []                ← local (thread-local in Python)
+//	  func(*args) { ... }       ← method body, registers callbacks
+//	  Thread(queue_runner).start()  ← async goroutine after return
+//
+// Crucially, because each method has its own queue:
+//   - Nested engine calls (e.g. OnActionComplete → advanceWorkflow →
+//     Dispatcher.StartTask → StartTask) each get independent queues
+//   - No shared mutable state between concurrent callers
+//   - Callbacks run in goroutines completely detached from the call stack
+//     → store.Update races in nested call chains are eliminated
 type PostTxQueue struct {
 	mu            sync.Mutex
 	callbacks     []func()
 	inTxCallbacks []func() // Callbacks that should run inside a new transaction.
 }
 
-// Global default post-tx queue.
-var defaultQueue = NewPostTxQueue()
-
-// NewPostTxQueue creates a new post-tx queue.
+// NewPostTxQueue creates a new post-tx queue. Each engine entry method
+// should call this once as a local variable — the returned pointer is
+// safe to Register from the same goroutine before Drain().
 func NewPostTxQueue() *PostTxQueue {
 	return &PostTxQueue{}
 }
 
-// Register registers a callback to run after the current transaction.
-func (q *PostTxQueue) Register(fn func(), opts ...bool) {
-	inTx := false
-	if len(opts) > 0 {
-		inTx = opts[0]
+// Register queues a callback to run asynchronously when Drain() is called.
+// If inTx=true, the callback is marked as needing its own transaction.
+func (q *PostTxQueue) Register(fn func(), inTx ...bool) {
+	isTx := false
+	if len(inTx) > 0 {
+		isTx = inTx[0]
 	}
 
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	if inTx {
+	if isTx {
 		q.inTxCallbacks = append(q.inTxCallbacks, fn)
 	} else {
 		q.callbacks = append(q.callbacks, fn)
 	}
 }
 
-// RegisterGlobal adds a callback to the global queue.
-func Register(fn func(), inTx ...bool) {
-	defaultQueue.Register(fn, inTx...)
-}
-
-// Drain executes all queued callbacks asynchronously in a fresh goroutine,
-// mirroring Python's post_tx_queue.run decorator which spawns
-// `threading.Thread(target=_within_new_thread).start()` after the main
-// engine method returns. Callers do NOT wait for the goroutine — callbacks
-// are fire-and-forget. This ensures downstream operations (e.g.
-// checkAndCompleteWorkflow) execute AFTER the current call stack's DB
-// writes are visible to other readers.
-//
-// If synchronous draining is needed (e.g. tests that assert final state),
-// use DrainSync instead.
+// Drain fires all queued callbacks asynchronously in a new goroutine.
+// Mirrors Python's `threading.Thread(target=_within_new_thread).start()`
+// after an @run-decorated method returns. Callers MUST NOT register more
+// callbacks on this queue after calling Drain — it's a one-shot operation
+// (callbacks are cleared to nil after the goroutine starts).
 func (q *PostTxQueue) Drain() {
 	q.mu.Lock()
 	callbacks := q.callbacks
@@ -115,10 +122,8 @@ func (q *PostTxQueue) Drain() {
 	go q.runAll(callbacks, inTxCallbacks)
 }
 
-// DrainSync executes queued callbacks synchronously in the calling goroutine.
-// Useful for tests and rare cases where the caller must observe final state
-// immediately. Python has no direct equivalent — Python always spawns a new
-// thread — but Go tests need this for deterministic assertions.
+// DrainSync runs all callbacks synchronously. Used by integration tests
+// that need deterministic ordering without goroutine scheduling involved.
 func (q *PostTxQueue) DrainSync() {
 	q.mu.Lock()
 	callbacks := q.callbacks
@@ -138,16 +143,6 @@ func (q *PostTxQueue) runAll(callbacks, inTxCallbacks []func()) {
 	}
 }
 
-// DrainGlobal drains the global queue asynchronously.
-func DrainGlobal() {
-	defaultQueue.Drain()
-}
-
-// DrainGlobalSync drains the global queue synchronously.
-func DrainGlobalSync() {
-	defaultQueue.DrainSync()
-}
-
 // safeRun runs a callback and recovers from panics.
 func safeRun(fn func()) {
 	defer func() {
@@ -156,13 +151,6 @@ func safeRun(fn func()) {
 		}
 	}()
 	fn()
-}
-
-// WithPostTx wraps a function so that any callbacks registered inside it run after it returns.
-func WithPostTx(fn func() error) error {
-	err := fn()
-	DrainGlobal()
-	return err
 }
 
 // --- Dispatcher ---

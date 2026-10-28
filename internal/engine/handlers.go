@@ -25,16 +25,54 @@ type DefaultEngine struct {
 	store      db.Store
 	dispatcher *Dispatcher
 	sched      scheduler.Scheduler // optional delayed-job scheduler (nil if none)
+
+	// AutoExecute: when true (default), StartTask/DispatchAction are
+	// registered to a local PostTxQueue and executed asynchronously after
+	// the entry method returns — matching Python's @post_tx_queue.run.
+	// Tests that drive OnActionComplete manually set this to false.
+	AutoExecute bool
+
+	// inflightWg tracks goroutines spawned by PostTxQueue.Drain() so tests
+	// and API callers can WaitForIdle() before asserting final state.
+	// Python's @post_tx_queue.run uses Thread() which fire-and-forget; Go
+	// adds this WaitGroup because tests need deterministic end-of-execution
+	// synchronization without sleeping.
+	inflightWg sync.WaitGroup
 }
 
 // NewDefaultEngine creates a DefaultEngine with the given store.
 func NewDefaultEngine(store db.Store) *DefaultEngine {
 	eng := &DefaultEngine{
-		store: store,
+		store:       store,
+		AutoExecute: true, // default: match Python @post_tx_queue.run async behavior
 	}
 	eng.dispatcher = NewDispatcher(store, eng)
 	return eng
 }
+
+// WaitForIdle blocks until all PostTxQueue-spawned goroutines finish,
+// or timeout expires. Returns nil on success, ErrTimeout if it fires.
+// Production callers don't need this — it exists solely for tests and
+// CLI demo scenarios that need to observe the workflow's final state
+// after all async callbacks (DispatchAction → RunAction → OnActionComplete
+// → ContinueWorkflow) have drained.
+func (e *DefaultEngine) WaitForIdle(timeout time.Duration) error {
+	done := make(chan struct{})
+	go func() {
+		e.inflightWg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		return ErrWaitForIdleTimeout
+	}
+}
+
+// ErrWaitForIdleTimeout is returned when WaitForIdle's timeout fires before
+// all inflight PostTxQueue goroutines finish.
+var ErrWaitForIdleTimeout = fmt.Errorf("engine.WaitForIdle: timeout before all async callbacks drained")
 
 // WithScheduler wires a generic delayed-job scheduler into the engine.
 // Policies like retry-delay, wait-before, wait-after and timeout need it.
@@ -263,6 +301,16 @@ func (e *DefaultEngine) StartWorkflow(
 	ctx context.Context, wfDefID, wfNamespace, wfExID string, wfInput map[string]interface{}, description string,
 	params map[string]interface{},
 ) (*db.WorkflowExecution, error) {
+	// Python @post_tx_queue.run — StartWorkflow → Dispatcher → StartTask →
+	// Register(DispatchAction) 异步执行。
+	var ptx *PostTxQueue
+	if e.AutoExecute {
+		ptx = NewPostTxQueue()
+		e.inflightWg.Add(1)
+		defer func() { ptx.Drain() }()
+		defer e.inflightWg.Done()
+	}
+
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
@@ -387,6 +435,14 @@ func (e *DefaultEngine) PauseWorkflow(ctx context.Context, wfExID string) error 
 
 // ResumeWorkflow resumes a paused workflow.
 func (e *DefaultEngine) ResumeWorkflow(ctx context.Context, wfExID string, env map[string]interface{}) error {
+	var ptx *PostTxQueue
+	if e.AutoExecute {
+		ptx = NewPostTxQueue()
+		e.inflightWg.Add(1)
+		defer func() { ptx.Drain() }()
+		defer e.inflightWg.Done()
+	}
+
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -483,6 +539,14 @@ func (e *DefaultEngine) StopWorkflow(ctx context.Context, wfExID string, state s
 func (e *DefaultEngine) RerunWorkflow(
 	ctx context.Context, taskExID string, reset bool, skip bool, env map[string]interface{},
 ) error {
+	var ptx *PostTxQueue
+	if e.AutoExecute {
+		ptx = NewPostTxQueue()
+		e.inflightWg.Add(1)
+		defer func() { ptx.Drain() }()
+		defer e.inflightWg.Done()
+	}
+
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -580,6 +644,17 @@ func (e *DefaultEngine) StartTask(
 	ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool,
 	reset bool,
 ) error {
+	// Python @post_tx_queue.run 等价：每个 engine 入口方法拥有自己的 queue，
+	// 方法返回后异步 goroutine 跑队列 —— 完全脱离调用栈。
+	// AutoExecute=false 时跳过整个 post-tx 机制（测试手动驱动用）。
+	var ptx *PostTxQueue
+	if e.AutoExecute {
+		ptx = NewPostTxQueue()
+		e.inflightWg.Add(1)
+		defer func() { ptx.Drain() }()
+		defer e.inflightWg.Done()
+	}
+
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -702,7 +777,7 @@ func (e *DefaultEngine) StartTask(
 	// startWithItemsTask handles the per-iteration dispatch.
 	withItems := taskSpec.GetWithItems()
 	if len(withItems) > 0 {
-		return e.startWithItemsTask(ctx, taskEx, taskSpec, wfEx, withItems, inputDict)
+		return e.startWithItemsTask(ctx, taskEx, taskSpec, wfEx, withItems, inputDict, ptx)
 	}
 
 	// Check for sub-workflow (nesting). Mirror of Python RegularTask._build_action
@@ -800,15 +875,29 @@ func (e *DefaultEngine) StartTask(
 
 	log.Printf("task %s (id=%s) started with input: %v (action_ex=%s)", taskEx.Name, taskEx.ID, inputDict, actionEx.ID)
 
+	// Post-tx: queue the action execution to run after StartTask returns.
+	// Mirrors Python's RegularAction.schedule() which calls
+	// post_tx_queue.register_operation(_run_action) inside an @run-decorated
+	// start_task method. The DispatchAction callback runs in a fresh goroutine
+	// after StartTask returns (via defer ptx.Drain() below) — completely
+	// detached from the call stack, so nested engine calls inside the
+	// Dispatcher's Drain don't race with sibling queue iterations.
+	if ptx != nil {
+		ptx.Register(func() { e.DispatchAction(ctx, actionEx.ID) })
+	}
+
 	return nil
 }
 
 // startWithItemsTask launches parallel iterations — either ActionExecutions or
 // nested WorkflowExecutions, depending on whether the task has `action:` or `workflow:`.
 // Port of Python WithItemsTask → N×_build_action() (RegularAction or WorkflowAction).
+// ptx: all iteration callbacks (child StartWorkflow + DispatchAction) register here;
+//
+//	caller (StartTask) owns the queue and defers Drain().
 func (e *DefaultEngine) startWithItemsTask(
 	ctx context.Context, taskEx *db.TaskExecution, taskSpec *v2.TaskSpec, wfEx *db.WorkflowExecution,
-	withItems map[string]interface{}, baseInput map[string]interface{},
+	withItems map[string]interface{}, baseInput map[string]interface{}, ptx *PostTxQueue,
 ) error {
 	// Evaluate each with-items expression to get the actual item lists.
 	ctxMap := workflow.BuildFullContext(wfEx, nil, nil)
@@ -895,7 +984,7 @@ func (e *DefaultEngine) startWithItemsTask(
 	startedCount := 0
 	for i := 0; i < initialBatch; i++ {
 		if err := e.startWithItemsIter(
-			ctx, i, minLen, taskEx, taskSpec, wfEx, subWfDef, withValues, baseInput, subWfName,
+			ctx, i, minLen, taskEx, taskSpec, wfEx, subWfDef, withValues, baseInput, subWfName, ptx,
 		); err != nil {
 			return err
 		}
@@ -921,7 +1010,7 @@ func (e *DefaultEngine) startWithItemsTask(
 func (e *DefaultEngine) startWithItemsIter(
 	ctx context.Context, i, total int, taskEx *db.TaskExecution, taskSpec *v2.TaskSpec, wfEx *db.WorkflowExecution,
 	subWfDef *db.WorkflowDefinition, withValues map[string][]interface{}, baseInput map[string]interface{},
-	subWfName string,
+	subWfName string, ptx *PostTxQueue,
 ) error {
 	// Build per-iteration context — Python WithItemsTask re-evaluates input
 	// expressions with the iteration variables bound so that "<% $.vm_info %>"
@@ -997,6 +1086,14 @@ func (e *DefaultEngine) startWithItemsIter(
 		)
 		// Timeout policy — each with-items iteration gets its own timer.
 		e.scheduleTaskTimeout(actionEx, taskEx, taskSpec)
+		// Post-tx: run this iteration's action async via StartTask's queue.
+		// Note: ptx here resolves to the StartTask-level local PostTxQueue
+		// (startWithItemsIter is called from inside StartTask's @run block),
+		// so all iteration actions fire after StartTask returns as a single
+		// batch — mirroring Python N×register_operation + single Thread start.
+		if ptx != nil {
+			ptx.Register(func() { e.DispatchAction(ctx, actionEx.ID) })
+		}
 	}
 	return nil
 }
@@ -1005,6 +1102,17 @@ func (e *DefaultEngine) startWithItemsIter(
 func (e *DefaultEngine) OnActionComplete(
 	ctx context.Context, actionExID string, result *db.Result, wfAction bool,
 ) error {
+	// Python @post_tx_queue.run 等价 — OnActionComplete 里的异步动作
+	// （refreshTaskState 调 continueTask 后可能又启动 with-items capacity
+	//  迭代）通过这个 queue 延迟到返回后。
+	var ptx *PostTxQueue
+	if e.AutoExecute {
+		ptx = NewPostTxQueue()
+		e.inflightWg.Add(1)
+		defer func() { ptx.Drain() }()
+		defer e.inflightWg.Done()
+	}
+
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -1197,7 +1305,7 @@ func (e *DefaultEngine) OnActionComplete(
 							for b := 0; b < capacity && startedCount < total; b++ {
 								if err := e.startWithItemsIter(
 									ctx, startedCount, total, taskEx, taskSpec, wfEx, subWfDef, withValues, inputDict,
-									subWfName,
+									subWfName, ptx,
 								); err != nil {
 									return fmt.Errorf("with-items capacity launch iter %d: %w", startedCount, err)
 								}
@@ -2038,6 +2146,14 @@ func (e *DefaultEngine) continueTask(taskEx *db.TaskExecution, wfEx *db.Workflow
 // parent wfEx to apply cascade rules.
 // ================================================================
 func (e *DefaultEngine) OnActionUpdate(wfExID string) error {
+	var ptx *PostTxQueue
+	if e.AutoExecute {
+		ptx = NewPostTxQueue()
+		e.inflightWg.Add(1)
+		defer func() { ptx.Drain() }()
+		defer e.inflightWg.Done()
+	}
+
 	childWfEx, err := e.store.WorkflowExecutions().Get(wfExID)
 	if err != nil || childWfEx == nil {
 		return fmt.Errorf("OnActionUpdate: child wfEx %s not found: %v", wfExID, err)
@@ -2172,7 +2288,19 @@ func (e *DefaultEngine) DispatchAction(ctx context.Context, actionExID string) (
 	if input == nil {
 		input = map[string]interface{}{}
 	}
-	result, runErr := exec.RunAction(inst, actionEx.ID, false, input, "", false, timeoutDur)
+	execCtx := map[string]interface{}{
+		"action_execution_id": actionEx.ID,
+		"task_execution_id":   actionEx.TaskExecutionID,
+		"workflow_id":         actionEx.WorkflowID,
+		"workflow_name":       actionEx.WorkflowName,
+		"workflow_namespace":  actionEx.WorkflowNamespace,
+		"project_id":          actionEx.ProjectID,
+	}
+	var safeRerun bool
+	if v, _ := actionEx.RuntimeContext["safe_rerun"].(bool); v {
+		safeRerun = true
+	}
+	result, runErr := exec.RunAction(inst, input, actionEx.ID, safeRerun, execCtx, "", timeoutDur)
 	if runErr != nil {
 		// Executor returned Go error — wrap in db.Result{Error: ...}.
 		result = &db.Result{Error: runErr}

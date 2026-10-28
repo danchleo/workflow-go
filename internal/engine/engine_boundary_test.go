@@ -521,6 +521,7 @@ func TestEngine_StartWorkflow_NoStartTask_Direct(t *testing.T) {
 	}
 
 	eng := NewDefaultEngine(store)
+	eng.AutoExecute = false
 	_, err = eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", defaultParams())
 	if err == nil {
 		t.Fatal("expected error: NewWorkflowSpec should reject no-start-task wf")
@@ -558,6 +559,7 @@ tasks:
 		t.Fatalf("reverse workflow with cycle should be valid: %v", err)
 	}
 	eng := NewDefaultEngine(store)
+	eng.AutoExecute = false
 	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", defaultParams())
 	if err != nil {
 		t.Fatalf("StartWorkflow reverse cycle: %v", err)
