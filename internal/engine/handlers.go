@@ -1095,6 +1095,12 @@ func (e *DefaultEngine) startWithItemsIter(
 			ptx.Register(func() { e.DispatchAction(ctx, actionEx.ID) })
 		}
 	}
+
+	// Track how many iterations have been launched (Python task.executions grows on each launch).
+	started := db.CoerceInt(taskEx.RuntimeContext["with_items_started"])
+	taskEx.RuntimeContext["with_items_started"] = started + 1
+	_ = e.store.TaskExecutions().Update(taskEx)
+
 	return nil
 }
 
@@ -1211,6 +1217,13 @@ func (e *DefaultEngine) OnActionComplete(
 			return err
 		}
 	}
+	// wfAction=true: child WorkflowExecution also needs Accepted=true
+	if wfAction && childWfEx != nil {
+		childWfEx.Accepted = true
+		if err := e.store.WorkflowExecutions().Update(childWfEx); err != nil {
+			return err
+		}
+	}
 
 	// ============================================================
 	// Retry Policy — Python engine/policies.py RetryPolicy.after_task_complete.
@@ -1235,30 +1248,107 @@ func (e *DefaultEngine) OnActionComplete(
 	}
 
 	// Handle with-items: defer task completion until all iterations finish.
-	// Mirror Python WithItemsTask._complete_actions (engine/tasks.py ~line 870):
-	// if any iter ERROR → task ERROR, else SUCCESS. We count failed iters
-	// alongside done_count so the final state is determined by aggregation.
+	// Python: task_ex.executions → filter(accepted=True) → 动态计数
+	// Go 对齐：RuntimeContext 只存 total/concurrency；done/failed/running 动态查 DB
 	if _, hasSize := taskEx.RuntimeContext["with_items_total"]; hasSize {
 		total := db.CoerceInt(taskEx.RuntimeContext["with_items_total"])
-		doneCount := db.CoerceInt(taskEx.RuntimeContext["with_items_done_count"])
-		failedCount := db.CoerceInt(taskEx.RuntimeContext["with_items_failed_count"])
-		startedCount := db.CoerceInt(taskEx.RuntimeContext["with_items_started"])
 		concurrency := db.CoerceInt(taskEx.RuntimeContext["with_items_concurrency"])
-		doneCount++
-		if states.IsFailed(newState) {
-			failedCount++
-		}
-		taskEx.RuntimeContext["with_items_done_count"] = doneCount
-		taskEx.RuntimeContext["with_items_failed_count"] = failedCount
 
-		// Concurrency gate — Python WithItemsTask._dispatch_actions:
-		// capacity = concurrency - (started - done). If we have spare capacity
-		// and there are undelivered iterations, launch the next batch now.
-		if concurrency > 0 && startedCount < total {
-			running := startedCount - doneCount
-			capacity := concurrency - running
-			if capacity > 0 {
-				// Load taskSpec + wfSpec to resolve subWfDef and get with_values.
+		// Python 等价: execs = [t for t in task_ex.executions if t.accepted]
+		// Go: taskEx.executions 统一包含 ActionExecution（action 类型 task）
+		// 和 child WorkflowExecution（sub-workflow 类型 task）
+		allActionEx, _ := e.store.ActionExecutions().List(taskEx.ID, "")
+		allWfExs, _ := e.store.WorkflowExecutions().List("")
+
+		// indexAccepted: index → (Accepted=true 且终态的 iteration)
+		// indexRunning:  index → 有未终态 iteration（Accepted=false）
+		type iterEntry struct {
+			accepted bool
+			state    string
+			updated  time.Time
+		}
+		indexAccepted := make(map[int]iterEntry)
+		indexRunning := make(map[int]bool)
+
+		addEntry := func(idx int, accepted bool, state string, updated time.Time) {
+			if accepted && states.IsCompleted(state) {
+				if prev, ok := indexAccepted[idx]; !ok || updated.After(prev.updated) {
+					indexAccepted[idx] = iterEntry{accepted, state, updated}
+				}
+			} else if !accepted {
+				if !states.IsCompleted(state) {
+					indexRunning[idx] = true
+				}
+			}
+		}
+
+		for _, ex := range allActionEx {
+			idx := db.CoerceInt(ex.RuntimeContext["index"])
+			addEntry(idx, ex.Accepted, ex.State, ex.UpdatedAt)
+		}
+		for _, wf := range allWfExs {
+			if wf.TaskExecutionID != taskEx.ID {
+				continue
+			}
+			idx := db.CoerceInt(wf.Params["index"])
+			addEntry(idx, wf.Accepted, wf.State, wf.UpdatedAt)
+		}
+
+		doneCount := len(indexAccepted)
+		var failedCount int
+		var cancelledCount int
+		for _, entry := range indexAccepted {
+			if states.IsError(entry.state) {
+				failedCount++
+			} else if states.IsCancelled(entry.state) {
+				cancelledCount++
+			}
+		}
+		runningCount := len(indexRunning)
+
+		// 完成判定（Python is_with_items_completed）:
+		//   Python: count == len(accepted_execs) AND capacity == concurrency
+		//   capacity == concurrency ≡ running == 0（所有 action 都跑完）
+		isCompleted := doneCount >= total && runningCount == 0
+
+		log.Printf(
+			"with-items task %s: done=%d/%d, failed=%d, cancelled=%d, running=%d, completed=%v",
+			taskEx.Name, doneCount, total, failedCount, cancelledCount, runningCount, isCompleted,
+		)
+
+		if isCompleted {
+			// Python _get_final_state
+			switch {
+			case cancelledCount > 0:
+				newState = states.CANCELLED
+				stateInfo = "One or more actions was cancelled."
+			case failedCount > 0:
+				newState = states.ERROR
+				stateInfo = "One or more actions had failed."
+			}
+
+			taskEx.RuntimeContext["with_items_done_count"] = doneCount
+			taskEx.RuntimeContext["with_items_failed_count"] = failedCount
+			// fall through 到后面统一 finalize（设 taskEx.State/Output/Publish/advance）
+		}
+
+		// Concurrency gate — Python WithItemsTask._schedule_actions:
+		//   _get_next_indexes() 找下一批 index（优先 retry 的旧 index）
+		//   _decrease_capacity(N) 启动 N 个 action
+		// Go: capacity 动态算 concurrency - running
+		if concurrency > 0 {
+			capacity := concurrency - runningCount
+
+			// 所有"已经被启动过"的 index（有 Accepted=true 或 RUNNING 的 actionEx）
+			launchedIndexes := make(map[int]bool)
+			for idx := range indexAccepted {
+				launchedIndexes[idx] = true
+			}
+			for idx := range indexRunning {
+				launchedIndexes[idx] = true
+			}
+
+			if capacity > 0 && len(launchedIndexes) < total {
 				wfDef2, _ := e.store.WorkflowDefinitions().Get(wfEx.WorkflowID)
 				if wfDef2 != nil {
 					wfSpec2, _ := v2.NewWorkflowSpec(wfDef2.Name, wfDef2.Spec)
@@ -1285,58 +1375,47 @@ func (e *DefaultEngine) OnActionComplete(
 									)
 								}
 							}
-							withValues, _ := taskEx.RuntimeContext["with_items_values"].(map[string][]interface{})
-							// If values got JSON-round-tripped as []interface{} lists inside an interface{} map,
-							// convert them back.
-							if withValues == nil {
-								if raw, ok := taskEx.RuntimeContext["with_items_values"].(map[string]interface{}); ok {
-									withValues = make(map[string][]interface{})
-									for k, v := range raw {
-										if items, ok := v.([]interface{}); ok {
-											withValues[k] = items
-										}
-									}
-								}
-							}
-							// Load task input from wfSpec.
+							withValues := loadWithItemsValues(taskEx)
 							inputDict := evaluateTaskInput(
 								taskSpec, workflow.BuildFullContext(wfEx, wfSpec2, nil), wfEx.Input, wfEx.Context,
 							)
-							for b := 0; b < capacity && startedCount < total; b++ {
+							batchStarted := 0
+							for b := 0; b < capacity && len(launchedIndexes)+batchStarted < total; b++ {
+								// 找第一个未启动的 index（顺序，Python _get_next_indexes 的 fallback 路径）
+								var nextIdx int = -1
+								for i := 0; i < total; i++ {
+									if !launchedIndexes[i] {
+										nextIdx = i
+										break
+									}
+								}
+								if nextIdx < 0 {
+									break
+								}
 								if err := e.startWithItemsIter(
-									ctx, startedCount, total, taskEx, taskSpec, wfEx, subWfDef, withValues, inputDict,
+									ctx, nextIdx, total, taskEx, taskSpec, wfEx, subWfDef, withValues, inputDict,
 									subWfName, ptx,
 								); err != nil {
-									return fmt.Errorf("with-items capacity launch iter %d: %w", startedCount, err)
+									return fmt.Errorf("with-items capacity launch iter %d: %w", nextIdx, err)
 								}
-								startedCount++
+								launchedIndexes[nextIdx] = true
+								batchStarted++
 							}
-							taskEx.RuntimeContext["with_items_started"] = startedCount
+							log.Printf(
+								"with-items task %s capacity refill: launched %d new iters, running=%d/%d",
+								taskEx.Name, batchStarted, runningCount+batchStarted, total,
+							)
 						}
 					}
 				}
-				log.Printf(
-					"with-items task %s capacity refill: launched %d new iters, started=%d/%d", taskEx.Name,
-					min(capacity, total-startedCount), startedCount, total,
-				)
 			}
 		}
 
-		if doneCount < total {
-			log.Printf(
-				"with-items task %s: %d/%d iterations done (%d failed)", taskEx.Name, doneCount, total, failedCount,
-			)
-			return e.store.TaskExecutions().Update(taskEx)
+		// with-items task 还没完成，正常返回（不 advance workflow）
+		// Python: is_with_items_completed → fall through；否则 return
+		if !isCompleted {
+			return nil
 		}
-		// Aggregate final state — Python WithItemsTask rule.
-		if failedCount > 0 {
-			newState = states.ERROR
-			stateInfo = fmt.Sprintf("%d of %d with-items iterations failed", failedCount, total)
-		}
-		log.Printf(
-			"with-items task %s: all %d iterations done (%d failed), final state=%s",
-			taskEx.Name, total, failedCount, newState,
-		)
 	}
 
 	// ================================================================
@@ -1707,6 +1786,13 @@ func (e *DefaultEngine) handleRetry(
 			log.Printf("retry: update taskEx to RUNNING_DELAYED failed: %v", err)
 		}
 
+		// Python: task.invalidate_result() — 把原 action_ex 标记 unaccepted
+		// 这样 with-items 计数动态查 accepted 时不会把这个 ERROR actionEx 算进去
+		actionEx.Accepted = false
+		if err := e.store.ActionExecutions().Update(actionEx); err != nil {
+			log.Printf("retry: invalidate actionEx %s failed: %v", actionEx.ID, err)
+		}
+
 		e.sched.Schedule(
 			scheduler.JobContinueTask, map[string]interface{}{
 				"task_ex_id":             taskEx.ID,
@@ -1726,6 +1812,13 @@ func (e *DefaultEngine) handleRetry(
 	newActionEx := buildRetryActionEx()
 	if err := e.store.ActionExecutions().Create(newActionEx); err != nil {
 		return false, fmt.Errorf("retry creating ActionExecution: %w", err)
+	}
+
+	// Python: task.invalidate_result() — 把原 action_ex 标记 unaccepted
+	// 这样 with-items 计数动态查 accepted 时不会把这个 ERROR actionEx 算进去
+	actionEx.Accepted = false
+	if err := e.store.ActionExecutions().Update(actionEx); err != nil {
+		log.Printf("retry: invalidate actionEx %s failed: %v", actionEx.ID, err)
 	}
 
 	e.scheduleTaskTimeout(newActionEx, taskEx, taskSpec)
@@ -2403,4 +2496,23 @@ func (e *DefaultEngine) checkIntegrity(ctx context.Context, wfExID string) {
 			log.Printf("integrity_check: OnActionComplete failed: %v", err)
 		}
 	}
+}
+
+// loadWithItemsValues extracts with-items evaluation results from taskEx.RuntimeContext.
+// Handles JSON round-trip where []interface{} values inside an interface{} map
+// may get wrapped differently across Store implementations.
+func loadWithItemsValues(taskEx *db.TaskExecution) map[string][]interface{} {
+	if withValues, ok := taskEx.RuntimeContext["with_items_values"].(map[string][]interface{}); ok {
+		return withValues
+	}
+	if raw, ok := taskEx.RuntimeContext["with_items_values"].(map[string]interface{}); ok {
+		result := make(map[string][]interface{})
+		for k, v := range raw {
+			if items, ok := v.([]interface{}); ok {
+				result[k] = items
+			}
+		}
+		return result
+	}
+	return nil
 }

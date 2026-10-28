@@ -99,7 +99,7 @@ func runToCompletion(t *testing.T, eng *DefaultEngine, store db.Store, wfExID st
 		}
 
 		// Handle with-items: find ALL ActionExecutions for this task and complete each.
-		if _, hasSize := pending.RuntimeContext["with_items_size"]; hasSize {
+		if _, hasSize := pending.RuntimeContext["with_items_total"]; hasSize {
 			actionExs, _ := store.ActionExecutions().List(pending.ID, "")
 			for _, ae := range actionExs {
 				result := &db.Result{Data: pending.Name + "-iter-" + fmt.Sprintf("%v", ae.RuntimeContext["index"])}
@@ -297,7 +297,7 @@ func TestEngine_WithItems_EndToEnd(t *testing.T) {
 	tasks, _ := store.TaskExecutions().List(wfEx.ID, "")
 	var fanoutTaskExID string
 	for _, te := range tasks {
-		if _, ok := te.RuntimeContext["with_items_size"]; ok {
+		if _, ok := te.RuntimeContext["with_items_total"]; ok {
 			fanoutTaskExID = te.ID
 		}
 	}
