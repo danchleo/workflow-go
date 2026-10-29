@@ -128,9 +128,16 @@ func (w *wmDefStore) GetByName(name, namespace, projectID string) (*WorkflowDefi
 	w.s.mu.RLock()
 	defer w.s.mu.RUnlock()
 	for _, wf := range w.s.workflowDefs {
-		if wf.Name == name && wf.Namespace == namespace && wf.ProjectID == projectID {
-			return wf, nil
+		if wf.Name != name {
+			continue
 		}
+		if namespace != "" && wf.Namespace != namespace {
+			continue
+		}
+		if projectID != "" && wf.ProjectID != projectID {
+			continue
+		}
+		return wf, nil
 	}
 	return nil, &NotFoundError{Entity: "WorkflowDefinition", ID: name}
 }

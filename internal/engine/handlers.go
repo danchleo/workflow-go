@@ -2394,15 +2394,26 @@ func (e *DefaultEngine) DispatchAction(ctx context.Context, actionExID string) (
 		safeRerun = true
 	}
 
-	// Python: executor.run_action(...)  ← 无 callback 参数！
-	//   DefaultExecutor 内部 self._engine_client.on_action_complete(...)
-	// Go 现在完全对齐：DefaultExecutor 构造时持有 engineClient，
-	// RunAction 内部自己回调。DispatchAction 只负责调 RunAction，不手动回调。
-	exec.RunAction(
+	// Python: executor.run_action(...)  ← 无 callback 参数
+	//   回调统一由 engine 层处理（对齐 Python 里 engine.Dispatcher
+	//   注册 callback 给 executor 的模式）。
+	//   - DefaultExecutor：RunAction 返回 result → engine 回调
+	//   - RemoteExecutor：HTTP POST 返回 result → engine 回调
+	//   - executorapi.Server：不回调（纯 HTTP executor 模式，engine 在客户端）
+	result, _ := exec.RunAction(
 		ctx, inst, input, actionEx.ID, safeRerun, execCtx, "", timeoutDur,
 	)
 
-	// DefaultExecutor 内部已经通过 engineClient.OnActionComplete 更新了状态。
+	// engine 层统一回调 OnActionComplete
+	if actionEx.ID != "" {
+		if result == nil {
+			result = &db.Result{}
+		}
+		if err := e.OnActionComplete(ctx, actionEx.ID, result, false); err != nil {
+			log.Printf("DispatchAction: OnActionComplete(%s) failed: %v", actionEx.ID, err)
+		}
+	}
+
 	return e.store.ActionExecutions().Get(actionExID)
 }
 
