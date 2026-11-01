@@ -4,11 +4,29 @@
 // but uses gorm.io/gorm + gorm.io/driver/sqlite for the Go ecosystem.
 // All interface{} fields (RuntimeContext, Input, Output, etc.) are
 // serialized as JSON text columns.
+//
+// Driver model (Python-aligned for multi-process):
+//
+//	SQLite (single-process tests)
+//	  RunInTransaction → rawLock process-level serialisation
+//	  Lock              → process-level rlocks map
+//	  CRUD              → currentDB() = top-level pool (no real tx)
+//
+//	PostgreSQL / MySQL (production)
+//	  RunInTransaction → rawLock + gorm.DB.Transaction (SQL BEGIN/COMMIT)
+//	  Lock              → sqlNamedLock (INSERT named_locks unique wait)
+//	  CRUD              → currentDB() = tx handle (atomic with transaction)
+//
+// SQLite can't do true concurrent transactions — one writer at a time on
+// a single connection — so we fall back to process-level serialisation
+// and skip real SQL transactions. PG/MySQL support full multi-process
+// coordination via named_locks INSERT unique-constraint blocking.
 package db
 
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,55 +35,85 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// NewSQLStore creates a GORM-backed Store using SQLite (file or :memory:).
-// Example: NewSQLStore("/tmp/mistral.db") or NewSQLStore(":memory:")
+// Driver identifies the SQL backend — drives which concurrency model we use.
+type Driver string
+
+const (
+	DriverSQLite   Driver = "sqlite"
+	DriverPostgres Driver = "postgres"
+	DriverMySQL    Driver = "mysql"
+)
+
+// NewSQLStore opens a GORM Store on the given DSN.
+//   - sqlite  DSNs (":memory:", "/tmp/foo.db")  → DriverSQLite
+//   - postgres DSNs ("postgres://...")          → DriverPostgres
+//   - mysql    DSNs ("user:pass@tcp(...)/...")  → DriverMySQL
+//
+// The driver determines the concurrency model (see package doc).
 func NewSQLStore(dsn string) (Store, error) {
 	var gormDB *gorm.DB
 	var err error
 
-	if dsn == ":memory:" {
-		// :memory: opens a fresh DB per connection — force a single connection
-		// pool so AutoMigrate tables are visible, and sqlite doesn't need
-		// concurrent-transaction support (rawLock serialises RunInTransaction).
-		gormDB, err = gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
-			Logger: logger.Default.LogMode(logger.Warn),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("open sqlite :memory:: %w", err)
-		}
-		sqlDB, _ := gormDB.DB()
-		sqlDB.SetMaxOpenConns(1)
-		sqlDB.SetMaxIdleConns(1)
-	} else {
+	driver := detectDriver(dsn)
+
+	if driver == DriverSQLite {
 		gormDB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
 			Logger: logger.Default.LogMode(logger.Warn),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("open sqlite %s: %w", dsn, err)
 		}
+		if dsn == ":memory:" {
+			// :memory: opens a fresh DB per connection — force single pool
+			// so AutoMigrate tables are visible. rawLock serialises writes.
+			sqlDB, _ := gormDB.DB()
+			sqlDB.SetMaxOpenConns(1)
+			sqlDB.SetMaxIdleConns(1)
+		}
+	} else {
+		return nil, fmt.Errorf("driver %q not yet implemented — use pgx/MySQL driver; sqlite is the only supported backend today", driver)
 	}
+
 	if err := gormDB.AutoMigrate(
 		&gWorkflowDef{}, &gActionDef{}, &gWfEx{}, &gTaskEx{}, &gActEx{}, &gEnv{}, &gCronTrigger{}, &gScheduledJob{},
 		&gWorkbook{}, &gDynamicActionDef{}, &gEventTrigger{}, &gResourceMember{}, &gNamedLock{}, &gCodeSource{}, &gMistralMetrics{},
 	); err != nil {
 		return nil, fmt.Errorf("autmigrate: %w", err)
 	}
-	return &sqlStore{db: gormDB, rlocks: make(map[string]*reentrantLock)}, nil
+	return &sqlStore{
+		db:     gormDB,
+		driver: driver,
+		rlocks: make(map[string]*reentrantLock),
+	}, nil
+}
+
+// detectDriver picks DriverX from a DSN string prefix.
+func detectDriver(dsn string) Driver {
+	low := strings.ToLower(dsn)
+	switch {
+	case strings.HasPrefix(low, "postgres://"), strings.HasPrefix(low, "postgresql://"):
+		return DriverPostgres
+	case strings.Contains(low, "@tcp("): // mysql DSN shape
+		return DriverMySQL
+	default:
+		return DriverSQLite
+	}
 }
 
 // sqlStore is the top-level aggregate that implements Store.
 //
-// RunInTransaction wraps fn in a real gorm.DB.Transaction — SQL BEGIN/COMMIT
-// so all CRUD inside lands in one atomic unit. This is critical for multi-
-// process coordination: named_locks INSERT (Store.Lock) only blocks when
-// both sides are inside a transaction (PostgreSQL unique-constraint wait).
+// driver selects the concurrency model — see package doc.
 //
-// tx is set/unset by RunInTransaction — CRUD helpers use currentDB() which
-// prefers tx when set, falls back to s.db otherwise. rawLock is still held
-// as a process-level guard (SQLite + test determinism).
+//	SQLite → rawLock serialisation + in-process rlocks (no real SQL tx)
+//	PG/MySQL → gorm.Transaction + sqlNamedLock (multi-process safe)
+//
+// tx is the active gorm.DB handle while inside RunInTransaction — set by
+// gorm.Transaction's callback. currentDB() prefers s.tx when non-nil so
+// every CRUD inside RunInTransaction lands in the same transaction.
 type sqlStore struct {
 	db        *gorm.DB
-	tx        *gorm.DB // set inside RunInTransaction (gorm.Transaction callback)
+	driver    Driver
+	tx        *gorm.DB // set inside gorm.Transaction callback (PG/MySQL only)
 	locks     map[string]bool
 	locksChan map[string]chan struct{}
 	mu        txRWMutex
@@ -102,20 +150,25 @@ func (s *sqlStore) MistralMetrics() MistralMetricsStore  { return &sqlMistralMet
 
 // Lock returns a per-named re-entrant mutex.
 //
-// For SQLite (single-process test mode) we use an in-process reentrantLock
-// identical to InMemoryStore — rawLock already serialises RunInTransaction
-// so named_locks INSERT would be redundant. Production PostgreSQL/MySQL
-// should switch this to sqlNamedLock (INSERT into named_locks table) which
-// is how Python Mistral coordinates across engine processes.
+// Driver selects the coordination layer:
+//
+//	SQLite   → in-process reentrantLock (process-level serialisation)
+//	PG/MySQL → sqlNamedLock (INSERT into named_locks table, unique
+//	           constraint blocks cross-process — Python Mistral pattern)
 func (s *sqlStore) Lock(name string) ReentrantLock {
-	s.rlocksMu.Lock()
-	defer s.rlocksMu.Unlock()
-	if l, ok := s.rlocks[name]; ok {
+	switch s.driver {
+	case DriverPostgres, DriverMySQL:
+		return &sqlNamedLock{store: s, name: name}
+	default: // DriverSQLite
+		s.rlocksMu.Lock()
+		defer s.rlocksMu.Unlock()
+		if l, ok := s.rlocks[name]; ok {
+			return l
+		}
+		l := newReentrantLock()
+		s.rlocks[name] = l
 		return l
 	}
-	l := newReentrantLock()
-	s.rlocks[name] = l
-	return l
 }
 
 func (s *sqlStore) AcquireLock(name string) error {
@@ -160,16 +213,22 @@ func (s *sqlStore) RunInTransaction(fn func(Store) error) error {
 	enterTx()
 	defer exitTx()
 
-	// For PostgreSQL/MySQL this would wrap in s.db.Transaction(fn) so we
-	// get real SQL BEGIN/COMMIT/ROLLBACK plus cross-process named_lock
-	// blocking. SQLite (and :memory: test mode) can't do true concurrent
-	// transactions — one connection, one writer at a time — so the
-	// process-level rawLock above is the serialisation boundary.
+	// Driver selects the atomicity layer:
+	//   SQLite  → rawLock only (no real SQL tx — single connection)
+	//   PG/MySQL → rawLock + gorm.DB.Transaction (SQL BEGIN/COMMIT/ROLLBACK)
 	//
-	// Engine internals (CRUD, Lock) use currentDB() which prefers s.tx when
-	// set — when we ARE inside a real gorm.Transaction it naturally flows
-	// through. For now SQLite uses s.db directly.
-	return fn(s)
+	// rawLock is kept for ALL drivers — it cheaply serialises engine entries
+	// within a process so multi-connection pools don't contend for writes.
+	switch s.driver {
+	case DriverPostgres, DriverMySQL:
+		return s.db.Transaction(func(tx *gorm.DB) error {
+			s.tx = tx
+			defer func() { s.tx = nil }()
+			return fn(s)
+		})
+	default: // DriverSQLite
+		return fn(s)
+	}
 }
 
 // --- JSON helpers: serialize interface{} to/from TEXT columns ---
