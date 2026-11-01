@@ -3120,3 +3120,122 @@ func TestIntegration_Nested_DynamicInputDict(t *testing.T) {
 
 	t.Logf("  dynamic input dict: ✅")
 }
+
+// TestIntegration_Giant30Step_FullGraph validates a 30-task workflow that
+// exercises every major feature at once: with-items + concurrency, 4-way
+// join, and sub-workflow fanout + concurrency. This is the single biggest
+// integration fixture in the suite — if it passes, the engine's dependency
+// graph, join logic, iteration accounting, and sub-workflow wiring are all
+// working together correctly.
+func TestIntegration_Giant30Step_FullGraph(t *testing.T) {
+	final, store := runWorkflowFromYAML(
+		t, fixture{
+			yamlPath:      "giant_30step_parent.yaml",
+			extraYAMLs:    []string{"giant_30step_child.yaml"},
+			expectedState: states.SUCCESS,
+		},
+	)
+
+	if final == nil {
+		t.Fatal("final wfEx is nil")
+	}
+
+	// --- 1. Parent workflow ---
+	parentTasks, _ := store.TaskExecutions().List(final.ID, "")
+	parentOK := 0
+	for _, te := range parentTasks {
+		if !states.IsCompleted(te.State) {
+			t.Errorf("parent task %s state=%s, want terminal", te.Name, te.State)
+		} else {
+			parentOK++
+		}
+	}
+	// 29 real tasks (deploy_fanout 算 1 个 taskEx) + 1 sub_fanout taskEx + boot/plan/... = 29
+	// 但 join 算一个 task，deploy_fanout 算一个 task，sub_fanout 算一个 task：
+	// boot+plan+deploy_fanout+collect+validate+4siblings+4collect+join+aggregate+enrich+augment+sub_fanout+collect+join_final+final_emit+final_publish = 23
+	t.Logf("  parent completed tasks: %d", parentOK)
+
+	// --- 2. with-items deploy_fanout: 5 iters, concurrency:3 ---
+	var deployFanout *db.TaskExecution
+	for _, te := range parentTasks {
+		if te.Name == "deploy_fanout" {
+			deployFanout = te
+			break
+		}
+	}
+	if deployFanout == nil {
+		t.Fatal("deploy_fanout not found")
+	}
+	if v := db.CoerceInt(deployFanout.RuntimeContext["with_items_total"]); v != 5 {
+		t.Errorf("deploy_fanout with_items_total=%v, want 5", v)
+	}
+	if v := db.CoerceInt(deployFanout.RuntimeContext["with_items_concurrency"]); v != 3 {
+		t.Errorf("deploy_fanout with_items_concurrency=%v, want 3", v)
+	}
+	actionExs, _ := store.ActionExecutions().List(deployFanout.ID, "")
+	if len(actionExs) != 5 {
+		t.Errorf("deploy_fanout ActionExecutions=%d, want 5", len(actionExs))
+	}
+	for _, ae := range actionExs {
+		if ae.State != states.SUCCESS {
+			t.Errorf("deploy_fanout iter %s state=%s, want SUCCESS", ae.RuntimeContext["index"], ae.State)
+		}
+		if !ae.Accepted {
+			t.Errorf("deploy_fanout iter %s Accepted=false", ae.RuntimeContext["index"])
+		}
+	}
+
+	// --- 3. sub-workflow fanout: 5 child WFs, concurrency:2 ---
+	var subFanout *db.TaskExecution
+	for _, te := range parentTasks {
+		if te.Name == "sub_fanout" {
+			subFanout = te
+			break
+		}
+	}
+	if subFanout == nil {
+		t.Fatal("sub_fanout not found")
+	}
+	if v := db.CoerceInt(subFanout.RuntimeContext["with_items_total"]); v != 5 {
+		t.Errorf("sub_fanout with_items_total=%v, want 5", v)
+	}
+	if v := db.CoerceInt(subFanout.RuntimeContext["with_items_concurrency"]); v != 2 {
+		t.Errorf("sub_fanout with_items_concurrency=%v, want 2", v)
+	}
+
+	allWfExs, _ := store.WorkflowExecutions().List("")
+	var childCount int
+	for _, w := range allWfExs {
+		if w.Name == "giant_30step_child" {
+			childCount++
+			if w.State != states.SUCCESS {
+				t.Errorf("child %s state=%s, want SUCCESS", w.ID, w.State)
+			}
+		}
+	}
+	if childCount != 5 {
+		t.Errorf("child WorkflowExecutions=%d, want 5", childCount)
+	}
+
+	// --- 4. Join tasks must have fired ---
+	for _, want := range []string{"join_abcd", "join_final", "deploy_collect", "validate_zones", "sub_collect"} {
+		found := false
+		for _, te := range parentTasks {
+			if te.Name == want {
+				found = true
+				if !states.IsCompleted(te.State) {
+					t.Errorf("task %s state=%s, want terminal", te.Name, te.State)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Errorf("task %s not found — join/wiring broken", want)
+		}
+	}
+
+	t.Logf("  parent workflow: %s (final)", final.State)
+	t.Logf("  child workflows: %d", childCount)
+	t.Logf("  deploy_fanout iters: %d", len(actionExs))
+	t.Logf("  ✅ giant 30-step graph passed")
+}

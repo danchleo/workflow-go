@@ -1,0 +1,196 @@
+version: "2.0"
+name: giant_30step_parent
+description: "30-task integration: sub-workflow + with-items(5,concurrency:3) + 4-way join + sub-workflow fanout(5,concurrency:2)"
+
+tasks:
+  # === Phase 1: boot ===
+  boot:                    # step 1
+    action: std.echo
+    input:
+      output: "step-1-boot"
+    on-success:
+      - plan
+
+  plan:                    # step 2
+    action: std.echo
+    input:
+      output: "step-2-plan"
+    publish:
+      targets:
+        - "a"
+        - "b"
+        - "c"
+        - "d"
+    on-success:
+      - deploy_fanout
+
+  # === Phase 2: with-items fanout of 5, concurrency:3 ===
+  deploy_fanout:
+    action: std.echo
+    input:
+      output: "deploy-<% $.zone %>"
+    with-items:
+      zone:
+        - "zone-alpha"
+        - "zone-beta"
+        - "zone-gamma"
+        - "zone-delta"
+        - "zone-epsilon"
+    concurrency: 3
+    publish:
+      zones_done: "<% task('deploy_fanout').result %>"
+    on-success:
+      - deploy_collect
+
+  deploy_collect:          # step 8
+    action: std.echo
+    input:
+      output: "step-8-deploy-collect"
+    on-success:
+      - validate_zones
+
+  validate_zones:          # step 9
+    action: std.echo
+    input:
+      output: "step-9-validate-zones"
+    on-success:
+      - sibling_a
+      - sibling_b
+      - sibling_c
+      - sibling_d
+
+  # === Phase 3: 4 parallel siblings, each leads to a join ===
+  sibling_a:               # step 10
+    action: std.echo
+    input:
+      output: "step-10-a"
+    on-success:
+      - collect_a
+
+  sibling_b:               # step 11
+    action: std.echo
+    input:
+      output: "step-11-b"
+    on-success:
+      - collect_b
+
+  sibling_c:               # step 12
+    action: std.echo
+    input:
+      output: "step-12-c"
+    on-success:
+      - collect_c
+
+  sibling_d:               # step 13
+    action: std.echo
+    input:
+      output: "step-13-d"
+    on-success:
+      - collect_d
+
+  collect_a:               # step 14
+    action: std.echo
+    input:
+      output: "step-14-collect-a"
+    on-success:
+      - join_abcd
+
+  collect_b:               # step 15
+    action: std.echo
+    input:
+      output: "step-15-collect-b"
+    on-success:
+      - join_abcd
+
+  collect_c:               # step 16
+    action: std.echo
+    input:
+      output: "step-16-collect-c"
+    on-success:
+      - join_abcd
+
+  collect_d:               # step 17
+    action: std.echo
+    input:
+      output: "step-17-collect-d"
+    on-success:
+      - join_abcd
+
+  # === Phase 4: 4-way join ===
+  join_abcd:               # step 18
+    action: std.echo
+    input:
+      output: "step-18-join-all-four"
+    publish:
+      all_siblings: "<% task('collect_a').result %>|<% task('collect_b').result %>|<% task('collect_c').result %>|<% task('collect_d').result %>"
+    on-success:
+      - aggregate
+
+  aggregate:               # step 19
+    action: std.echo
+    input:
+      output: "step-19-aggregate"
+    on-success:
+      - enrich
+
+  enrich:                  # step 20
+    action: std.echo
+    input:
+      output: "step-20-enrich"
+    on-success:
+      - augment
+
+  augment:                 # step 21
+    action: std.echo
+    input:
+      output: "step-21-augment"
+    on-success:
+      - sub_fanout
+
+  # === Phase 5: sub-workflow fanout of 5, concurrency:2 ===
+  sub_fanout:
+    workflow: giant_30step_child
+    input:
+      iter: "<% $.iter %>"
+    with-items:
+      iter:
+        - "iter-1"
+        - "iter-2"
+        - "iter-3"
+        - "iter-4"
+        - "iter-5"
+    concurrency: 2
+    on-success:
+      - sub_collect
+
+  sub_collect:             # step 27
+    action: std.echo
+    input:
+      output: "step-27-sub-collect"
+    on-success:
+      - join_final
+
+  # === Phase 6: final join ===
+  join_final:              # step 28
+    action: std.echo
+    input:
+      output: "step-28-final-join"
+    on-success:
+      - final_emit
+
+  final_emit:              # step 29
+    action: std.echo
+    input:
+      output: "step-29-final-emit"
+    on-success:
+      - final_publish
+
+  final_publish:           # step 30
+    action: std.echo
+    input:
+      output: "step-30-final-publish"
+
+output:
+  result: "giant-30step-done"
+  deploy: "<% $.zones_done %>"
+  joined: "<% $.all_siblings %>"

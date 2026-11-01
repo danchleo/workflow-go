@@ -11,7 +11,10 @@ import (
 // InMemoryStore provides an in-memory implementation of the Store interface.
 // Suitable for development, testing, and small deployments.
 type InMemoryStore struct {
-	mu sync.RWMutex
+	// txRWMutex: No-OPs when inside RunInTransaction (inTx==true).
+	// This is how RunInTransaction avoids deadlock — it already holds
+	// the serialisation boundary, so per-CRUD locks skip. See txRWMutex below.
+	mu txRWMutex
 
 	workflowDefs    map[string]*WorkflowDefinition
 	actionDefs      map[string]*ActionDefinition
@@ -30,7 +33,51 @@ type InMemoryStore struct {
 
 	// Locks: map of lock name -> channel used for simple mutex semantics.
 	locks map[string]chan struct{}
+
+	// Named re-entrant locks used by engine for per-workflow serialisation.
+	// The SQL backend implementation INSERTs into the named_locks table
+	// (Python-compatible unique-constraint lock); InMemory falls back to
+	// a per-name recursiveMutex that is also skipped inside RunInTransaction.
+	rlocksMu sync.Mutex
+	rlocks   map[string]*reentrantLock
 }
+
+// txRWMutex wraps sync.RWMutex but NO-OPs all operations when the current
+// goroutine is inside RunInTransaction. This matches the Python Mistral
+// model where the transaction itself is the serialisation boundary — CRUD
+// methods inside a transaction don't need their own lock.
+//
+// Without this we'd deadlock: RunInTransaction holds s.mu.Lock (write), then
+// fn() calls amExecStore.Get() which tries s.mu.RLock (read) — Go's stdlib
+// RWMutex does not let a write-lock holder re-acquire a read lock.
+type txRWMutex struct{ m sync.RWMutex }
+
+func (m *txRWMutex) Lock() {
+	if !inTx() {
+		m.m.Lock()
+	}
+}
+func (m *txRWMutex) Unlock() {
+	if !inTx() {
+		m.m.Unlock()
+	}
+}
+func (m *txRWMutex) RLock() {
+	if !inTx() {
+		m.m.RLock()
+	}
+}
+func (m *txRWMutex) RUnlock() {
+	if !inTx() {
+		m.m.RUnlock()
+	}
+}
+
+// rawLock / rawUnlock bypass the inTx check — only RunInTransaction uses
+// these because it IS the serialisation boundary and must actually hold
+// the lock before calling enterTx.
+func (m *txRWMutex) rawLock()   { m.m.Lock() }
+func (m *txRWMutex) rawUnlock() { m.m.Unlock() }
 
 // NewInMemoryStore creates a new in-memory store.
 func NewInMemoryStore() *InMemoryStore {
@@ -50,7 +97,24 @@ func NewInMemoryStore() *InMemoryStore {
 		codeSources:     make(map[string]*CodeSource),
 		metrics:         make(map[string]*MistralMetrics),
 		locks:           make(map[string]chan struct{}),
+		rlocks:          make(map[string]*reentrantLock),
 	}
+}
+
+// Lock returns a per-named re-entrant mutex. This is the Go equivalent of
+// Python Mistral's DB advisory locks (per-workflow). For production SQL
+// backends (PostgreSQL/MySQL), replace the in-process map with real
+// pg_advisory_lock / MySQL GET_LOCK calls so multiple engine processes
+// coordinate at the DB server level — exactly what Python does.
+func (s *InMemoryStore) Lock(name string) ReentrantLock {
+	s.rlocksMu.Lock()
+	defer s.rlocksMu.Unlock()
+	if l, ok := s.rlocks[name]; ok {
+		return l
+	}
+	l := newReentrantLock()
+	s.rlocks[name] = l
+	return l
 }
 
 func (s *InMemoryStore) WorkflowDefinitions() WorkflowDefinitionStore { return &wmDefStore{s} }
@@ -94,8 +158,18 @@ func (s *InMemoryStore) ReleaseLock(name string) error {
 }
 
 func (s *InMemoryStore) RunInTransaction(fn func(Store) error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// Outermost call grabs the global serialisation boundary BEFORE enterTx
+	// — enterTx makes txRWMutex skip per-CRUD locks inside fn, so a real
+	// lock MUST be held to protect all in-memory maps (wfExecs, taskExecs,
+	// rlocks, locks…). Nested RunInTransaction (same goroutine, txDepth > 0
+	// before enterTx) re-uses the outer lock — PostgreSQL savepoint style.
+	depthBefore := txDepth()
+	if depthBefore == 0 {
+		s.mu.rawLock()
+		defer s.mu.rawUnlock()
+	}
+	enterTx()
+	defer exitTx()
 	return fn(s)
 }
 

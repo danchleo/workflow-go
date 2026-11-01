@@ -19,7 +19,6 @@ import (
 	"github.com/danchleo/workflow-go/internal/workflow"
 )
 
-// DefaultEngine is the main engine implementation.
 // Ported from mistral-master/mistral/engine/default_engine.py
 type DefaultEngine struct {
 	store      db.Store
@@ -409,7 +408,7 @@ func (e *DefaultEngine) StartWorkflow(
 	ctrl := workflow.GetController(wfEx, wfSpec, tasks)
 	cmds := ctrl.ContinueWorkflow(nil)
 
-	if err := e.dispatcher.DispatchWorkflowCommands(wfEx, cmds); err != nil {
+	if err := e.dispatcher.DispatchWorkflowCommands(wfEx, cmds, ptx); err != nil {
 		return wfEx, err
 	}
 
@@ -487,7 +486,7 @@ func (e *DefaultEngine) ResumeWorkflow(ctx context.Context, wfExID string, env m
 		return err
 	}
 
-	return e.dispatcher.DispatchWorkflowCommands(wfEx, cmds)
+	return e.dispatcher.DispatchWorkflowCommands(wfEx, cmds, ptx)
 }
 
 // StopWorkflow sets a workflow to a terminal state.
@@ -600,7 +599,7 @@ func (e *DefaultEngine) RerunWorkflow(
 		cmds = ctrl.RerunTasks([]*db.TaskExecution{taskEx}, reset)
 	}
 
-	if err := e.dispatcher.DispatchWorkflowCommands(wfEx, cmds); err != nil {
+	if err := e.dispatcher.DispatchWorkflowCommands(wfEx, cmds, ptx); err != nil {
 		return err
 	}
 
@@ -621,7 +620,7 @@ func (e *DefaultEngine) RerunWorkflow(
 		}
 		next := ctrl.ContinueWorkflow(skipTaskEx)
 		if len(next) > 0 {
-			if err := e.dispatcher.DispatchWorkflowCommands(wfEx, next); err != nil {
+			if err := e.dispatcher.DispatchWorkflowCommands(wfEx, next, ptx); err != nil {
 				return err
 			}
 		}
@@ -639,14 +638,13 @@ func (e *DefaultEngine) RerunWorkflow(
 	return nil
 }
 
-// StartTask runs a task execution.
+// StartTask runs a task execution — wrapper that creates its own PostTxQueue.
+// Use StartTaskWithQueue when caller wants to control Drain timing (avoids
+// deadlock when nested inside RunInTransaction).
 func (e *DefaultEngine) StartTask(
 	ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool,
 	reset bool,
 ) error {
-	// Python @post_tx_queue.run 等价：每个 engine 入口方法拥有自己的 queue，
-	// 方法返回后异步 goroutine 跑队列 —— 完全脱离调用栈。
-	// AutoExecute=false 时跳过整个 post-tx 机制（测试手动驱动用）。
 	var ptx *PostTxQueue
 	if e.AutoExecute {
 		ptx = NewPostTxQueue()
@@ -654,7 +652,30 @@ func (e *DefaultEngine) StartTask(
 		defer func() { ptx.Drain() }()
 		defer e.inflightWg.Done()
 	}
+	return e.StartTaskWithQueue(ctx, ptx, taskExID, firstRun, waiting, triggeredBy, rerun, reset)
+}
 
+// StartTask runs a task execution.
+func (e *DefaultEngine) StartTaskWithQueue(
+	ctx context.Context, ptx *PostTxQueue, taskExID string, firstRun bool, waiting bool,
+	triggeredBy []map[string]interface{}, rerun bool, reset bool,
+) error {
+	// Caller-supplied ptx is preferred — ensures DispatchAction callbacks are
+	// registered to the outermost engine-entry queue so Drain happens AFTER
+	// RunInTransaction releases rawLock (no deadlock on nested Drain).
+	// If caller didn't supply, fall back to creating a local one with its own
+	// Drain (slightly suboptimal but correct).
+	var drainOwnPtx bool
+	if ptx == nil && e.AutoExecute {
+		ptx = NewPostTxQueue()
+		drainOwnPtx = true
+		e.inflightWg.Add(1)
+		defer func() {
+			ptx.Drain()
+			e.inflightWg.Done()
+		}()
+	}
+	_ = drainOwnPtx // suppress unused warning
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -705,6 +726,34 @@ func (e *DefaultEngine) StartTask(
 	// Evaluate action input.
 	inputDict := evaluateTaskInput(taskSpec, taskEx.InContext, wfEx.Input, wfEx.Context)
 	taskEx.RuntimeContext["resolved_input"] = inputDict
+
+	// ================================================================
+	// IDEMPOTENCY GUARD
+	// ================================================================
+	// Block StartTask if ANY actionEx exists — regardless of state.
+	// OnActionComplete already advances downstream tasks when the LAST
+	// actionEx completes; calling StartTask again just creates duplicates.
+	// Exception: all actionEx are ERROR → rerun/retry path legitimately re-starts.
+	existing, _ := e.store.ActionExecutions().List(taskEx.ID, "")
+	if len(existing) > 0 {
+		allError := true
+		for _, ae := range existing {
+			if ae.State != states.ERROR {
+				allError = false
+				break
+			}
+		}
+		if !allError {
+			return nil
+		}
+	}
+	// child WorkflowExecution guard (sub-workflow tasks create child WFs, not actionEx)
+	taskExChildWfs, _ := e.store.WorkflowExecutions().List("")
+	for _, cw := range taskExChildWfs {
+		if cw.TaskExecutionID == taskEx.ID && !states.IsCompleted(cw.State) {
+			return nil
+		}
+	}
 
 	// ================================================================
 	// PauseBeforePolicy — mirror Python policies.py PauseBeforePolicy.
@@ -1108,9 +1157,6 @@ func (e *DefaultEngine) startWithItemsIter(
 func (e *DefaultEngine) OnActionComplete(
 	ctx context.Context, actionExID string, result *db.Result, wfAction bool,
 ) error {
-	// Python @post_tx_queue.run 等价 — OnActionComplete 里的异步动作
-	// （refreshTaskState 调 continueTask 后可能又启动 with-items capacity
-	//  迭代）通过这个 queue 延迟到返回后。
 	var ptx *PostTxQueue
 	if e.AutoExecute {
 		ptx = NewPostTxQueue()
@@ -1118,6 +1164,39 @@ func (e *DefaultEngine) OnActionComplete(
 		defer func() { ptx.Drain() }()
 		defer e.inflightWg.Done()
 	}
+	wfExID, err := e.resolveWfExID(actionExID)
+	if err != nil {
+		return err
+	}
+	return e.store.RunInTransaction(func(tx db.Store) error {
+		tx.Lock("wf:" + wfExID).Lock()
+		defer tx.Lock("wf:" + wfExID).Unlock()
+		return e.onActionCompleteLocked(ptx, ctx, actionExID, result, wfAction)
+	})
+}
+
+// resolveWfExID follows actionEx → taskEx → wfEx, or child wfEx → parent taskEx → parent wfEx.
+func (e *DefaultEngine) resolveWfExID(id string) (string, error) {
+	// Try ActionExecution first (regular action tasks).
+	if actionEx, _ := e.store.ActionExecutions().Get(id); actionEx != nil {
+		if taskEx, err := e.store.TaskExecutions().Get(actionEx.TaskExecutionID); err == nil && taskEx != nil {
+			return taskEx.WorkflowExecutionID, nil
+		}
+	}
+	// Fallback: sub-workflow — the ID is a child WorkflowExecution.
+	if wfEx, _ := e.store.WorkflowExecutions().Get(id); wfEx != nil {
+		if taskEx, err := e.store.TaskExecutions().Get(wfEx.TaskExecutionID); err == nil && taskEx != nil {
+			return taskEx.WorkflowExecutionID, nil
+		}
+	}
+	return "", fmt.Errorf("cannot resolve wfExID from %s", id)
+}
+
+func (e *DefaultEngine) onActionCompleteLocked(
+	ptx *PostTxQueue, ctx context.Context, actionExID string, result *db.Result, wfAction bool,
+) error {
+	// ptx passed in from caller (OnActionComplete) — used by DispatchWorkflowCommands
+	// → StartTaskWithQueue so DispatchAction callbacks register outermost queue.
 
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -1588,7 +1667,7 @@ func (e *DefaultEngine) OnActionComplete(
 		wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
 		ctrl := workflow.GetController(wfEx, wfSpec, tasks)
 		cmds := ctrl.ContinueWorkflow(taskEx)
-		if err := e.dispatcher.DispatchWorkflowCommands(wfEx, cmds); err != nil {
+		if err := e.dispatcher.DispatchWorkflowCommands(wfEx, cmds, ptx); err != nil {
 			return err
 		}
 
@@ -1861,6 +1940,22 @@ func (e *DefaultEngine) forceFailWorkflow(wfEx *db.WorkflowExecution, reason str
 // task that just completed — passed through so workflow policies like
 // direct-join can observe it.
 func (e *DefaultEngine) advanceWorkflow(wfExID string, doneTaskExID string) {
+	var ptx *PostTxQueue
+	if e.AutoExecute {
+		ptx = NewPostTxQueue()
+		e.inflightWg.Add(1)
+		defer func() { ptx.Drain() }()
+		defer e.inflightWg.Done()
+	}
+	e.store.RunInTransaction(func(tx db.Store) error {
+		tx.Lock("wf:" + wfExID).Lock()
+		defer tx.Lock("wf:" + wfExID).Unlock()
+		e.advanceWorkflowLocked(ptx, wfExID, doneTaskExID)
+		return nil
+	})
+}
+
+func (e *DefaultEngine) advanceWorkflowLocked(ptx *PostTxQueue, wfExID string, doneTaskExID string) {
 	wfEx, err := e.store.WorkflowExecutions().Get(wfExID)
 	if err != nil || wfEx == nil {
 		log.Printf("advanceWorkflow: wfEx %s not found: %v", wfExID, err)
@@ -1886,7 +1981,7 @@ func (e *DefaultEngine) advanceWorkflow(wfExID string, doneTaskExID string) {
 	ctrl := workflow.GetController(wfEx, wfSpec, tasks)
 	cmds := ctrl.ContinueWorkflow(doneTaskEx)
 
-	if err := e.dispatcher.DispatchWorkflowCommands(wfEx, cmds); err != nil {
+	if err := e.dispatcher.DispatchWorkflowCommands(wfEx, cmds, ptx); err != nil {
 		log.Printf("advanceWorkflow: DispatchWorkflowCommands failed: %v", err)
 		return
 	}
@@ -1895,14 +1990,11 @@ func (e *DefaultEngine) advanceWorkflow(wfExID string, doneTaskExID string) {
 		log.Printf("advanceWorkflow: checkAndCompleteWorkflow failed: %v", err)
 	}
 
-	// P0: same as OnActionComplete — wake up join tasks after deferred advance
-	// (wait-after policy path). doneTaskEx carries the freshly-completed task.
 	if doneTaskEx != nil {
 		e.checkAffectedTasks(doneTaskEx, wfEx)
 	}
 }
 
-// checkAndCompleteWorkflow checks if all tasks are done and the workflow should complete.
 func (e *DefaultEngine) checkAndCompleteWorkflow(
 	wfEx *db.WorkflowExecution, ctrl workflow.WorkflowController, wfSpec *v2.WorkflowSpec,
 ) error {
@@ -1910,7 +2002,6 @@ func (e *DefaultEngine) checkAndCompleteWorkflow(
 		return nil
 	}
 
-	// Count incomplete tasks.
 	tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
 	incomplete := 0
 	for _, te := range tasks {
@@ -1922,9 +2013,7 @@ func (e *DefaultEngine) checkAndCompleteWorkflow(
 		return nil
 	}
 
-	// All tasks completed.
 	finalCtx, _ := ctrl.EvaluateWorkflowFinalContext()
-
 	wfEx.State = states.SUCCESS
 	wfEx.Output = evaluateOutput(wfSpec.GetOutput(), finalCtx)
 
@@ -2156,7 +2245,21 @@ func (e *DefaultEngine) scheduleRefreshTaskState(taskExID string) {
 // refreshTaskState is the scheduler callback. It re-evaluates the join task's
 // logical state and either continues it, completes it with ERROR, or no-ops
 // if still waiting. Mirrors Python task_handler._refresh_task_state.
+//
+// IMPORTANT: this runs in a scheduler goroutine, NOT inside
+// RunInTransaction. All store access must go through RunInTransaction so we
+// grab the global rawLock — otherwise we deadlock against another goroutine
+// that already holds the write lock while waiting for us to finish.
 func (e *DefaultEngine) refreshTaskState(taskExID string) {
+	e.store.RunInTransaction(func(tx db.Store) error {
+		e.refreshTaskStateLocked(taskExID)
+		return nil
+	})
+}
+
+// refreshTaskStateLocked does the actual work — safe to call from inside
+// RunInTransaction (rawLock held, inTx==true, txRWMutex skips its per-CRUD locks).
+func (e *DefaultEngine) refreshTaskStateLocked(taskExID string) {
 	taskEx, err := e.store.TaskExecutions().Get(taskExID)
 	if err != nil || taskEx == nil {
 		log.Printf("refreshTaskState: taskEx %s not found: %v", taskExID, err)
@@ -2327,6 +2430,22 @@ func (e *DefaultEngine) OnActionUpdate(wfExID string) error {
 // clients) to fire an action without manual orchestration.
 // ================================================================
 func (e *DefaultEngine) DispatchAction(ctx context.Context, actionExID string) (*db.ActionExecution, error) {
+	wfExID, err := e.resolveWfExID(actionExID)
+	if err != nil {
+		return nil, err
+	}
+	var ret *db.ActionExecution
+	var retErr error
+	e.store.RunInTransaction(func(tx db.Store) error {
+		tx.Lock("wf:" + wfExID).Lock()
+		defer tx.Lock("wf:" + wfExID).Unlock()
+		ret, retErr = e.dispatchActionLocked(ctx, actionExID)
+		return nil
+	})
+	return ret, retErr
+}
+
+func (e *DefaultEngine) dispatchActionLocked(ctx context.Context, actionExID string) (*db.ActionExecution, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}

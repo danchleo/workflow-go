@@ -1,0 +1,26 @@
+version: "2.0"
+name: giant_30step_child
+description: "Child workflow called 5 times by parent's with-items fanout (concurrency:2)"
+
+tasks:
+  inner_start:
+    action: std.echo
+    input:
+      output: "child-start-<% $.iter %>"
+    on-success:
+      - inner_process
+
+  inner_process:
+    action: std.echo
+    input:
+      output: "child-process-<% $.iter %>"
+    on-success:
+      - inner_finish
+
+  inner_finish:
+    action: std.echo
+    input:
+      output: "child-finish-<% $.iter %>"
+
+output:
+  child_done: "child-<% $.iter %>-done"

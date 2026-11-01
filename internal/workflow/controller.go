@@ -374,8 +374,15 @@ func (c *DirectWorkflowController) findNextCommands(taskEx *db.TaskExecution) []
 			inboundSpecs := c.wfSpec.InboundTaskSpecs(nextTaskSpec)
 			inboundExecs := c.filterCompletedTasksForSpecs(inboundSpecs)
 
+			// Python default: if a task has multiple inbound sources but no
+			// explicit "join:" field, default to join=all. Single inbound →
+			// fire immediately (join effectively disabled).
 			shouldRun := true
-			if joinVal != nil {
+			if joinVal == nil {
+				if len(inboundSpecs) > 1 {
+					shouldRun = len(inboundExecs) >= len(inboundSpecs)
+				}
+			} else {
 				switch jv := joinVal.(type) {
 				case string:
 					if jv == "all" {

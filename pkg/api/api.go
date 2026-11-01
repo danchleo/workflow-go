@@ -141,7 +141,9 @@ func (s *Server) handleWorkflows(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleExecutions(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		wfExecs, err := s.store.WorkflowExecutions().List("")
+		q := r.URL.Query()
+		name := q.Get("workflow_name")
+		wfExecs, err := s.store.WorkflowExecutions().List(name)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -241,7 +243,10 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	tasks, err := s.store.TaskExecutions().List("", "")
+	q := r.URL.Query()
+	wfExID := q.Get("workflow_execution_id")
+	state := q.Get("state")
+	tasks, err := s.store.TaskExecutions().List(wfExID, state)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -254,7 +259,10 @@ func (s *Server) handleActionExecutions(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	actions, err := s.store.ActionExecutions().List("", "")
+	q := r.URL.Query()
+	taskExID := q.Get("task_execution_id")
+	state := q.Get("state")
+	actions, err := s.store.ActionExecutions().List(taskExID, state)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

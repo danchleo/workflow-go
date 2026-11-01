@@ -9,6 +9,7 @@ package db
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -49,14 +50,28 @@ func NewSQLStore(dsn string) (Store, error) {
 	); err != nil {
 		return nil, fmt.Errorf("autmigrate: %w", err)
 	}
-	return &sqlStore{db: gormDB}, nil
+	return &sqlStore{db: gormDB, rlocks: make(map[string]*reentrantLock)}, nil
 }
 
 // sqlStore is the top-level aggregate that implements Store.
+//
+// Currently uses the same process-level concurrency model as InMemoryStore
+// (txRWMutex + RunInTransaction global lock + enterTx/exitTx savepoint).
+// This keeps both backends identical for engine serialisation semantics.
+//
+// Production PostgreSQL/MySQL will switch RunInTransaction back to real
+// gorm.DB.Transaction() and Store.Lock to INSERT into named_locks table —
+// mirroring Python Mistral exactly. Engine internals must then pass tx
+// (the transaction's store) through every helper so all CRUD lands in the
+// same transaction.
 type sqlStore struct {
 	db        *gorm.DB
 	locks     map[string]bool
 	locksChan map[string]chan struct{}
+	mu        txRWMutex // process-level serialisation (temporary — see above)
+
+	rlocks   map[string]*reentrantLock
+	rlocksMu sync.Mutex
 }
 
 func (s *sqlStore) WorkflowDefinitions() WorkflowDefinitionStore { return &sqlWfDefStoreSQL{db: s.db} }
@@ -76,10 +91,20 @@ func (s *sqlStore) ResourceMembers() ResourceMemberStore { return &sqlResourceMe
 func (s *sqlStore) CodeSources() CodeSourceStore         { return &sqlCodeSourceStore{db: s.db} }
 func (s *sqlStore) MistralMetrics() MistralMetricsStore  { return &sqlMistralMetricsStore{db: s.db} }
 
+// Lock returns a per-named re-entrant mutex. In-process for now — see
+// struct comment for SQL backend notes on real DB advisory lock migration.
+func (s *sqlStore) Lock(name string) ReentrantLock {
+	s.rlocksMu.Lock()
+	defer s.rlocksMu.Unlock()
+	if l, ok := s.rlocks[name]; ok {
+		return l
+	}
+	l := newReentrantLock()
+	s.rlocks[name] = l
+	return l
+}
+
 func (s *sqlStore) AcquireLock(name string) error {
-	// Use an in-process named channel — good enough for :memory: SQLite
-	// and single-process file SQLite. For multi-process coordination,
-	// replace with a real advisory lock.
 	if s.locks == nil {
 		s.locks = make(map[string]bool)
 		s.locksChan = make(map[string]chan struct{})
@@ -113,10 +138,14 @@ func (s *sqlStore) ReleaseLock(name string) error {
 	return nil
 }
 func (s *sqlStore) RunInTransaction(fn func(Store) error) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		txn := &sqlStore{db: tx, locks: s.locks, locksChan: s.locksChan}
-		return fn(txn)
-	})
+	depthBefore := txDepth()
+	if depthBefore == 0 {
+		s.mu.rawLock()
+		defer s.mu.rawUnlock()
+	}
+	enterTx()
+	defer exitTx()
+	return fn(s)
 }
 
 // --- JSON helpers: serialize interface{} to/from TEXT columns ---

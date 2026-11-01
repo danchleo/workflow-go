@@ -104,11 +104,6 @@ func (q *PostTxQueue) Register(fn func(), inTx ...bool) {
 	}
 }
 
-// Drain fires all queued callbacks asynchronously in a new goroutine.
-// Mirrors Python's `threading.Thread(target=_within_new_thread).start()`
-// after an @run-decorated method returns. Callers MUST NOT register more
-// callbacks on this queue after calling Drain — it's a one-shot operation
-// (callbacks are cleared to nil after the goroutine starts).
 func (q *PostTxQueue) Drain() {
 	q.mu.Lock()
 	callbacks := q.callbacks
@@ -117,14 +112,23 @@ func (q *PostTxQueue) Drain() {
 	q.inTxCallbacks = nil
 	q.mu.Unlock()
 
-	if len(callbacks) == 0 && len(inTxCallbacks) == 0 {
+	all := append(callbacks, inTxCallbacks...)
+	if len(all) == 0 {
 		return
 	}
-	go q.runAll(callbacks, inTxCallbacks)
+	// Each callback fires in its own goroutine — different goroutines
+	// means each RunInTransaction inside gets a fresh rawLock (no re-entrant
+	// deadlock on sync.Mutex). Python equivalent: each @post_tx_queue.run
+	// op spawns its own Thread.
+	for _, cb := range all {
+		go safeRun(cb)
+	}
 }
 
-// DrainSync runs all callbacks synchronously. Used by integration tests
-// that need deterministic ordering without goroutine scheduling involved.
+// DrainSync runs all callbacks synchronously in the caller's goroutine,
+// preserving the order they were registered. Used by integration tests
+// that need deterministic execution and by callers that want to block
+// until all deferred engine operations complete.
 func (q *PostTxQueue) DrainSync() {
 	q.mu.Lock()
 	callbacks := q.callbacks
@@ -132,10 +136,6 @@ func (q *PostTxQueue) DrainSync() {
 	q.callbacks = nil
 	q.inTxCallbacks = nil
 	q.mu.Unlock()
-	q.runAll(callbacks, inTxCallbacks)
-}
-
-func (q *PostTxQueue) runAll(callbacks, inTxCallbacks []func()) {
 	for _, cb := range callbacks {
 		safeRun(cb)
 	}
@@ -164,13 +164,24 @@ type TaskStarter interface {
 		ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{},
 		rerun bool, reset bool,
 	) error
+	StartTaskWithQueue(
+		ctx context.Context, ptx *PostTxQueue, taskExID string, firstRun bool, waiting bool,
+		triggeredBy []map[string]interface{}, rerun bool, reset bool,
+	) error
 }
 
 // Dispatcher creates task executions from workflow commands and kicks them off.
 type Dispatcher struct {
 	store   db.Store
 	starter TaskStarter
+	mu      sync.Mutex // serialize startNewTask + StartTask chains (Python Engine._dispatch_lock)
 }
+
+// Lock / Unlock expose the dispatcher's internal mutex so callers (advanceWorkflow)
+// can serialize the entire dispatch chain — startNewTask → StartTask → DispatchAction
+// — against concurrent arrivals from scheduler goroutines and PostTxQueue drains.
+func (d *Dispatcher) Lock()   { d.mu.Lock() }
+func (d *Dispatcher) Unlock() { d.mu.Unlock() }
 
 // NewDispatcher creates a Dispatcher.
 func NewDispatcher(store db.Store, starter TaskStarter) *Dispatcher {
@@ -180,16 +191,16 @@ func NewDispatcher(store db.Store, starter TaskStarter) *Dispatcher {
 const backlogKey = "backlog_commands"
 
 // DispatchWorkflowCommands processes workflow commands from the controller.
-func (d *Dispatcher) DispatchWorkflowCommands(wfEx *db.WorkflowExecution, cmds []commands.WorkflowCommand) error {
+func (d *Dispatcher) DispatchWorkflowCommands(wfEx *db.WorkflowExecution, cmds []commands.WorkflowCommand, ptx *PostTxQueue) error {
 	// First process backlog commands (saved during pause).
 	backlogCmds := d.pollBacklog(wfEx)
 	if len(backlogCmds) > 0 {
-		if err := d.processCommands(wfEx, backlogCmds); err != nil {
+		if err := d.processCommands(wfEx, backlogCmds, ptx); err != nil {
 			return err
 		}
 	}
 	// Then process new commands.
-	return d.processCommands(wfEx, cmds)
+	return d.processCommands(wfEx, cmds, ptx)
 }
 
 func (d *Dispatcher) pollBacklog(wfEx *db.WorkflowExecution) []commands.WorkflowCommand {
@@ -287,10 +298,12 @@ func cmdKey(c commands.WorkflowCommand) string {
 	}
 }
 
-func (d *Dispatcher) processCommands(wfEx *db.WorkflowExecution, cmds []commands.WorkflowCommand) error {
+func (d *Dispatcher) processCommands(wfEx *db.WorkflowExecution, cmds []commands.WorkflowCommand, ptx *PostTxQueue) error {
 	if len(cmds) == 0 {
 		return nil
 	}
+	// NOTE: dispatcher mutex is held by caller (advanceWorkflow.Lock) —
+	// DO NOT nest another lock here (would deadlock).
 
 	cmds = rearrangeCommands(cmds)
 
@@ -319,9 +332,10 @@ func (d *Dispatcher) processCommands(wfEx *db.WorkflowExecution, cmds []commands
 			if err != nil {
 				return err
 			}
-			// Kick off the task immediately — this is where ActionExecution
-			// gets created for with-items and non-with-items tasks.
-			if err := d.starter.StartTask(context.Background(), taskExID, true, false, nil, false, false); err != nil {
+			// Kick off the task immediately — using StartTaskWithQueue with the
+			// caller's ptx so DispatchAction callbacks register to the outermost
+			// queue (Drain happens AFTER RunInTransaction releases rawLock).
+			if err := d.starter.StartTaskWithQueue(context.Background(), ptx, taskExID, true, false, nil, false, false); err != nil {
 				return err
 			}
 		case *commands.RunExistingTask:
@@ -372,6 +386,17 @@ func (d *Dispatcher) startNewTask(wfEx *db.WorkflowExecution, cmd *commands.RunT
 		return "", fmt.Errorf("task spec not found: %s", cmd.TaskName())
 	}
 
+	// Dedup: check existing taskEx first (must be BEFORE Create under the
+	// same dispatcher lock — otherwise two concurrent callers both pass
+	// the check and Create duplicate rows).
+	if existing, _ := d.store.TaskExecutions().List(wfEx.ID, ""); existing != nil {
+		for _, te := range existing {
+			if te.Name == taskSpec.GetName() {
+				return te.ID, nil
+			}
+		}
+	}
+
 	// Create task execution.
 	taskEx := &db.TaskExecution{
 		Name:                taskSpec.GetName(),
@@ -394,17 +419,6 @@ func (d *Dispatcher) startNewTask(wfEx *db.WorkflowExecution, cmd *commands.RunT
 	}
 	if cmd.TriggeredBy() != nil {
 		taskEx.RuntimeContext["triggered_by"] = cmd.TriggeredBy()
-	}
-
-	// Dedup: a task with the same name already exists (e.g. pause-before
-	// then resume creates a second RunTask command). Return existing ID
-	// instead of creating a duplicate row.
-	if existing, _ := d.store.TaskExecutions().List(wfEx.ID, ""); existing != nil {
-		for _, te := range existing {
-			if te.Name == taskSpec.GetName() {
-				return te.ID, nil
-			}
-		}
 	}
 
 	if err := d.store.TaskExecutions().Create(taskEx); err != nil {

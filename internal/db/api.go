@@ -169,11 +169,22 @@ type Store interface {
 	CodeSources() CodeSourceStore
 	MistralMetrics() MistralMetricsStore
 
-	// Lock management (named locks for concurrency control).
+	// Lock management.
+	//
+	// Lock(name) returns a per-named re-entrant mutex. The same goroutine
+	// can Lock the same name multiple times without deadlocking; different
+	// goroutines serialize. Engine uses "wf:<wfExID>" as the lock key —
+	// this is the Go equivalent of Python Mistral's DB-level advisory lock
+	// on workflow_execution. For SQL backends, replace the in-process map
+	// with real DB advisory locks (pg_advisory_lock / MySQL GET_LOCK) to
+	// support multi-process engine clusters like Python does.
+	Lock(name string) ReentrantLock
 	AcquireLock(lockName string) error
 	ReleaseLock(lockName string) error
 
-	// Transaction management.
+	// Transaction management — stores that support real SQL transactions
+	// (PostgreSQL, MySQL) expose this. InMemory's version wraps the same
+	// global mutex it uses for RunInTransaction — mostly a compat shim.
 	RunInTransaction(fn func(Store) error) error
 }
 

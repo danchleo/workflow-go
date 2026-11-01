@@ -1,10 +1,20 @@
 package v2
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/danchleo/workflow-go/internal/lang"
 )
+
+// deepCopyMap returns a deep copy of a map[string]interface{}.
+// Uses JSON round-trip — works for all YAML-parsed data (no channels/funcs).
+func deepCopyMap(m map[string]interface{}) map[string]interface{} {
+	b, _ := json.Marshal(m)
+	var out map[string]interface{}
+	_ = json.Unmarshal(b, &out)
+	return out
+}
 
 // Standard engine command names used in workflow DSL.
 const (
@@ -35,6 +45,11 @@ func NewWorkflowSpec(name string, data map[string]interface{}) (*WorkflowSpec, e
 	if data == nil {
 		return nil, fmt.Errorf("workflow data is nil")
 	}
+	// Deep-copy the input map — multiple goroutines may parse the same
+	// wfDef.Spec concurrently (engine scheduler vs DispatchAction, etc.),
+	// and we mutate data["name"] below. Mutating shared maps from concurrent
+	// goroutines triggers "concurrent map read and map write" fatal errors.
+	data = deepCopyMap(data)
 	data["name"] = name
 
 	s := &WorkflowSpec{
