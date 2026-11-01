@@ -1294,9 +1294,14 @@ func (e *DefaultEngine) onActionCompleteLocked(
 	}
 
 	// Handle with-items: defer task completion until all iterations finish.
-	// Python: task_ex.executions → filter(accepted=True) → 动态计数
-	// Go 对齐：RuntimeContext 只存 total/concurrency；done/failed/running 动态查 DB
+	// Python WithItemsTask.on_action_complete 每次 iteration 完成都先拿
+	// named_lock('with-items-' + task_ex.id) 再 refresh + 计数 + capacity 管理。
+	// PG/MySQL 多进程下两个 engine 同时收到不同 iteration completion → 必须串行化。
 	if _, hasSize := taskEx.RuntimeContext["with_items_total"]; hasSize {
+		lock := e.store.Lock("with-items-" + taskEx.ID)
+		lock.Lock()
+		defer lock.Unlock()
+
 		total := db.CoerceInt(taskEx.RuntimeContext["with_items_total"])
 		concurrency := db.CoerceInt(taskEx.RuntimeContext["with_items_concurrency"])
 
