@@ -300,8 +300,6 @@ func (e *DefaultEngine) StartWorkflow(
 	ctx context.Context, wfDefID, wfNamespace, wfExID string, wfInput map[string]interface{}, description string,
 	params map[string]interface{},
 ) (*db.WorkflowExecution, error) {
-	// Python @post_tx_queue.run — StartWorkflow → Dispatcher → StartTask →
-	// Register(DispatchAction) 异步执行。
 	var ptx *PostTxQueue
 	if e.AutoExecute {
 		ptx = NewPostTxQueue()
@@ -314,105 +312,101 @@ func (e *DefaultEngine) StartWorkflow(
 		return nil, ctx.Err()
 	}
 
-	var wfDefs = e.store.WorkflowDefinitions()
-	wfDef, err := wfDefs.Get(wfDefID)
-	if err != nil {
-		return nil, fmt.Errorf("workflow definition not found: %w", err)
-	}
+	var resultWfEx *db.WorkflowExecution
+	err := e.store.RunInTransaction(func(tx db.Store) error {
+		wfDefs := e.store.WorkflowDefinitions()
+		wfDef, err := wfDefs.Get(wfDefID)
+		if err != nil {
+			return fmt.Errorf("workflow definition not found: %w", err)
+		}
 
-	wfSpec, err := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
-	if err != nil {
-		return nil, fmt.Errorf("invalid workflow spec: %w", err)
-	}
+		wfSpec, err := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
+		if err != nil {
+			return fmt.Errorf("invalid workflow spec: %w", err)
+		}
 
-	// Validate and prepare input.
-	if wfInput == nil {
-		wfInput = make(map[string]interface{})
-	}
-	for k, v := range wfSpec.GetInput() {
-		if _, ok := wfInput[k]; !ok {
-			if v == lang.NotDefined {
-				return nil, fmt.Errorf("missing required input: %s", k)
+		if wfInput == nil {
+			wfInput = make(map[string]interface{})
+		}
+		for k, v := range wfSpec.GetInput() {
+			if _, ok := wfInput[k]; !ok {
+				if v == lang.NotDefined {
+					return fmt.Errorf("missing required input: %s", k)
+				}
+				wfInput[k] = v
 			}
-			wfInput[k] = v
 		}
-	}
 
-	// Create workflow execution.
-	wfEx := &db.WorkflowExecution{
-		Name:              wfDef.Name,
-		Description:       description,
-		WorkflowName:      wfDef.Name,
-		WorkflowNamespace: wfDef.Namespace,
-		WorkflowID:        wfDef.ID,
-		Spec:              wfDef.Spec,
-		State:             states.RUNNING,
-		Input:             wfInput,
-		Params:            params,
-		Context:           make(map[string]interface{}),
-		RuntimeContext:    make(map[string]interface{}),
-		ProjectID:         wfDef.ProjectID,
-	}
-	if wfExID != "" {
-		wfEx.ID = wfExID
-	}
-
-	// Python Workflow._create_execution: wf_def.workbook_name → runtime_context['wb_name'].
-	// This lets sub-workflow resolution stay scoped within the same workbook.
-	if wfDef.WorkbookName != "" {
-		wfEx.RuntimeContext["wb_name"] = wfDef.WorkbookName
-	}
-	if v, ok := params["wb_name"].(string); ok && v != "" {
-		wfEx.RuntimeContext["wb_name"] = v // explicit param overrides wfDef's
-	}
-
-	// Initialize context with workflow variables.
-	for k, v := range wfSpec.GetVars() {
-		wfEx.Context[k] = expressions.EvaluateRecursively(
-			v, map[string]interface{}{
-				"__env":  params["env"],
-				"input":  wfInput,
-				"params": params,
-			},
-		)
-	}
-	for k, v := range wfInput {
-		wfEx.Context[k] = v
-	}
-
-	if params["task_execution_id"] != nil {
-		if id, ok := params["task_execution_id"].(string); ok {
-			wfEx.TaskExecutionID = id
+		wfEx := &db.WorkflowExecution{
+			Name:              wfDef.Name,
+			Description:       description,
+			WorkflowName:      wfDef.Name,
+			WorkflowNamespace: wfDef.Namespace,
+			WorkflowID:        wfDef.ID,
+			Spec:              wfDef.Spec,
+			State:             states.RUNNING,
+			Input:             wfInput,
+			Params:            params,
+			Context:           make(map[string]interface{}),
+			RuntimeContext:    make(map[string]interface{}),
+			ProjectID:         wfDef.ProjectID,
 		}
-	}
-	if params["root_execution_id"] != nil {
-		if id, ok := params["root_execution_id"].(string); ok {
-			wfEx.RootExecutionID = id
+		if wfExID != "" {
+			wfEx.ID = wfExID
 		}
+
+		if wfDef.WorkbookName != "" {
+			wfEx.RuntimeContext["wb_name"] = wfDef.WorkbookName
+		}
+		if v, ok := params["wb_name"].(string); ok && v != "" {
+			wfEx.RuntimeContext["wb_name"] = v
+		}
+
+		for k, v := range wfSpec.GetVars() {
+			wfEx.Context[k] = expressions.EvaluateRecursively(
+				v, map[string]interface{}{
+					"__env":  params["env"],
+					"input":  wfInput,
+					"params": params,
+				},
+			)
+		}
+		for k, v := range wfInput {
+			wfEx.Context[k] = v
+		}
+
+		if params["task_execution_id"] != nil {
+			if id, ok := params["task_execution_id"].(string); ok {
+				wfEx.TaskExecutionID = id
+			}
+		}
+		if params["root_execution_id"] != nil {
+			if id, ok := params["root_execution_id"].(string); ok {
+				wfEx.RootExecutionID = id
+			}
+		}
+
+		if err := e.store.WorkflowExecutions().Create(wfEx); err != nil {
+			return fmt.Errorf("creating workflow execution: %w", err)
+		}
+
+		e.scheduleIntegrityCheck(wfEx.ID)
+
+		tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
+		ctrl := workflow.GetController(wfEx, wfSpec, tasks)
+		cmds := ctrl.ContinueWorkflow(nil)
+
+		if err := e.dispatcher.DispatchWorkflowCommands(wfEx, cmds, ptx); err != nil {
+			return err
+		}
+
+		resultWfEx = wfEx
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	// Create execution in DB.
-	if err := e.store.WorkflowExecutions().Create(wfEx); err != nil {
-		return nil, fmt.Errorf("creating workflow execution: %w", err)
-	}
-
-	// Crash-recovery sweep: schedule an integrity check that fires ~120s
-	// from now (and re-schedules itself) to catch tasks that may be stuck
-	// in RUNNING state after an engine crash. Mirrors Python
-	// _schedule_check_and_fix_integrity called from workflow_handler.py
-	// whenever a workflow transitions to RUNNING.
-	e.scheduleIntegrityCheck(wfEx.ID)
-
-	// Find controller and dispatch start commands.
-	tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
-	ctrl := workflow.GetController(wfEx, wfSpec, tasks)
-	cmds := ctrl.ContinueWorkflow(nil)
-
-	if err := e.dispatcher.DispatchWorkflowCommands(wfEx, cmds, ptx); err != nil {
-		return wfEx, err
-	}
-
-	return wfEx, nil
+	return resultWfEx, nil
 }
 
 // PauseWorkflow pauses a running workflow.
@@ -420,16 +414,17 @@ func (e *DefaultEngine) PauseWorkflow(ctx context.Context, wfExID string) error 
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-
-	wfEx, err := e.store.WorkflowExecutions().Get(wfExID)
-	if err != nil {
-		return err
-	}
-	if states.IsPaused(wfEx.State) {
-		return nil
-	}
-	wfEx.State = states.PAUSED
-	return e.store.WorkflowExecutions().Update(wfEx)
+	return e.store.RunInTransaction(func(tx db.Store) error {
+		wfEx, err := e.store.WorkflowExecutions().Get(wfExID)
+		if err != nil {
+			return err
+		}
+		if states.IsPaused(wfEx.State) {
+			return nil
+		}
+		wfEx.State = states.PAUSED
+		return e.store.WorkflowExecutions().Update(wfEx)
+	})
 }
 
 // ResumeWorkflow resumes a paused workflow.
@@ -446,47 +441,44 @@ func (e *DefaultEngine) ResumeWorkflow(ctx context.Context, wfExID string, env m
 		return ctx.Err()
 	}
 
-	wfEx, err := e.store.WorkflowExecutions().Get(wfExID)
-	if err != nil {
-		return err
-	}
-	if !states.IsPaused(wfEx.State) {
-		return fmt.Errorf("workflow %s is not paused", wfExID)
-	}
-
-	if env != nil {
-		wfEx.Params["env"] = env
-	}
-
-	wfEx.State = states.RUNNING
-
-	// Load workflow spec and tasks.
-	wfDef, err := e.store.WorkflowDefinitions().Get(wfEx.WorkflowID)
-	if err != nil {
-		wfEx.RuntimeContext["wf_spec"] = nil
-		return e.store.WorkflowExecutions().Update(wfEx)
-	}
-	wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
-	tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
-
-	ctrl := workflow.GetController(wfEx, wfSpec, tasks)
-	cmds := ctrl.ContinueWorkflow(nil)
-
-	// Re-run all IDLE tasks (set by pause-before policy).
-	// Python resume_workflow iterates over IDLE tasks and calls continue_task.
-	for _, t := range tasks {
-		if t.State == states.IDLE {
-			// Trigger a refresh; scheduleRefreshTaskState will re-check logical state
-			// and call continueTask → StartTask if ready.
-			e.scheduleRefreshTaskState(t.ID)
+	return e.store.RunInTransaction(func(tx db.Store) error {
+		wfEx, err := e.store.WorkflowExecutions().Get(wfExID)
+		if err != nil {
+			return err
 		}
-	}
+		if !states.IsPaused(wfEx.State) {
+			return fmt.Errorf("workflow %s is not paused", wfExID)
+		}
 
-	if err := e.store.WorkflowExecutions().Update(wfEx); err != nil {
-		return err
-	}
+		if env != nil {
+			wfEx.Params["env"] = env
+		}
 
-	return e.dispatcher.DispatchWorkflowCommands(wfEx, cmds, ptx)
+		wfEx.State = states.RUNNING
+
+		wfDef, err := e.store.WorkflowDefinitions().Get(wfEx.WorkflowID)
+		if err != nil {
+			wfEx.RuntimeContext["wf_spec"] = nil
+			return e.store.WorkflowExecutions().Update(wfEx)
+		}
+		wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
+		tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
+
+		ctrl := workflow.GetController(wfEx, wfSpec, tasks)
+		cmds := ctrl.ContinueWorkflow(nil)
+
+		for _, t := range tasks {
+			if t.State == states.IDLE {
+				e.scheduleRefreshTaskState(t.ID)
+			}
+		}
+
+		if err := e.store.WorkflowExecutions().Update(wfEx); err != nil {
+			return err
+		}
+
+		return e.dispatcher.DispatchWorkflowCommands(wfEx, cmds, ptx)
+	})
 }
 
 // StopWorkflow sets a workflow to a terminal state.
@@ -495,43 +487,44 @@ func (e *DefaultEngine) StopWorkflow(ctx context.Context, wfExID string, state s
 		return ctx.Err()
 	}
 
-	wfEx, err := e.store.WorkflowExecutions().Get(wfExID)
-	if err != nil {
-		return err
-	}
-	if !states.IsValidTransition(wfEx.State, state) {
-		return fmt.Errorf("invalid state transition: %s -> %s", wfEx.State, state)
-	}
-
-	wfEx.State = state
-	wfEx.StateInfo = message
-
-	// Evaluate output for terminal states.
-	wfDef, _ := e.store.WorkflowDefinitions().Get(wfEx.WorkflowID)
-	if wfDef != nil {
-		wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
-		tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
-		ctrl := workflow.GetController(wfEx, wfSpec, tasks)
-		finalCtx, _ := ctrl.EvaluateWorkflowFinalContext()
-
-		if state == states.SUCCESS {
-			if wfSpec.GetOutput() != nil {
-				wfEx.Output = evaluateOutput(wfSpec.GetOutput(), finalCtx)
-			}
-		} else if state == states.ERROR {
-			if wfSpec.GetOutputOnError() != nil {
-				wfEx.Output = evaluateOutput(wfSpec.GetOutputOnError(), finalCtx)
-			}
-			if wfEx.Output == nil {
-				wfEx.Output = make(map[string]interface{})
-			}
-			wfEx.Output["result"] = message
-		} else if state == states.CANCELLED {
-			wfEx.Output = map[string]interface{}{"result": message}
+	return e.store.RunInTransaction(func(tx db.Store) error {
+		wfEx, err := e.store.WorkflowExecutions().Get(wfExID)
+		if err != nil {
+			return err
 		}
-	}
+		if !states.IsValidTransition(wfEx.State, state) {
+			return fmt.Errorf("invalid state transition: %s -> %s", wfEx.State, state)
+		}
 
-	return e.store.WorkflowExecutions().Update(wfEx)
+		wfEx.State = state
+		wfEx.StateInfo = message
+
+		wfDef, _ := e.store.WorkflowDefinitions().Get(wfEx.WorkflowID)
+		if wfDef != nil {
+			wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
+			tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
+			ctrl := workflow.GetController(wfEx, wfSpec, tasks)
+			finalCtx, _ := ctrl.EvaluateWorkflowFinalContext()
+
+			if state == states.SUCCESS {
+				if wfSpec.GetOutput() != nil {
+					wfEx.Output = evaluateOutput(wfSpec.GetOutput(), finalCtx)
+				}
+			} else if state == states.ERROR {
+				if wfSpec.GetOutputOnError() != nil {
+					wfEx.Output = evaluateOutput(wfSpec.GetOutputOnError(), finalCtx)
+				}
+				if wfEx.Output == nil {
+					wfEx.Output = make(map[string]interface{})
+				}
+				wfEx.Output["result"] = message
+			} else if state == states.CANCELLED {
+				wfEx.Output = map[string]interface{}{"result": message}
+			}
+		}
+
+		return e.store.WorkflowExecutions().Update(wfEx)
+	})
 }
 
 // RerunWorkflow reruns a workflow from a specific task execution.
@@ -550,92 +543,87 @@ func (e *DefaultEngine) RerunWorkflow(
 		return ctx.Err()
 	}
 
-	taskEx, err := e.store.TaskExecutions().Get(taskExID)
-	if err != nil {
-		return err
-	}
-
-	wfEx, err := e.store.WorkflowExecutions().Get(taskEx.WorkflowExecutionID)
-	if err != nil {
-		return err
-	}
-
-	if env != nil {
-		if wfEx.Params == nil {
-			wfEx.Params = make(map[string]interface{})
-		}
-		wfEx.Params["env"] = env
-	}
-
-	// Reset task state.
-	if reset {
-		taskEx.State = states.IDLE
-		taskEx.Processed = false
-		taskEx.Output = nil
-		taskEx.Published = make(map[string]interface{})
-		if err := e.store.TaskExecutions().Update(taskEx); err != nil {
+	return e.store.RunInTransaction(func(tx db.Store) error {
+		taskEx, err := e.store.TaskExecutions().Get(taskExID)
+		if err != nil {
 			return err
 		}
-	}
 
-	wfDef, err := e.store.WorkflowDefinitions().Get(wfEx.WorkflowID)
-	if err != nil {
-		return err
-	}
-	wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
-	tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
+		wfEx, err := e.store.WorkflowExecutions().Get(taskEx.WorkflowExecutionID)
+		if err != nil {
+			return err
+		}
 
-	wfEx.State = states.RUNNING
-	if err := e.store.WorkflowExecutions().Update(wfEx); err != nil {
-		return err
-	}
+		if env != nil {
+			if wfEx.Params == nil {
+				wfEx.Params = make(map[string]interface{})
+			}
+			wfEx.Params["env"] = env
+		}
 
-	ctrl := workflow.GetController(wfEx, wfSpec, tasks)
+		if reset {
+			taskEx.State = states.IDLE
+			taskEx.Processed = false
+			taskEx.Output = nil
+			taskEx.Published = make(map[string]interface{})
+			if err := e.store.TaskExecutions().Update(taskEx); err != nil {
+				return err
+			}
+		}
 
-	var cmds []commands.WorkflowCommand
-	if skip {
-		cmds = ctrl.SkipTasks([]*db.TaskExecution{taskEx})
-	} else {
-		cmds = ctrl.RerunTasks([]*db.TaskExecution{taskEx}, reset)
-	}
-
-	if err := e.dispatcher.DispatchWorkflowCommands(wfEx, cmds, ptx); err != nil {
-		return err
-	}
-
-	// For SKIP: the task never goes through OnActionComplete, so we need
-	// to explicitly drive ContinueWorkflow to pick up on-skip transitions
-	// and (eventually) workflow completion.
-	if skip {
-		// Skip updated the task state → reload for controller's fresh view.
+		wfDef, err := e.store.WorkflowDefinitions().Get(wfEx.WorkflowID)
+		if err != nil {
+			return err
+		}
+		wfSpec, _ := v2.NewWorkflowSpec(wfDef.Name, wfDef.Spec)
 		tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
-		ctrl = workflow.GetController(wfEx, wfSpec, tasks)
-		// Find the just-skipped task (it's still in tasks list, now SKIPPED).
-		var skipTaskEx *db.TaskExecution
-		for _, te := range tasks {
-			if te.ID == taskEx.ID {
-				skipTaskEx = te
-				break
-			}
-		}
-		next := ctrl.ContinueWorkflow(skipTaskEx)
-		if len(next) > 0 {
-			if err := e.dispatcher.DispatchWorkflowCommands(wfEx, next, ptx); err != nil {
-				return err
-			}
+
+		wfEx.State = states.RUNNING
+		if err := e.store.WorkflowExecutions().Update(wfEx); err != nil {
+			return err
 		}
 
-		// Mirror OnActionComplete's tail: check workflow completion + wake joins.
-		wfEx, _ = e.store.WorkflowExecutions().Get(wfEx.ID)
-		if ctrl.MayCompleteWorkflow(skipTaskEx) {
-			if err := e.checkAndCompleteWorkflow(wfEx, ctrl, wfSpec); err != nil {
-				return err
-			}
-		}
-		e.checkAffectedTasks(skipTaskEx, wfEx)
-	}
+		ctrl := workflow.GetController(wfEx, wfSpec, tasks)
 
-	return nil
+		var cmds []commands.WorkflowCommand
+		if skip {
+			cmds = ctrl.SkipTasks([]*db.TaskExecution{taskEx})
+		} else {
+			cmds = ctrl.RerunTasks([]*db.TaskExecution{taskEx}, reset)
+		}
+
+		if err := e.dispatcher.DispatchWorkflowCommands(wfEx, cmds, ptx); err != nil {
+			return err
+		}
+
+		if skip {
+			tasks, _ := e.store.TaskExecutions().List(wfEx.ID, "")
+			ctrl = workflow.GetController(wfEx, wfSpec, tasks)
+			var skipTaskEx *db.TaskExecution
+			for _, te := range tasks {
+				if te.ID == taskEx.ID {
+					skipTaskEx = te
+					break
+				}
+			}
+			next := ctrl.ContinueWorkflow(skipTaskEx)
+			if len(next) > 0 {
+				if err := e.dispatcher.DispatchWorkflowCommands(wfEx, next, ptx); err != nil {
+					return err
+				}
+			}
+
+			wfEx, _ = e.store.WorkflowExecutions().Get(wfEx.ID)
+			if ctrl.MayCompleteWorkflow(skipTaskEx) {
+				if err := e.checkAndCompleteWorkflow(wfEx, ctrl, wfSpec); err != nil {
+					return err
+				}
+			}
+			e.checkAffectedTasks(skipTaskEx, wfEx)
+		}
+
+		return nil
+	})
 }
 
 // StartTask runs a task execution — wrapper that creates its own PostTxQueue.
@@ -1164,32 +1152,11 @@ func (e *DefaultEngine) OnActionComplete(
 		defer func() { ptx.Drain() }()
 		defer e.inflightWg.Done()
 	}
-	wfExID, err := e.resolveWfExID(actionExID)
-	if err != nil {
-		return err
-	}
+	// Python engine entry: transaction() only — no named_lock at entry.
+	// Locking happens at task granularity inside handler internals.
 	return e.store.RunInTransaction(func(tx db.Store) error {
-		tx.Lock("wf:" + wfExID).Lock()
-		defer tx.Lock("wf:" + wfExID).Unlock()
 		return e.onActionCompleteLocked(ptx, ctx, actionExID, result, wfAction)
 	})
-}
-
-// resolveWfExID follows actionEx → taskEx → wfEx, or child wfEx → parent taskEx → parent wfEx.
-func (e *DefaultEngine) resolveWfExID(id string) (string, error) {
-	// Try ActionExecution first (regular action tasks).
-	if actionEx, _ := e.store.ActionExecutions().Get(id); actionEx != nil {
-		if taskEx, err := e.store.TaskExecutions().Get(actionEx.TaskExecutionID); err == nil && taskEx != nil {
-			return taskEx.WorkflowExecutionID, nil
-		}
-	}
-	// Fallback: sub-workflow — the ID is a child WorkflowExecution.
-	if wfEx, _ := e.store.WorkflowExecutions().Get(id); wfEx != nil {
-		if taskEx, err := e.store.TaskExecutions().Get(wfEx.TaskExecutionID); err == nil && taskEx != nil {
-			return taskEx.WorkflowExecutionID, nil
-		}
-	}
-	return "", fmt.Errorf("cannot resolve wfExID from %s", id)
 }
 
 func (e *DefaultEngine) onActionCompleteLocked(
@@ -1947,9 +1914,9 @@ func (e *DefaultEngine) advanceWorkflow(wfExID string, doneTaskExID string) {
 		defer func() { ptx.Drain() }()
 		defer e.inflightWg.Done()
 	}
+	// Python: called from inside transaction() context (OnActionComplete).
+	// If called standalone, wrap in RunInTransaction.
 	e.store.RunInTransaction(func(tx db.Store) error {
-		tx.Lock("wf:" + wfExID).Lock()
-		defer tx.Lock("wf:" + wfExID).Unlock()
 		e.advanceWorkflowLocked(ptx, wfExID, doneTaskExID)
 		return nil
 	})
@@ -2259,18 +2226,42 @@ func (e *DefaultEngine) refreshTaskState(taskExID string) {
 
 // refreshTaskStateLocked does the actual work — safe to call from inside
 // RunInTransaction (rawLock held, inTx==true, txRWMutex skips its per-CRUD locks).
+//
+// Mirrors Python task_handler._refresh_task_state:
+//
+//	pre-load outside lock (perf optimization) → acquire named_lock(task_ex.id)
+//	→ reload inside lock → re-check state → continue_task / complete_task.
 func (e *DefaultEngine) refreshTaskStateLocked(taskExID string) {
-	taskEx, err := e.store.TaskExecutions().Get(taskExID)
-	if err != nil || taskEx == nil {
-		log.Printf("refreshTaskState: taskEx %s not found: %v", taskExID, err)
+	// Pre-load (performance optimization — mirrors Python checking state
+	// outside named_lock to avoid expensive lock on every scheduler tick).
+	taskEx, _ := e.store.TaskExecutions().Get(taskExID)
+	if taskEx == nil {
+		return
+	}
+	wfEx, _ := e.store.WorkflowExecutions().Get(taskEx.WorkflowExecutionID)
+	if wfEx == nil || states.IsCompleted(wfEx.State) || states.IsPaused(wfEx.State) {
 		return
 	}
 
-	wfEx, err := e.store.WorkflowExecutions().Get(taskEx.WorkflowExecutionID)
-	if err != nil || wfEx == nil {
+	// Python named_lock(task_ex.id) — task granularity serialisation.
+	// Different engine processes (PG/MySQL mode) block here waiting for
+	// each other's refreshTaskState to finish before touching the same task.
+	lock := e.store.Lock(taskExID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Reload inside lock — a concurrent engine process may have changed
+	// taskEx state between our pre-load and acquiring the lock.
+	taskEx, _ = e.store.TaskExecutions().Get(taskExID)
+	if taskEx == nil {
 		return
 	}
-	if states.IsCompleted(wfEx.State) || states.IsPaused(wfEx.State) {
+	if states.IsCompleted(taskEx.State) || taskEx.State == states.RUNNING {
+		log.Printf("refreshTaskState: task %s already terminal or RUNNING (concurrent modification) — no-op", taskEx.Name)
+		return
+	}
+	wfEx, _ = e.store.WorkflowExecutions().Get(taskEx.WorkflowExecutionID)
+	if wfEx == nil || states.IsCompleted(wfEx.State) || states.IsPaused(wfEx.State) {
 		return
 	}
 
@@ -2303,7 +2294,6 @@ func (e *DefaultEngine) refreshTaskStateLocked(taskExID string) {
 		_ = e.store.TaskExecutions().Update(taskEx)
 		e.advanceWorkflow(wfEx.ID, taskEx.ID)
 	default:
-		// Still WAITING — nothing to do.
 		log.Printf(
 			"refreshTaskState: join task %s still WAITING (cardinality=%d) — no-op",
 			taskEx.Name, logical.Cardinality,
@@ -2314,7 +2304,17 @@ func (e *DefaultEngine) refreshTaskStateLocked(taskExID string) {
 // continueTask resets a task to RUNNING state and re-enters StartTask so a
 // new ActionExecution is created and dispatched. Mirrors Python
 // task_handler.continue_task called from _refresh_task_state.
+//
+// Python's continue_task has its OWN named_lock('continue-task-' + task_ex.id)
+// — a different key from _refresh_task_state's named_lock(task_ex.id) — so
+// both lock keys nest inside the same SQL transaction. We mirror that exactly.
 func (e *DefaultEngine) continueTask(taskEx *db.TaskExecution, wfEx *db.WorkflowExecution) {
+	// Python named_lock('continue-task-' + task_ex.id) — distinct from the
+	// taskEx.ID lock in refreshTaskStateLocked, so they nest cleanly.
+	lock := e.store.Lock("continue-task-" + taskEx.ID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	taskEx.State = states.RUNNING
 	taskEx.StateInfo = ""
 	taskEx.Processed = false
@@ -2342,80 +2342,68 @@ func (e *DefaultEngine) continueTask(taskEx *db.TaskExecution, wfEx *db.Workflow
 // parent wfEx to apply cascade rules.
 // ================================================================
 func (e *DefaultEngine) OnActionUpdate(wfExID string) error {
-	var ptx *PostTxQueue
-	if e.AutoExecute {
-		ptx = NewPostTxQueue()
-		e.inflightWg.Add(1)
-		defer func() { ptx.Drain() }()
-		defer e.inflightWg.Done()
-	}
+	// Python @post_tx_queue.run on_action_update → transaction() wrap.
+	return e.store.RunInTransaction(func(tx db.Store) error {
+		childWfEx, err := e.store.WorkflowExecutions().Get(wfExID)
+		if err != nil || childWfEx == nil {
+			return fmt.Errorf("OnActionUpdate: child wfEx %s not found: %v", wfExID, err)
+		}
 
-	childWfEx, err := e.store.WorkflowExecutions().Get(wfExID)
-	if err != nil || childWfEx == nil {
-		return fmt.Errorf("OnActionUpdate: child wfEx %s not found: %v", wfExID, err)
-	}
+		taskEx, err := e.store.TaskExecutions().Get(childWfEx.TaskExecutionID)
+		if err != nil || taskEx == nil {
+			return nil
+		}
 
-	taskEx, err := e.store.TaskExecutions().Get(childWfEx.TaskExecutionID)
-	if err != nil || taskEx == nil {
-		// Not a subworkflow (childWfEx has no parent taskEx) → nothing to cascade.
-		return nil
-	}
+		parentWfEx, err := e.store.WorkflowExecutions().Get(taskEx.WorkflowExecutionID)
+		if err != nil || parentWfEx == nil {
+			return nil
+		}
 
-	parentWfEx, err := e.store.WorkflowExecutions().Get(taskEx.WorkflowExecutionID)
-	if err != nil || parentWfEx == nil {
-		return nil
-	}
+		log.Printf(
+			"OnActionUpdate: child wfEx %s state=%s → parent taskEx %s state=%s",
+			childWfEx.ID, childWfEx.State, taskEx.ID, parentWfEx.State,
+		)
 
-	log.Printf(
-		"OnActionUpdate: child wfEx %s state=%s → parent taskEx %s state=%s",
-		childWfEx.ID, childWfEx.State, taskEx.ID, parentWfEx.State,
-	)
-
-	if states.IsPaused(childWfEx.State) {
-		// Cascade: parent workflow pauses.
-		if !states.IsPaused(parentWfEx.State) {
-			parentWfEx.State = states.PAUSED
-			parentWfEx.StateInfo = fmt.Sprintf("Paused by subworkflow %s (task %s)", childWfEx.ID, taskEx.Name)
-			if err := e.store.WorkflowExecutions().Update(parentWfEx); err != nil {
-				return err
+		if states.IsPaused(childWfEx.State) {
+			if !states.IsPaused(parentWfEx.State) {
+				parentWfEx.State = states.PAUSED
+				parentWfEx.StateInfo = fmt.Sprintf("Paused by subworkflow %s (task %s)", childWfEx.ID, taskEx.Name)
+				if err := e.store.WorkflowExecutions().Update(parentWfEx); err != nil {
+					return err
+				}
+				log.Printf("OnActionUpdate: parent wfEx %s → PAUSED (child wfEx %s)", parentWfEx.ID, childWfEx.ID)
 			}
-			log.Printf("OnActionUpdate: parent wfEx %s → PAUSED (child wfEx %s)", parentWfEx.ID, childWfEx.ID)
-		}
-		// Parent task stays RUNNING_DELAYED-ish — mark as PAUSED so dispatcher skips.
-		if !states.IsPausedOrCompleted(taskEx.State) {
-			taskEx.State = states.PAUSED
-			_ = e.store.TaskExecutions().Update(taskEx)
-		}
-		return nil
-	}
-
-	if states.IsRunning(childWfEx.State) {
-		// Cascade: check whether parent has ANY other PAUSED taskEx.
-		// If yes → parent stays PAUSED (multi-subworkflow mutual-cascade rule).
-		// If no  → resume parent workflow.
-		tasks, _ := e.store.TaskExecutions().List(parentWfEx.ID, "")
-		hasOtherPaused := false
-		for _, t := range tasks {
-			if t.ID != taskEx.ID && states.IsPaused(t.State) {
-				hasOtherPaused = true
-				break
+			if !states.IsPausedOrCompleted(taskEx.State) {
+				taskEx.State = states.PAUSED
+				_ = e.store.TaskExecutions().Update(taskEx)
 			}
+			return nil
 		}
-		if !hasOtherPaused && states.IsPaused(parentWfEx.State) {
-			// Resume taskEx first if it's PAUSED, then resume parent wfEx.
+
+		if states.IsRunning(childWfEx.State) {
+			tasks, _ := e.store.TaskExecutions().List(parentWfEx.ID, "")
+			hasOtherPaused := false
+			for _, t := range tasks {
+				if t.ID != taskEx.ID && states.IsPaused(t.State) {
+					hasOtherPaused = true
+					break
+				}
+			}
+			if !hasOtherPaused && states.IsPaused(parentWfEx.State) {
+				if states.IsPaused(taskEx.State) {
+					taskEx.State = states.RUNNING_DELAYED
+					_ = e.store.TaskExecutions().Update(taskEx)
+				}
+				// ResumeWorkflow internally wraps RunInTransaction — nested OK.
+				return e.ResumeWorkflow(context.Background(), parentWfEx.ID, nil)
+			}
 			if states.IsPaused(taskEx.State) {
 				taskEx.State = states.RUNNING_DELAYED
 				_ = e.store.TaskExecutions().Update(taskEx)
 			}
-			return e.ResumeWorkflow(context.Background(), parentWfEx.ID, nil)
 		}
-		// Other siblings still paused → just resume this specific taskEx.
-		if states.IsPaused(taskEx.State) {
-			taskEx.State = states.RUNNING_DELAYED
-			_ = e.store.TaskExecutions().Update(taskEx)
-		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // ================================================================
@@ -2430,15 +2418,11 @@ func (e *DefaultEngine) OnActionUpdate(wfExID string) error {
 // clients) to fire an action without manual orchestration.
 // ================================================================
 func (e *DefaultEngine) DispatchAction(ctx context.Context, actionExID string) (*db.ActionExecution, error) {
-	wfExID, err := e.resolveWfExID(actionExID)
-	if err != nil {
-		return nil, err
-	}
+	// Python: dispatch_action runs inside engine's transaction context
+	// (OnActionComplete creates it first, then fires PostTxQueue goroutine).
 	var ret *db.ActionExecution
 	var retErr error
 	e.store.RunInTransaction(func(tx db.Store) error {
-		tx.Lock("wf:" + wfExID).Lock()
-		defer tx.Lock("wf:" + wfExID).Unlock()
 		ret, retErr = e.dispatchActionLocked(ctx, actionExID)
 		return nil
 	})
