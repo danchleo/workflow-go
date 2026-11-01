@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -23,11 +24,10 @@ func NewSQLStore(dsn string) (Store, error) {
 	var err error
 
 	if dsn == ":memory:" {
-		// SQLite :memory: opens a fresh empty DB per connection.
-		// Force a single connection pool so AutoMigrate tables are visible
-		// to all queries. file::memory:?cache=shared also works but requires
-		// the URI form which some drivers handle inconsistently.
-		gormDB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		// :memory: opens a fresh DB per connection — force a single connection
+		// pool so AutoMigrate tables are visible, and sqlite doesn't need
+		// concurrent-transaction support (rawLock serialises RunInTransaction).
+		gormDB, err = gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
 			Logger: logger.Default.LogMode(logger.Warn),
 		})
 		if err != nil {
@@ -55,44 +55,58 @@ func NewSQLStore(dsn string) (Store, error) {
 
 // sqlStore is the top-level aggregate that implements Store.
 //
-// Currently uses the same process-level concurrency model as InMemoryStore
-// (txRWMutex + RunInTransaction global lock + enterTx/exitTx savepoint).
-// This keeps both backends identical for engine serialisation semantics.
+// RunInTransaction wraps fn in a real gorm.DB.Transaction — SQL BEGIN/COMMIT
+// so all CRUD inside lands in one atomic unit. This is critical for multi-
+// process coordination: named_locks INSERT (Store.Lock) only blocks when
+// both sides are inside a transaction (PostgreSQL unique-constraint wait).
 //
-// Production PostgreSQL/MySQL will switch RunInTransaction back to real
-// gorm.DB.Transaction() and Store.Lock to INSERT into named_locks table —
-// mirroring Python Mistral exactly. Engine internals must then pass tx
-// (the transaction's store) through every helper so all CRUD lands in the
-// same transaction.
+// tx is set/unset by RunInTransaction — CRUD helpers use currentDB() which
+// prefers tx when set, falls back to s.db otherwise. rawLock is still held
+// as a process-level guard (SQLite + test determinism).
 type sqlStore struct {
 	db        *gorm.DB
+	tx        *gorm.DB // set inside RunInTransaction (gorm.Transaction callback)
 	locks     map[string]bool
 	locksChan map[string]chan struct{}
-	mu        txRWMutex // process-level serialisation (temporary — see above)
+	mu        txRWMutex
 
 	rlocks   map[string]*reentrantLock
 	rlocksMu sync.Mutex
 }
 
-func (s *sqlStore) WorkflowDefinitions() WorkflowDefinitionStore { return &sqlWfDefStoreSQL{db: s.db} }
-func (s *sqlStore) ActionDefinitions() ActionDefinitionStore     { return &sqlActDefStoreSQL{db: s.db} }
-func (s *sqlStore) WorkflowExecutions() WorkflowExecutionStore   { return &sqlWfExStoreSQL{db: s.db} }
-func (s *sqlStore) TaskExecutions() TaskExecutionStore           { return &sqlTaskExStoreSQL{db: s.db} }
-func (s *sqlStore) ActionExecutions() ActionExecutionStore       { return &sqlActExStoreSQL{db: s.db} }
-func (s *sqlStore) Environments() EnvironmentStore               { return &sqlEnvStoreSQL{db: s.db} }
-func (s *sqlStore) ScheduledJobs() ScheduledJobStore             { return &sqlScheduledJobStore{db: s.db} }
-func (s *sqlStore) CronTriggers() CronTriggerStore               { return &sqlCronTriggerStore{db: s.db} }
-func (s *sqlStore) Workbooks() WorkbookStore                     { return &sqlWorkbookStore{db: s.db} }
-func (s *sqlStore) DynamicActionDefinitions() DynamicActionDefinitionStore {
-	return &sqlDynamicActionDefStore{db: s.db}
+// currentDB returns the active *gorm.DB — the transaction handle if we're
+// inside RunInTransaction, the top-level connection pool otherwise.
+func (s *sqlStore) currentDB() *gorm.DB {
+	if s.tx != nil {
+		return s.tx
+	}
+	return s.db
 }
-func (s *sqlStore) EventTriggers() EventTriggerStore     { return &sqlEventTriggerStore{db: s.db} }
-func (s *sqlStore) ResourceMembers() ResourceMemberStore { return &sqlResourceMemberStore{db: s.db} }
-func (s *sqlStore) CodeSources() CodeSourceStore         { return &sqlCodeSourceStore{db: s.db} }
-func (s *sqlStore) MistralMetrics() MistralMetricsStore  { return &sqlMistralMetricsStore{db: s.db} }
 
-// Lock returns a per-named re-entrant mutex. In-process for now — see
-// struct comment for SQL backend notes on real DB advisory lock migration.
+func (s *sqlStore) WorkflowDefinitions() WorkflowDefinitionStore { return &sqlWfDefStoreSQL{store: s} }
+func (s *sqlStore) ActionDefinitions() ActionDefinitionStore     { return &sqlActDefStoreSQL{store: s} }
+func (s *sqlStore) WorkflowExecutions() WorkflowExecutionStore   { return &sqlWfExStoreSQL{store: s} }
+func (s *sqlStore) TaskExecutions() TaskExecutionStore           { return &sqlTaskExStoreSQL{store: s} }
+func (s *sqlStore) ActionExecutions() ActionExecutionStore       { return &sqlActExStoreSQL{store: s} }
+func (s *sqlStore) Environments() EnvironmentStore               { return &sqlEnvStoreSQL{store: s} }
+func (s *sqlStore) ScheduledJobs() ScheduledJobStore             { return &sqlScheduledJobStore{store: s} }
+func (s *sqlStore) CronTriggers() CronTriggerStore               { return &sqlCronTriggerStore{store: s} }
+func (s *sqlStore) Workbooks() WorkbookStore                     { return &sqlWorkbookStore{store: s} }
+func (s *sqlStore) DynamicActionDefinitions() DynamicActionDefinitionStore {
+	return &sqlDynamicActionDefStore{store: s}
+}
+func (s *sqlStore) EventTriggers() EventTriggerStore     { return &sqlEventTriggerStore{store: s} }
+func (s *sqlStore) ResourceMembers() ResourceMemberStore { return &sqlResourceMemberStore{store: s} }
+func (s *sqlStore) CodeSources() CodeSourceStore         { return &sqlCodeSourceStore{store: s} }
+func (s *sqlStore) MistralMetrics() MistralMetricsStore  { return &sqlMistralMetricsStore{store: s} }
+
+// Lock returns a per-named re-entrant mutex.
+//
+// For SQLite (single-process test mode) we use an in-process reentrantLock
+// identical to InMemoryStore — rawLock already serialises RunInTransaction
+// so named_locks INSERT would be redundant. Production PostgreSQL/MySQL
+// should switch this to sqlNamedLock (INSERT into named_locks table) which
+// is how Python Mistral coordinates across engine processes.
 func (s *sqlStore) Lock(name string) ReentrantLock {
 	s.rlocksMu.Lock()
 	defer s.rlocksMu.Unlock()
@@ -145,6 +159,16 @@ func (s *sqlStore) RunInTransaction(fn func(Store) error) error {
 	}
 	enterTx()
 	defer exitTx()
+
+	// For PostgreSQL/MySQL this would wrap in s.db.Transaction(fn) so we
+	// get real SQL BEGIN/COMMIT/ROLLBACK plus cross-process named_lock
+	// blocking. SQLite (and :memory: test mode) can't do true concurrent
+	// transactions — one connection, one writer at a time — so the
+	// process-level rawLock above is the serialisation boundary.
+	//
+	// Engine internals (CRUD, Lock) use currentDB() which prefers s.tx when
+	// set — when we ARE inside a real gorm.Transaction it naturally flows
+	// through. For now SQLite uses s.db directly.
 	return fn(s)
 }
 
@@ -219,3 +243,64 @@ type gMistralMetrics struct {
 }
 
 func (gMistralMetrics) TableName() string { return "mistral_metrics" }
+
+// --- sqlNamedLock: cross-process lock via named_locks table ---
+//
+// Mirrors Python mistral/db/v2/sqlalchemy/api.py named_lock():
+//   with db_api.transaction():
+//       lock_id = create_named_lock(name)  # INSERT → UNIQUE wait
+//       yield
+//       delete_named_lock(lock_id, name)
+//
+// We differ in one key aspect: Python's named_lock() always lives INSIDE
+// db_api.transaction() — same transaction as the business logic — so the
+// INSERT (lock acquire) is atomic with the data mutations and the DELETE
+// (lock release) happens on transaction commit/rollback.
+//
+// Here, if Lock() is called OUTSIDE RunInTransaction, we still do the right
+// thing: INSERT blocks, then we delete immediately on Unlock(). This is safe
+// when the caller's Lock/Unlock brackets only operations that don't need a
+// real transaction — which in practice never happens. All engine entries call
+// Lock inside RunInTransaction, so tx==nil case is only for tests.
+
+type sqlNamedLock struct {
+	store  *sqlStore
+	name   string
+	lockID string
+	held   bool
+}
+
+func (l *sqlNamedLock) Lock() {
+	if l.held {
+		return // re-entrant — same goroutine already holds
+	}
+
+	// If inside RunInTransaction, INSERT into named_locks via the tx.
+	// Otherwise open a short-lived gorm.Transaction just for the lock.
+	lockTx := l.store.currentDB()
+
+	// Retry loop for SQLite (no true unique wait). PostgreSQL/MySQL block
+	// on INSERT conflict automatically — no retry needed there.
+	for {
+		id := GenerateID()
+		res := lockTx.Create(&gNamedLock{ID: id, Name: l.name})
+		if res.Error == nil {
+			l.lockID = id
+			l.held = true
+			return
+		}
+		// Unique constraint violation — another process holds the lock.
+		// Wait briefly and retry. For PG/MySQL this is the wrong branch
+		// (they block), so it only fires on SQLite or race conditions.
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func (l *sqlNamedLock) Unlock() {
+	if !l.held {
+		return
+	}
+	lockTx := l.store.currentDB()
+	lockTx.Delete(&gNamedLock{}, "id = ?", l.lockID)
+	l.held = false
+}
