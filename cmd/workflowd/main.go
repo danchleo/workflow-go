@@ -73,6 +73,7 @@ import (
 type config struct {
 	servers []string // api | engine | executor
 	dbURL   string
+	mqURL   string // empty=InProcessTransport, "amqp://..."=AMQPTransport
 }
 
 func main() {
@@ -88,6 +89,8 @@ func parseFlags() config {
 			"Comma-separated list of components: api,engine,executor,all")
 		dbURL = flag.String("db", ":memory:",
 			"DB URL — ':memory:' or SQLite path (shared across api+engine)")
+		mqURL = flag.String("mq-url", "",
+			"MQ broker — empty=process-local (test), amqp://guest:guest@host:5672=RabbitMQ (prod)")
 	)
 	flag.Parse()
 
@@ -112,7 +115,7 @@ func parseFlags() config {
 		log.Fatal("--server must specify at least one component")
 	}
 
-	return config{servers: servers, dbURL: *dbURL}
+	return config{servers: servers, dbURL: *dbURL, mqURL: *mqURL}
 }
 
 func run(cfg config) error {
@@ -132,10 +135,20 @@ func run(cfg config) error {
 
 	// --- MQ Transport ---
 	// 默认 InProcessTransport（进程内内存 MQ，对齐 Python oslo.messaging fake:/）。
-	// 生产多节点部署：未来用 NewAMQPTransport("amqp://...") 替换这一行即可。
-	transport := rpc.NewInProcessTransport()
+	// 生产多节点部署：--mq-url amqp://guest:guest@host:5672 → AMQPTransport（RabbitMQ）。
+	var transport rpc.Transport
+	if cfg.mqURL == "" {
+		transport = rpc.NewInProcessTransport()
+		log.Printf("mq transport: in-process memory (--mq-url for RabbitMQ)")
+	} else {
+		t, err := rpc.NewAMQPTransport(cfg.mqURL)
+		if err != nil {
+			return fmt.Errorf("amqp %s: %w", cfg.mqURL, err)
+		}
+		transport = t
+		log.Printf("mq transport: amqp %s", cfg.mqURL)
+	}
 	defer transport.Close()
-	log.Printf("mq transport: in-process memory")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

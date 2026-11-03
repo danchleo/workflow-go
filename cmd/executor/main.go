@@ -6,7 +6,7 @@
 //
 //	Python                              Go
 //	═══════                             ═══
-//	rpc.get_rpc_transport()             rpc.NewRedisTransport(--mq-url)
+//	rpc.get_rpc_transport()             rpc.NewAMQPTransport(--mq-url)
 //	rpc_server.register_endpoint        executorrpc.NewServer(transport, registry)
 //	  (ExecutorServer)                  topic='executor', 1 method: run_action
 //	rpc_server.start()                  executorServer.Start(ctx)
@@ -24,14 +24,14 @@
 // Transport options (同 cmd/engine):
 //
 //	--mq-url ""  (default) → InProcessTransport (单进程测试)
-//	--mq-url redis://host:port → RedisTransport (跨进程)
+//	--mq-url amqp://guest:guest@host:5672 → AMQPTransport (跨进程)
 //
-// Usage (配合 Redis broker):
+// Usage (配合 RabbitMQ broker):
 //
-//	# Start Redis first: docker run -p 6379:6379 redis:7-alpine
-//	go run ./cmd/engine   --db engine.db --mq-url redis://localhost:6379
-//	go run ./cmd/executor --mq-url redis://localhost:6379
-//	go run ./cmd/workflowd --server api --db engine.db --mq-url redis://localhost:6379
+//	# Start RabbitMQ first: docker run -p 6379:6379 RabbitMQ:7-alpine
+//	go run ./cmd/engine   --db engine.db --mq-url amqp://guest:guest@localhost:5672
+//	go run ./cmd/executor --mq-url amqp://guest:guest@localhost:5672
+//	go run ./cmd/workflowd --server api --db engine.db --mq-url amqp://guest:guest@localhost:5672
 package main
 
 import (
@@ -50,7 +50,7 @@ import (
 
 func main() {
 	mqURL := flag.String("mq-url", "",
-		"MQ broker URL — empty=process-local (test), redis://host:port=Redis (prod)")
+		"MQ broker URL — empty=process-local (test), amqp://guest:guest@host:5672=RabbitMQ (prod)")
 	flag.Parse()
 
 	// --- MQ Transport ---
@@ -59,12 +59,12 @@ func main() {
 		transport = rpc.NewInProcessTransport()
 		log.Println("mq transport: in-process memory")
 	} else {
-		t, err := rpc.NewRedisTransport(*mqURL)
+		t, err := rpc.NewAMQPTransport(*mqURL)
 		if err != nil {
-			log.Fatalf("redis transport %s: %v", *mqURL, err)
+			log.Fatalf("RabbitMQ transport %s: %v", *mqURL, err)
 		}
 		transport = t
-		log.Printf("mq transport: redis %s", *mqURL)
+		log.Printf("mq transport: RabbitMQ %s", *mqURL)
 	}
 	defer transport.Close()
 
