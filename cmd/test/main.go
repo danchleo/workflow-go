@@ -30,7 +30,7 @@ func main() {
 	reverse := flag.Bool("reverse", false, "Use a reverse workflow demo instead of direct")
 	flag.Parse()
 
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	eng := engine.NewDefaultEngine(store)
 
 	if *demo {

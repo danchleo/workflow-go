@@ -126,7 +126,7 @@ func runToCompletion(t *testing.T, eng *DefaultEngine, store db.Store, wfExID st
 
 func newEngine(t *testing.T) (*DefaultEngine, db.Store) {
 	t.Helper()
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	eng := NewDefaultEngine(store)
 	eng.AutoExecute = false // engine unit tests drive OnActionComplete manually
 	return eng, store
@@ -304,8 +304,15 @@ func TestEngine_WithItems_EndToEnd(t *testing.T) {
 	fanoutActionExs, _ := store.ActionExecutions().List(fanoutTaskExID, "")
 	indices := make(map[int]bool)
 	for _, ae := range fanoutActionExs {
-		if idx, ok := ae.RuntimeContext["index"].(int); ok {
-			indices[idx] = true
+		// JSON blob serialises all numeric values as float64 — check both.
+		// Pure Go map (old InMemoryStore) stores int directly.
+		if v, ok := ae.RuntimeContext["index"]; ok {
+			switch idx := v.(type) {
+			case int:
+				indices[idx] = true
+			case float64:
+				indices[int(idx)] = true
+			}
 		}
 	}
 	t.Logf("fanout action executions: %d, distinct indices: %v", len(fanoutActionExs), indices)

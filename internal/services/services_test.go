@@ -58,7 +58,7 @@ not: valid: yaml: {
 `
 
 func TestWorkflowService_Create_OK(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := NewWorkflowService(store)
 
 	wfDef, err := svc.CreateWorkflow("test_wf", validDirectWf, "proj1", "ns1")
@@ -80,7 +80,7 @@ func TestWorkflowService_Create_OK(t *testing.T) {
 }
 
 func TestWorkflowService_Create_InvalidYAML(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := NewWorkflowService(store)
 
 	_, err := svc.CreateWorkflow("bad", invalidYAML, "", "")
@@ -94,7 +94,7 @@ func TestWorkflowService_Create_InvalidYAML(t *testing.T) {
 
 func TestWorkflowService_Create_DuplicateAcrossNamespaces(t *testing.T) {
 	// Same workflow name in different namespaces should NOT conflict.
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := NewWorkflowService(store)
 
 	_, err := svc.CreateWorkflow("shared", validDirectWf, "", "nsA")
@@ -114,7 +114,7 @@ func TestWorkflowService_Create_DuplicateAcrossNamespaces(t *testing.T) {
 }
 
 func TestWorkflowService_Create_Duplicate(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := NewWorkflowService(store)
 
 	_, err := svc.CreateWorkflow("dup", validDirectWf, "", "")
@@ -134,7 +134,7 @@ func TestWorkflowService_Create_Duplicate(t *testing.T) {
 }
 
 func TestWorkflowService_Update_OK(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := NewWorkflowService(store)
 
 	wfDef, err := svc.CreateWorkflow("upd", validDirectWf, "", "")
@@ -152,7 +152,7 @@ func TestWorkflowService_Update_OK(t *testing.T) {
 }
 
 func TestWorkflowService_Update_NotFound(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := NewWorkflowService(store)
 
 	_, err := svc.UpdateWorkflow("nonexistent-id", validDirectWf)
@@ -162,7 +162,7 @@ func TestWorkflowService_Update_NotFound(t *testing.T) {
 }
 
 func TestWorkflowService_Update_InvalidYAML(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := NewWorkflowService(store)
 
 	wfDef, _ := svc.CreateWorkflow("bad_upd", validDirectWf, "", "")
@@ -173,7 +173,7 @@ func TestWorkflowService_Update_InvalidYAML(t *testing.T) {
 }
 
 func TestWorkflowService_Delete_OK(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := NewWorkflowService(store)
 
 	wfDef, _ := svc.CreateWorkflow("delme", validDirectWf, "", "")
@@ -187,7 +187,7 @@ func TestWorkflowService_Delete_OK(t *testing.T) {
 }
 
 func TestWorkflowService_GetWorkflow(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := NewWorkflowService(store)
 
 	wfDef, _ := svc.CreateWorkflow("getme", validDirectWf, "", "")
@@ -201,7 +201,7 @@ func TestWorkflowService_GetWorkflow(t *testing.T) {
 }
 
 func TestWorkflowService_ListWorkflows(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := NewWorkflowService(store)
 
 	svc.CreateWorkflow("wf1", validDirectWf, "projA", "")
@@ -275,7 +275,7 @@ yaml: error: here
 `
 
 func TestWorkbookService_Create_OK(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := NewWorkbookService(store)
 
 	wb, err := svc.CreateWorkbook("my_wb", workbookYAML, "p1", "")
@@ -305,7 +305,7 @@ func TestWorkbookService_Create_OK(t *testing.T) {
 }
 
 func TestWorkbookService_Create_NestedWorkflow(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := NewWorkbookService(store)
 
 	_, err := svc.CreateWorkbook("nested", workbookNestedYAML, "", "")
@@ -324,7 +324,7 @@ func TestWorkbookService_Create_NestedWorkflow(t *testing.T) {
 }
 
 func TestWorkbookService_Create_InvalidYAML(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := NewWorkbookService(store)
 
 	_, err := svc.CreateWorkbook("bad_wb", invalidWorkbook, "", "")
@@ -336,7 +336,7 @@ func TestWorkbookService_Create_InvalidYAML(t *testing.T) {
 func TestWorkbookService_Create_DedupOnRetry(t *testing.T) {
 	// CreateWorkbook is idempotent for workflows: re-registering the same
 	// workbook should silently skip already-existing workflows.
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := NewWorkbookService(store)
 
 	if _, err := svc.CreateWorkbook("dup_wb", workbookYAML, "", ""); err != nil {

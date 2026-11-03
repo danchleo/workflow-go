@@ -490,7 +490,7 @@ tasks:
 `
 
 func TestWorkflowService_Create_NoStartTask(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := services.NewWorkflowService(store)
 	_, err := svc.CreateWorkflow("no_start", noStartTaskWF, "p", "")
 	if err == nil {
@@ -504,7 +504,7 @@ func TestWorkflowService_Create_NoStartTask(t *testing.T) {
 func TestEngine_StartWorkflow_NoStartTask_Direct(t *testing.T) {
 	// Manually bypass CreateWorkflow validation (e.g. direct DB write)
 	// to confirm engine.StartWorkflow ALSO rejects it as a defense-in-depth.
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	data, err := parser.ParseYAML(noStartTaskWF)
 	if err != nil {
 		t.Fatal(err)
@@ -552,7 +552,7 @@ tasks:
     action: std.echo
     requires: [end]
 `
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	svc := services.NewWorkflowService(store)
 	wfDef, err := svc.CreateWorkflow("rev_cycle", reverseCycleWF, "p", "")
 	if err != nil {

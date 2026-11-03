@@ -103,6 +103,16 @@ func NewSQLStore(dsn string) (Store, error) {
 	}, nil
 }
 
+// MustNewSQLStore opens a Store or panics. Convenience for cmd/ entrypoints
+// where DSN failure is a fatal boot error anyway.
+func MustNewSQLStore(dsn string) Store {
+	s, err := NewSQLStore(dsn)
+	if err != nil {
+		panic(fmt.Sprintf("NewSQLStore(%s): %v", dsn, err))
+	}
+	return s
+}
+
 // detectDriver picks DriverX from a DSN string prefix.
 func detectDriver(dsn string) Driver {
 	low := strings.ToLower(dsn)
@@ -115,6 +125,35 @@ func detectDriver(dsn string) Driver {
 		return DriverSQLite
 	}
 }
+
+// txRWMutex wraps sync.RWMutex but NO-OPs all operations when the current
+// goroutine is inside RunInTransaction. This matches the Python reference
+// model where the transaction itself is the serialisation boundary — CRUD
+// methods inside a transaction don't need their own lock.
+type txRWMutex struct{ m sync.RWMutex }
+
+func (m *txRWMutex) Lock() {
+	if !inTx() {
+		m.m.Lock()
+	}
+}
+func (m *txRWMutex) Unlock() {
+	if !inTx() {
+		m.m.Unlock()
+	}
+}
+func (m *txRWMutex) RLock() {
+	if !inTx() {
+		m.m.RLock()
+	}
+}
+func (m *txRWMutex) RUnlock() {
+	if !inTx() {
+		m.m.RUnlock()
+	}
+}
+func (m *txRWMutex) rawLock()   { m.m.Lock() }
+func (m *txRWMutex) rawUnlock() { m.m.Unlock() }
 
 // sqlStore is the top-level aggregate that implements Store.
 //

@@ -2107,10 +2107,8 @@ func evaluateTaskInput(
 
 // buildPublishContext builds the context for publish clause evaluation.
 func buildPublishContext(wfEx *db.WorkflowExecution, taskEx *db.TaskExecution) map[string]interface{} {
-	// Load all task executions for this workflow.
-	tasks, _ := db.NewInMemoryStore().TaskExecutions().List(wfEx.ID, "")
-	ctx := workflow.BuildFullContext(wfEx, nil, tasks)
-	_ = taskEx // taskEx-specific context additions handled by BuildFullContext.
+	ctx := workflow.BuildFullContext(wfEx, nil, nil)
+	_ = taskEx
 	return ctx
 }
 

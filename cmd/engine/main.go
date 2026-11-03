@@ -58,7 +58,7 @@ func main() {
 	var store db.Store
 	var err error
 	if *dbURL == ":memory:" {
-		store = db.NewInMemoryStore()
+		store = db.MustNewSQLStore(":memory:")
 	} else {
 		store, err = db.NewSQLStore(*dbURL)
 		if err != nil {

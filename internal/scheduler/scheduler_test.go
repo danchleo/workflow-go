@@ -26,7 +26,7 @@ func registerSimpleHandler() (ch chan int, unreg func()) {
 }
 
 func TestDefaultScheduler_FiresInOrder(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	s := NewDefaultScheduler(store, 50*time.Millisecond, 0, 5*time.Second, 0, 0)
 	s.Start()
 	defer s.Stop()
@@ -55,7 +55,7 @@ func TestDefaultScheduler_FiresInOrder(t *testing.T) {
 }
 
 func TestDefaultScheduler_CancelWorks(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	s := NewDefaultScheduler(store, 50*time.Millisecond, 0, 5*time.Second, 0, 0)
 	s.Start()
 	defer s.Stop()
@@ -80,7 +80,7 @@ func TestDefaultScheduler_CancelWorks(t *testing.T) {
 }
 
 func TestDefaultScheduler_ImmediateJobsFire(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	s := NewDefaultScheduler(store, 50*time.Millisecond, 0, 5*time.Second, 0, 0)
 	s.Start()
 	defer s.Stop()
@@ -102,7 +102,7 @@ func TestDefaultScheduler_ImmediateJobsFire(t *testing.T) {
 // TestDefaultScheduler_CrashRecovery simulates: schedule → Stop → Start →
 // verify the DB-backed job survives and fires via jobStoreChecker.
 func TestDefaultScheduler_CrashRecovery(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	s1 := NewDefaultScheduler(store, 50*time.Millisecond, 0, 5*time.Second, 0, 0)
 
 	ch, _ := registerSimpleHandler()
@@ -139,7 +139,7 @@ func TestDefaultScheduler_CrashRecovery(t *testing.T) {
 // TestDefaultScheduler_CapturedAt_Lock: jobStoreChecker should capture
 // jobs whose captured_at is older than captureTimeout (stuck captures).
 func TestDefaultScheduler_CapturedAt_Lock(t *testing.T) {
-	store := db.NewInMemoryStore()
+	store := db.MustNewSQLStore(":memory:")
 	s := NewDefaultScheduler(store, 50*time.Millisecond, 0, 100*time.Millisecond, 0, 0) // 100ms capture timeout
 	s.Start()
 	defer s.Stop()
