@@ -25,7 +25,7 @@ const (
 )
 
 // WorkflowSpec represents a workflow definition (either direct or reverse).
-// Ported from mistral-master/mistral/lang/v2/workflows.py
+// Ported from Python reference/lang/v2/workflows.py
 type WorkflowSpec struct {
 	name          string
 	description   string

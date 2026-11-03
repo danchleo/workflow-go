@@ -24,7 +24,7 @@ func TestEchoAction_Run(t *testing.T) {
 		t.Errorf("unexpected error: %v", res.Error)
 	}
 	s, _ := res.Data.(string)
-	if !strings.Contains(s, "Hello, Mistral!") {
+	if !strings.Contains(s, "Hello, Workflow!") {
 		t.Errorf("Data = %q", res.Data)
 	}
 	if a.Name() != "std.echo" {
@@ -247,7 +247,7 @@ func TestAdHocActionProvider_Instantiate(t *testing.T) {
 	}
 	p.Register(desc)
 
-	// Instantiate (the python mistral pattern — descriptor has its own Instantiate method).
+	// Instantiate (the python reference pattern — descriptor has its own Instantiate method).
 	a, err := desc.Instantiate(nil)
 	if err != nil {
 		t.Fatalf("Instantiate: %v", err)

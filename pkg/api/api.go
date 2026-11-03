@@ -1,5 +1,5 @@
 // Package api provides a minimal REST API for the workflow engine.
-// Ported from mistral-master/mistral/api/
+// Ported from Python referenceapi/
 package api
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/danchleo/workflow-go/internal/services"
 )
 
-// Server is the Mistral API server.
+// Server is the Workflow API server.
 type Server struct {
 	store      db.Store
 	engine     engine.Engine
@@ -75,7 +75,7 @@ func (s *Server) Start(addr string) error {
 		Addr:    addr,
 		Handler: s.Router(),
 	}
-	log.Printf("Mistral API server listening on %s", addr)
+	log.Printf("Workflow API server listening on %s", addr)
 	return s.httpServer.ListenAndServe()
 }
 

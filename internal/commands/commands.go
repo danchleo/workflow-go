@@ -1,6 +1,6 @@
 // Package commands defines workflow command types that form the protocol
 // between workflow controllers and their clients (engine, dispatcher, etc).
-// Ported from mistral-master/mistral/workflow/commands.py
+// Ported from reference/workflow/commands.py
 package commands
 
 import (

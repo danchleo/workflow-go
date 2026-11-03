@@ -991,31 +991,31 @@ func (s *sqlCodeSourceStore) Delete(id string) error {
 	return s.store.currentDB().Delete(&gCodeSource{}, "id = ?", id).Error
 }
 
-// --- MistralMetricsStore (simple key/value) ---
+// --- MetricsStore (simple key/value) ---
 
-type sqlMistralMetricsStore struct{ store *sqlStore }
+type sqlMetricsStore struct{ store *sqlStore }
 
-func (s *sqlMistralMetricsStore) GetByName(name string) (*MistralMetrics, error) {
-	var m MistralMetrics
+func (s *sqlMetricsStore) GetByName(name string) (*Metrics, error) {
+	var m Metrics
 	if err := s.store.currentDB().Where("name = ?", name).First(&m).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil, &NotFoundError{Entity: "MistralMetrics", ID: name}
+			return nil, &NotFoundError{Entity: "Metrics", ID: name}
 		}
 		return nil, err
 	}
 	return &m, nil
 }
 
-func (s *sqlMistralMetricsStore) Set(name, value string) error {
-	var existing MistralMetrics
+func (s *sqlMetricsStore) Set(name, value string) error {
+	var existing Metrics
 	err := s.store.currentDB().Where("name = ?", name).First(&existing).Error
 	if err == nil {
 		existing.Value = value
 		return s.store.currentDB().Save(&existing).Error
 	}
-	return s.store.currentDB().Create(&MistralMetrics{Name: name, Value: value}).Error
+	return s.store.currentDB().Create(&Metrics{Name: name, Value: value}).Error
 }
 
-func (s *sqlMistralMetricsStore) Delete(name string) error {
-	return s.store.currentDB().Where("name = ?", name).Delete(&MistralMetrics{}).Error
+func (s *sqlMetricsStore) Delete(name string) error {
+	return s.store.currentDB().Where("name = ?", name).Delete(&Metrics{}).Error
 }

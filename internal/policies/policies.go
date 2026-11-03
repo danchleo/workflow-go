@@ -1,5 +1,5 @@
 // Package policies provides a hook interface for engine policies (retry, timeout, concurrency, etc).
-// Ported from mistral-master/mistral/engine/policies.py and mistral/policies/
+// Ported from reference/engine/policies.py and reference/policies/
 package policies
 
 import (

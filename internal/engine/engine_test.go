@@ -142,7 +142,7 @@ func TestEngine_DirectWorkflow_EndToEnd(t *testing.T) {
 	}
 
 	params := map[string]interface{}{"env": map[string]interface{}{}, "namespace": ""}
-	input := map[string]interface{}{"greeting": "Hi", "name": "Mistral"}
+	input := map[string]interface{}{"greeting": "Hi", "name": "Workflow"}
 
 	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", input, "test", params)
 	if err != nil {

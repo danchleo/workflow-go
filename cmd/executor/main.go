@@ -1,6 +1,6 @@
 // Command executor is a standalone action-executor process.
 //
-// Mirrors Python mistral's mistral/executors/executor_server.py:
+// Mirrors Python reference's reference/executors/executor_server.py:
 // This process owns the LocalExecutor and exposes it over HTTP at
 // /v1/actions/run. An engine process with --executor=remote points its
 // RemoteExecutor at this server's base URL.

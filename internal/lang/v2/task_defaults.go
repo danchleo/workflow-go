@@ -1,7 +1,7 @@
 package v2
 
 // TaskDefaultsSpec holds default settings that apply to all tasks in a workflow.
-// Ported from mistral-master/mistral/lang/v2/task_defaults.py
+// Ported from reference/lang/v2/task_defaults.py
 type TaskDefaultsSpec struct {
 	description string
 	policies    *PoliciesSpec

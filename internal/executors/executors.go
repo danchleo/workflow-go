@@ -1,5 +1,5 @@
 // Package executors defines the action execution interface and executors.
-// Ported from mistral-master/mistral/executors/
+// Ported from Python reference/executors/
 //
 // Python 架构（关键设计，必须对齐）：
 //
@@ -21,7 +21,7 @@
 //  3. RunAction **内部**通过 self._engine_client.on_action_complete() 回调
 //     （本地进程里是 LocalEngineClient 直接内调；远程进程里是 RPC EngineClient）
 //  4. 回调条件：action_ex_id 非空 AND (action.is_sync() OR result.is_error())
-//  5. 回调异常处理：MistralException → send_error_back retry；其他 Exception → 只 log
+//  5. 回调异常处理：reference.Exception → send_error_back retry；其他 Exception → 只 log
 //
 // Go 完全照搬这个设计：
 //   - DefaultExecutor 持有 rpc.EngineClient（构造时注入）
@@ -64,7 +64,7 @@ import (
 )
 
 // Executor is the interface that action executors must implement.
-// Ported from mistral-master/mistral/executors/base.py
+// Ported from Python reference/executors/base.py
 //
 // Go 签名与 Python 的差异：
 //   - context.Context ctx — Go 标准
@@ -84,7 +84,7 @@ type Executor interface {
 }
 
 // DefaultExecutor is the built-in executor that runs actions in-process.
-// Ported from mistral-master/mistral/executors/default_executor.py
+// Ported from Python reference/executors/default_executor.py
 //
 // Critical: DefaultExecutor HOLDS an rpc.EngineClient, injected at construction.
 // This matches Python's self._engine_client = rpc.get_engine_client().
@@ -133,7 +133,7 @@ func NewDefaultExecutor(engineClient rpc.EngineClient) *DefaultExecutor {
 //	    try:
 //	        if action_ex_id and (action.is_sync() or result.is_error()):
 //	            self._engine_client.on_action_complete(...)  ← CALLBACK
-//	    except MistralException as e:
+//	    except reference.Exception as e:
 //	        return send_error_back(msg)        ← retry as error
 //	    except Exception as e:
 //	        LOG.exception(msg)                ← just log
@@ -155,7 +155,7 @@ func (e *DefaultExecutor) RunAction(
 
 	// --- send_error_back closure (mirrors Python) ---
 	// Python: def send_error_back(error_msg):
-	//            error_result = mistral_lib.Result(error=error_msg)
+	//            error_result = reference_lib.Result(error=error_msg)
 	//            if action_ex_id:
 	//                self._engine_client.on_action_complete(action_ex_id, error_result)
 	//                return None
@@ -230,7 +230,7 @@ func (e *DefaultExecutor) RunAction(
 	}
 
 	// --- Normal completion: return result to caller ---
-	// Python Mistral 的 DefaultExecutor 内部持有 engineClient，在
+	// Python reference 的 DefaultExecutor 内部持有 engineClient，在
 	// is_sync() || is_error() 时回调。但 Go 统一让 engine 层
 	// （DispatchAction）处理回调——这样 DefaultExecutor 和
 	// RemoteExecutor 都走同一条路径。executorapi.Server 拿到 result
@@ -238,10 +238,10 @@ func (e *DefaultExecutor) RunAction(
 	return result, nil
 }
 
-// engineComplete calls engineClient.OnActionComplete with panic recovery + MistralException retry.
+// engineComplete calls engineClient.OnActionComplete with panic recovery + reference.Exception retry.
 // Mirrors Python's try/except around self._engine_client.on_action_complete():
 //
-//	except exc.MistralException → send_error_back retry
+//	except exc.reference.Exception → send_error_back retry
 //	except Exception → only log
 func (e *DefaultExecutor) engineComplete(ctx context.Context, actionExID string, result *db.Result) {
 	if e.engineClient == nil || actionExID == "" {
@@ -249,7 +249,7 @@ func (e *DefaultExecutor) engineComplete(ctx context.Context, actionExID string,
 	}
 	defer func() {
 		if rec := recover(); rec != nil {
-			// panic → retry with error result (Python's MistralException path)
+			// panic → retry with error result (Python's reference.Exception path)
 			log.Printf("DefaultExecutor: panic on OnActionComplete for %s: %v", actionExID, rec)
 			e.engineCompleteError(ctx, actionExID,
 				fmt.Sprintf("OnActionComplete panic: %v", rec))
@@ -257,7 +257,7 @@ func (e *DefaultExecutor) engineComplete(ctx context.Context, actionExID string,
 	}()
 
 	if err := e.engineClient.OnActionComplete(ctx, actionExID, result, false); err != nil {
-		// Python MistralException → send_error_back retry
+		// Python reference.Exception → send_error_back retry
 		log.Printf("DefaultExecutor: OnActionComplete failed for %s: %v", actionExID, err)
 		e.engineCompleteError(ctx, actionExID,
 			fmt.Sprintf("OnActionComplete failed: %v", err))
@@ -282,7 +282,7 @@ func (e *DefaultExecutor) engineCompleteError(ctx context.Context, actionExID st
 }
 
 // RemoteExecutor calls an HTTP executor server to run the action on a remote worker.
-// Ported from mistral-master/mistral/executors/remote_executor.py which uses
+// Ported from Python reference/executors/remote_executor.py which uses
 // oslo.messaging RPC. Go uses a simple HTTP POST + JSON.
 //
 // 重要：RemoteExecutor 是 engine 进程里的组件，它 POST HTTP 到 executor 进程，

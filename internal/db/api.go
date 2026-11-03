@@ -145,9 +145,9 @@ type CodeSourceStore interface {
 	Delete(id string) error
 }
 
-// MistralMetricsStore defines CRUD for metrics key/value.
-type MistralMetricsStore interface {
-	GetByName(name string) (*MistralMetrics, error)
+// MetricsStore defines CRUD for metrics key/value.
+type MetricsStore interface {
+	GetByName(name string) (*Metrics, error)
 	Set(name, value string) error
 	Delete(name string) error
 }
@@ -167,14 +167,14 @@ type Store interface {
 	EventTriggers() EventTriggerStore
 	ResourceMembers() ResourceMemberStore
 	CodeSources() CodeSourceStore
-	MistralMetrics() MistralMetricsStore
+	Metrics() MetricsStore
 
 	// Lock management.
 	//
 	// Lock(name) returns a per-named re-entrant mutex. The same goroutine
 	// can Lock the same name multiple times without deadlocking; different
 	// goroutines serialize. Engine uses "wf:<wfExID>" as the lock key —
-	// this is the Go equivalent of Python Mistral's DB-level advisory lock
+	// this is the Go equivalent of Python reference's DB-level advisory lock
 	// on workflow_execution. For SQL backends, replace the in-process map
 	// with real DB advisory locks (pg_advisory_lock / MySQL GET_LOCK) to
 	// support multi-process engine clusters like Python does.

@@ -1,5 +1,5 @@
 // Package parser provides YAML parsing and specification caching utilities.
-// Ported from mistral-master/mistral/lang/parser.py
+// Ported from Python reference/lang/parser.py
 package parser
 
 import (
@@ -25,7 +25,7 @@ var (
 )
 
 // ParseYAML parses YAML text into a generic map and validates the DSL version.
-// Only version "2.0" is supported (matches Mistral v2.0 DSL). An explicit
+// Only version "2.0" is supported (matches v2.0 DSL). An explicit
 // version field is required — missing or non-"2.0" values are rejected.
 func ParseYAML(text string) (map[string]interface{}, error) {
 	var result map[string]interface{}

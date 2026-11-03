@@ -6,7 +6,7 @@ import (
 )
 
 // OnClauseSpec represents an "on-xxx" clause in a task definition.
-// Ported from mistral-master/mistral/lang/v2/on_clause.py prepare_next_clause.
+// Ported from reference/lang/v2/on_clause.py prepare_next_clause.
 //
 // Python's prepare_next_clause produces triples (task_name, condition, params).
 // condition (a.k.a. "when:") is optional — empty string = always run.

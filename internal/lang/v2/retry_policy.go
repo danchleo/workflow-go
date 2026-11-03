@@ -1,7 +1,7 @@
 package v2
 
 // RetrySpec represents the retry policy for a task.
-// Ported from mistral-master/mistral/lang/v2/retry_policy.py
+// Ported from reference/lang/v2/retry_policy.py
 type RetrySpec struct {
 	count   interface{}
 	delay   interface{}

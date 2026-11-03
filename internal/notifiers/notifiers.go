@@ -1,5 +1,5 @@
 // Package notifiers provides a simple webhook / notification interface.
-// Ported from mistral-master/mistral/notifiers/
+// Ported from Python reference/notifiers/
 package notifiers
 
 import (

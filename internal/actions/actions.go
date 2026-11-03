@@ -1,5 +1,5 @@
 // Package actions defines the action interface and standard built-in actions.
-// Ported from mistral-master/mistral/actions/std_actions.py
+// Ported from Python reference/actions/std_actions.py
 package actions
 
 import (
@@ -16,8 +16,8 @@ import (
 	"github.com/danchleo/workflow-go/internal/expressions"
 )
 
-// Action is the interface that all Mistral actions must implement.
-// Ported from mistral_lib.actions.Action
+// Action is the interface that all Workflow actions must implement.
+// Ported from reference_lib.actions.Action
 type Action interface {
 	// Run executes the action.
 	Run(input map[string]interface{}) (*db.Result, error)
@@ -49,7 +49,7 @@ type EchoAction struct {
 }
 
 func NewEchoAction() Action {
-	return &EchoAction{Output: "Hello, Mistral!"}
+	return &EchoAction{Output: "Hello, Workflow!"}
 }
 
 func (a *EchoAction) Run(input map[string]interface{}) (*db.Result, error) {
@@ -62,7 +62,7 @@ func (a *EchoAction) Run(input map[string]interface{}) (*db.Result, error) {
 func (a *EchoAction) Name() string { return "std.echo" }
 func (a *EchoAction) IsSync() bool { return true }
 
-// HttpAction performs an HTTP request. Input keys (mirroring Mistral std.http):
+// HttpAction performs an HTTP request. Input keys (mirroring reference std.http):
 //
 //	method   — GET/POST/PUT/DELETE/PATCH/HEAD (default GET)
 //	url      — required
@@ -168,7 +168,7 @@ func (a *HttpAction) Run(input map[string]interface{}) (*db.Result, error) {
 	}, nil
 }
 
-// MistralHttpAction triggers a workflow in this engine via HTTP.
+// WorkflowHTTPAction triggers a workflow in this engine via HTTP.
 // Input keys:
 //
 //	url       — engine API base, e.g. "http://localhost:8989" (default)
@@ -179,21 +179,21 @@ func (a *HttpAction) Run(input map[string]interface{}) (*db.Result, error) {
 //	timeout   — seconds (default 30)
 //
 // Output contains the new workflow execution ID and state.
-type MistralHttpAction struct{}
+type WorkflowHTTPAction struct{}
 
-func NewMistralHttpAction() Action { return &MistralHttpAction{} }
+func NewWorkflowHTTPAction() Action { return &WorkflowHTTPAction{} }
 
-func (a *MistralHttpAction) Name() string { return "std.mistral_http" }
-func (a *MistralHttpAction) IsSync() bool { return true }
+func (a *WorkflowHTTPAction) Name() string { return "std.workflow_http" }
+func (a *WorkflowHTTPAction) IsSync() bool { return true }
 
-func (a *MistralHttpAction) Run(input map[string]interface{}) (*db.Result, error) {
+func (a *WorkflowHTTPAction) Run(input map[string]interface{}) (*db.Result, error) {
 	base := "http://localhost:8989"
 	if b, ok := input["url"].(string); ok && b != "" {
 		base = b
 	}
 	wfName, _ := input["workflow"].(string)
 	if wfName == "" {
-		return &db.Result{Error: "std.mistral_http requires 'workflow' input"}, nil
+		return &db.Result{Error: "std.workflow_http requires 'workflow' input"}, nil
 	}
 
 	payload := map[string]interface{}{
@@ -207,13 +207,13 @@ func (a *MistralHttpAction) Run(input map[string]interface{}) (*db.Result, error
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return &db.Result{Error: fmt.Sprintf("std.mistral_http: marshal: %v", err)}, nil
+		return &db.Result{Error: fmt.Sprintf("std.workflow_http: marshal: %v", err)}, nil
 	}
 
 	url := strings.TrimRight(base, "/") + "/v2/executions"
 	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
-		return &db.Result{Error: fmt.Sprintf("std.mistral_http: req: %v", err)}, nil
+		return &db.Result{Error: fmt.Sprintf("std.workflow_http: req: %v", err)}, nil
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if h, ok := input["headers"].(map[string]interface{}); ok {
@@ -232,7 +232,7 @@ func (a *MistralHttpAction) Run(input map[string]interface{}) (*db.Result, error
 	resp, err := client.Do(req)
 	if err != nil {
 		return &db.Result{
-			Error: fmt.Sprintf("std.mistral_http: request failed: %v", err),
+			Error: fmt.Sprintf("std.workflow_http: request failed: %v", err),
 			Data:  map[string]interface{}{"url": url, "workflow": wfName},
 		}, nil
 	}
@@ -343,7 +343,7 @@ func (a *SSHAction) Run(input map[string]interface{}) (*db.Result, error) {
 //	proxy_command        — optional custom proxy command
 //
 // Go version is a simulated stub (real SSH + proxy would need crypto libs)
-// but preserves the exact Mistral DSL action name and parameter contract.
+// but preserves the exact reference DSL action name and parameter contract.
 type SSHProxiedAction struct{}
 
 func NewSSHProxiedAction() Action { return &SSHProxiedAction{} }
@@ -380,9 +380,9 @@ func (a *SSHProxiedAction) Run(input map[string]interface{}) (*db.Result, error)
 
 // JavaScriptAction evaluates a JavaScript script with a context map.
 //
-// Ported from Python mistral/actions/std_actions.py JavaScriptAction which
+// Ported from Python reference/actions/std_actions.py JavaScriptAction which
 // uses py_mini_racer. The full-featured JS interpreter (v8, goja) can be
-// plugged in later; for now we implement the Mistral-standard semantics by
+// plugged in later; for now we implement the reference-standard semantics by
 // routing the script through the expressions engine for simple expressions
 // plus a set of built-in functions. Users who need real JS evaluation should
 // depend on a goja/v8 binding and replace this implementation.
@@ -406,7 +406,7 @@ func (a *JavaScriptAction) Run(input map[string]interface{}) (*db.Result, error)
 		return &db.Result{Error: "std.javascript requires 'script'"}, nil
 	}
 
-	// If the script is a simple expression like `<% $.foo + 1 %>` (Mistral
+	// If the script is a simple expression like `<% $.foo + 1 %>` (Workflow
 	// expression syntax), route through the expressions engine directly.
 	if strings.HasPrefix(script, "<%") || strings.Contains(script, "${") {
 		ctx, _ := input["context"].(map[string]interface{})
@@ -638,11 +638,11 @@ func (r *ActionRegistry) RegisterBuiltinActions() {
 
 	r.Register(
 		&ActionDescriptor{
-			Name:        "std.mistral_http",
+			Name:        "std.workflow_http",
 			Description: "Triggers a workflow in this engine via HTTP POST /v2/executions",
 			IsSystem:    true,
 			Factory: func() Action {
-				return NewMistralHttpAction()
+				return NewWorkflowHTTPAction()
 			},
 		},
 	)
@@ -683,7 +683,7 @@ func (r *ActionRegistry) RegisterBuiltinActions() {
 	r.Register(
 		&ActionDescriptor{
 			Name:        "std.javascript",
-			Description: "Evaluates a JavaScript expression (falls back to Mistral expressions)",
+			Description: "Evaluates a JavaScript expression (falls back to Workflow expressions)",
 			IsSystem:    true,
 			Factory: func() Action {
 				return NewJavaScriptAction()
@@ -694,7 +694,7 @@ func (r *ActionRegistry) RegisterBuiltinActions() {
 	r.Register(
 		&ActionDescriptor{
 			Name:        "std.test_dict",
-			Description: "Returns a fixed test dict (standard Mistral testing helper)",
+			Description: "Returns a fixed test dict (standard Workflow testing helper)",
 			IsSystem:    true,
 			Factory: func() Action {
 				return NewTestDictAction()
@@ -762,7 +762,7 @@ func (s *syncLock) RUnlock() { s.Unlock() }
 // --- ActionProvider layer ---
 
 // ActionProvider resolves action names to descriptors. Mirrors Python's
-// mistral_lib.actions.ActionProvider and the CompositeActionProvider facade.
+// reference_lib.actions.ActionProvider and the CompositeActionProvider facade.
 // Go's ActionRegistry is a built-in system provider; tests can add a
 // TestActionProvider to inject mock actions without creating real workflows.
 type ActionProvider interface {
@@ -817,7 +817,7 @@ func (p *registryProvider) Find(name, namespace string) (*ActionDescriptor, bool
 func (p *registryProvider) List(namespace string) []*ActionDescriptor { return p.r.List() }
 
 // TestActionProvider allows tests to register ad-hoc action descriptors
-// at runtime. Mirrors Python's mistral/actions/test.py TestActionProvider.
+// at runtime. Mirrors Python's reference/actions/test.py TestActionProvider.
 // Useful for integration tests where you need a one-off "mock" action
 // without creating a full workflow definition.
 type TestActionProvider struct {
@@ -879,7 +879,7 @@ func (p *TestActionProvider) List(namespace string) []*ActionDescriptor {
 
 // AdHocAction wraps a base action with resolved input from an ad-hoc
 // action definition (YAML "action" object with base/base-input).
-// Mirrors Python's mistral/actions/adhoc.py AdHocAction / AdHocActionDescriptor.
+// Mirrors Python's reference/actions/adhoc.py AdHocAction / AdHocActionDescriptor.
 //
 // Example: a user defines "actions: { my_action: { base: std.echo,
 // base-input: { output: <% $.foo %> } } }". At runtime the engine first

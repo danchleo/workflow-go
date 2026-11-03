@@ -11,7 +11,7 @@ const (
 )
 
 // TaskSpec represents a single task in a workflow.
-// Ported from mistral-master/mistral/lang/v2/tasks.py
+// Ported from reference/lang/v2/tasks.py
 type TaskSpec struct {
 	name           string
 	description    string
@@ -98,7 +98,7 @@ func NewTaskSpec(name string, data map[string]interface{}, taskType string) *Tas
 	}
 
 	// Concurrency limit — positive integer; 0 means unlimited (Python default).
-	// Mirrors mistral/lang/v2/tasks.py EXPRESSION_OR_POSITIVE_INTEGER schema.
+	// Mirrors reference/lang/v2/tasks.py EXPRESSION_OR_POSITIVE_INTEGER schema.
 	// Read from both top-level key and policies.block (Python accepts both).
 	readConcurrency := func(v interface{}) int {
 		switch n := v.(type) {
@@ -121,7 +121,7 @@ func NewTaskSpec(name string, data map[string]interface{}, taskType string) *Tas
 		}
 	}
 
-	// Publish — three forms supported (mirrors Python mistral):
+	// Publish — three forms supported (mirrors Python reference):
 	//   1. Shorthand: publish: {k: v, k2: v2}          → all keys treated as global
 	//   2. Explicit:  publish: {global: {...}, branch: {...}}
 	//   3. Mixed:     publish: {global: {...}, extra_key: expr}  (rare)
@@ -158,7 +158,7 @@ func NewTaskSpec(name string, data map[string]interface{}, taskType string) *Tas
 		s.publishOnSkip = v
 	}
 
-	// Policies - group policy fields. Two sources supported (mirrors Mistral):
+	// Policies - group policy fields. Two sources supported (mirrors reference):
 	//   1. Direct:  task.retry: {count: 3}              ← top-level key
 	//   2. Block:   task.policies: {retry: {count: 3}}  ← grouped under policies:
 	policyFields := []string{"retry", "wait-before", "wait-after", "timeout", "pause-before", "concurrency", "fail-on"}
@@ -253,7 +253,7 @@ func mergeMaps(a, b map[string]interface{}) map[string]interface{} {
 }
 
 // parseWithItems parses the 'with-items' expression.
-// Three formats supported (mirror Python mistral/lang/v2/tasks.py _parse_with_items):
+// Three formats supported (mirror Python reference/lang/v2/tasks.py _parse_with_items):
 //  1. String:      "var1 in <% $.array1 %>, var2 in <% $.array2 %>"   (multi-var)
 //  2. List of strs: ["var1 in <% $.array1 %>", "var2 in <% $.array2 %>"]
 //  3. Map:         {item: [a, b, c]}  — var → literal item list

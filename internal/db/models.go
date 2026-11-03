@@ -1,6 +1,6 @@
 // Package db defines database models, interfaces, and implementations.
 //
-// Ported from mistral-master/mistral/db/v2/sqlalchemy/models.py
+// Ported from reference/db/v2/sqlalchemy/models.py
 //
 // Core execution entity relationships:
 //
@@ -243,7 +243,7 @@ type ActionExecution struct {
 }
 
 // ScheduledJob is a persistent delayed-job record — the Go equivalent of
-// Python's scheduled_jobs_v2 table (mistral/db/v2/sqlalchemy/models.py).
+// Python's scheduled_jobs_v2 table (reference/db/v2/sqlalchemy/models.py).
 // On Schedule() we persist to DB first, then push to in-memory heap.
 // On Start() we recover from DB. On crash, jobs survive to be picked up
 // by jobStoreChecker on next start.
@@ -286,7 +286,7 @@ type CronTrigger struct {
 	UpdatedAt           time.Time              `json:"updated_at"`
 }
 
-// NamedLock mirrors Python mistral/db/v2/sqlalchemy/models.py NamedLock.
+// NamedLock mirrors Python reference/db/v2/sqlalchemy/models.py NamedLock.
 //
 // Used as a distributed mutex across scheduler workers: a worker acquires
 // the lock by attempting to Insert a row with unique (Name) — two workers
@@ -308,7 +308,7 @@ func (nl *NamedLock) Validate() error {
 	return nil
 }
 
-// DynamicActionDefinition mirrors Python mistral/db/v2/sqlalchemy/models.py
+// DynamicActionDefinition mirrors Python reference/db/v2/sqlalchemy/models.py
 // DynamicActionDefinition. Registers a dynamically-loaded action at runtime.
 // In Python this pairs with CodeSource (a code blob). The Go version is
 // simplified: no CodeSource model (embedded code is a separate problem) —
@@ -333,7 +333,7 @@ func (d *DynamicActionDefinition) Validate() error {
 	return nil
 }
 
-// EventTrigger mirrors Python mistral/db/v2/sqlalchemy/models.py EventTrigger.
+// EventTrigger mirrors Python reference/db/v2/sqlalchemy/models.py EventTrigger.
 // Maps an external event (exchange + topic + event) to a workflow definition.
 // The engine's event handler calls events.Subscribe() for each row.
 type EventTrigger struct {
@@ -361,7 +361,7 @@ func (e *EventTrigger) Validate() error {
 	return nil
 }
 
-// ResourceMember mirrors Python mistral/db/v2/sqlalchemy/models.py ResourceMember.
+// ResourceMember mirrors Python reference/db/v2/sqlalchemy/models.py ResourceMember.
 // Tracks who has what role on a resource (workflow, workbook, action).
 type ResourceMember struct {
 	ID           string    `json:"id"`
@@ -433,7 +433,7 @@ func (r *Result) FromDict(d map[string]interface{}) {
 	}
 }
 
-// CodeSource mirrors Python mistral/db/v2/sqlalchemy/models.py CodeSource.
+// CodeSource mirrors Python reference/db/v2/sqlalchemy/models.py CodeSource.
 // Stores a blob of source code paired with DynamicActionDefinition —
 // the Go engine rarely loads this at runtime (user-defined dynamic actions
 // are compiled out-of-band), but the model is required so that dynamic
@@ -458,10 +458,10 @@ func (c *CodeSource) Validate() error {
 	return nil
 }
 
-// MistralMetrics mirrors Python mistral/db/v2/sqlalchemy/models.py MistralMetrics.
+// Metrics mirrors Python reference/db/v2/sqlalchemy/models.py Metrics.
 // Single-row-style key/value for maintenance mode and other engine-wide toggles.
 // Known keys (from Python api/controllers/maintenance.py): "maintenance".
-type MistralMetrics struct {
+type Metrics struct {
 	ID    int    `json:"id" gorm:"primaryKey;autoIncrement"`
 	Name  string `json:"name" gorm:"uniqueIndex"`
 	Value string `json:"value"`

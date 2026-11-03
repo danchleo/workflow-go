@@ -1,5 +1,5 @@
 // Package services contains high-level service functions used by the engine and API.
-// Ported from mistral-master/mistral/services/
+// Ported from Python reference/services/
 package services
 
 import (
@@ -107,7 +107,7 @@ func NewWorkbookService(store db.Store) *WorkbookService {
 
 // CreateWorkbook parses and saves a workbook, creating all contained
 // workflow definitions as separate DB records. Mirrors Python
-// mistral.services.workbooks._create_or_update_workflows: each workflow
+// reference/services.workbooks._create_or_update_workflows: each workflow
 // is registered as "<wb_name>.<wf_name>" with WorkbookName stamped.
 func (s *WorkbookService) CreateWorkbook(name string, definition string, projectID, namespace string) (
 	*db.Workbook, error,

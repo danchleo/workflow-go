@@ -1,5 +1,5 @@
 // Package scheduler provides a general-purpose delayed-job scheduler that
-// mirrors Python mistral.scheduler's DefaultScheduler architecture:
+// mirrors Python reference/scheduler's DefaultScheduler architecture:
 //
 //  1. On Schedule() → persist to DB FIRST (ScheduledJob), then push to
 //     in-memory heap for fast local dispatch.
@@ -99,7 +99,7 @@ type Scheduler interface {
 }
 
 // DefaultScheduler is the heap + DB-backed implementation — the Go
-// equivalent of Python's mistral.scheduler.DefaultScheduler.
+// equivalent of Python's reference/scheduler.DefaultScheduler.
 type DefaultScheduler struct {
 	store db.Store
 

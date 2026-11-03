@@ -20,7 +20,7 @@ type WorkflowStarter interface {
 }
 
 // CronRunner handles DB-backed cron triggers — it is a separate struct so
-// the core scheduler stays pure. Mirrors Python mistral.scheduler's cron
+// the core scheduler stays pure. Mirrors Python reference/scheduler's cron
 // processing loop but simplified (interval-based, not cron-expression).
 type CronRunner struct {
 	store    db.Store

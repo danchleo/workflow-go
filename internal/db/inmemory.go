@@ -29,7 +29,7 @@ type InMemoryStore struct {
 	eventTriggers   map[string]*EventTrigger
 	resourceMembers map[string]*ResourceMember
 	codeSources     map[string]*CodeSource
-	metrics         map[string]*MistralMetrics
+	metrics         map[string]*Metrics
 
 	// Locks: map of lock name -> channel used for simple mutex semantics.
 	locks map[string]chan struct{}
@@ -43,7 +43,7 @@ type InMemoryStore struct {
 }
 
 // txRWMutex wraps sync.RWMutex but NO-OPs all operations when the current
-// goroutine is inside RunInTransaction. This matches the Python Mistral
+// goroutine is inside RunInTransaction. This matches the Python reference
 // model where the transaction itself is the serialisation boundary — CRUD
 // methods inside a transaction don't need their own lock.
 //
@@ -95,14 +95,14 @@ func NewInMemoryStore() *InMemoryStore {
 		eventTriggers:   make(map[string]*EventTrigger),
 		resourceMembers: make(map[string]*ResourceMember),
 		codeSources:     make(map[string]*CodeSource),
-		metrics:         make(map[string]*MistralMetrics),
+		metrics:         make(map[string]*Metrics),
 		locks:           make(map[string]chan struct{}),
 		rlocks:          make(map[string]*reentrantLock),
 	}
 }
 
 // Lock returns a per-named re-entrant mutex. This is the Go equivalent of
-// Python Mistral's DB advisory locks (per-workflow). For production SQL
+// Python reference's DB advisory locks (per-workflow). For production SQL
 // backends (PostgreSQL/MySQL), replace the in-process map with real
 // pg_advisory_lock / MySQL GET_LOCK calls so multiple engine processes
 // coordinate at the DB server level — exactly what Python does.
@@ -132,7 +132,7 @@ func (s *InMemoryStore) DynamicActionDefinitions() DynamicActionDefinitionStore 
 func (s *InMemoryStore) EventTriggers() EventTriggerStore     { return &memEventTriggerStore{s} }
 func (s *InMemoryStore) ResourceMembers() ResourceMemberStore { return &memResourceMemberStore{s} }
 func (s *InMemoryStore) CodeSources() CodeSourceStore         { return &memCodeSourceStore{s} }
-func (s *InMemoryStore) MistralMetrics() MistralMetricsStore  { return &memMistralMetricsStore{s} }
+func (s *InMemoryStore) Metrics() MetricsStore  { return &memMetricsStore{s} }
 
 func (s *InMemoryStore) AcquireLock(name string) error {
 	s.mu.Lock()
@@ -1162,21 +1162,21 @@ func (m *memCodeSourceStore) Delete(id string) error {
 	return nil
 }
 
-// --- MistralMetricsStore (InMemory) ---
+// --- MetricsStore (InMemory) ---
 
-type memMistralMetricsStore struct{ s *InMemoryStore }
+type memMetricsStore struct{ s *InMemoryStore }
 
-func (m *memMistralMetricsStore) GetByName(name string) (*MistralMetrics, error) {
+func (m *memMetricsStore) GetByName(name string) (*Metrics, error) {
 	m.s.mu.RLock()
 	defer m.s.mu.RUnlock()
 	mm, ok := m.s.metrics[name]
 	if !ok {
-		return nil, &NotFoundError{Entity: "MistralMetrics", ID: name}
+		return nil, &NotFoundError{Entity: "Metrics", ID: name}
 	}
 	return mm, nil
 }
 
-func (m *memMistralMetricsStore) Set(name, value string) error {
+func (m *memMetricsStore) Set(name, value string) error {
 	m.s.mu.Lock()
 	defer m.s.mu.Unlock()
 	mm, ok := m.s.metrics[name]
@@ -1184,11 +1184,11 @@ func (m *memMistralMetricsStore) Set(name, value string) error {
 		mm.Value = value
 		return nil
 	}
-	m.s.metrics[name] = &MistralMetrics{Name: name, Value: value}
+	m.s.metrics[name] = &Metrics{Name: name, Value: value}
 	return nil
 }
 
-func (m *memMistralMetricsStore) Delete(name string) error {
+func (m *memMetricsStore) Delete(name string) error {
 	m.s.mu.Lock()
 	defer m.s.mu.Unlock()
 	delete(m.s.metrics, name)

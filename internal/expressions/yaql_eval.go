@@ -22,7 +22,7 @@ type yaqEval struct {
 // making concurrent evaluation safe.
 type BuiltinFunc func(eval *yaqEval, args []interface{}) (interface{}, error)
 
-// NewYaqEval creates a YAQL evaluator with Mistral-standard builtins.
+// NewYaqEval creates a YAQL evaluator with reference-standard builtins.
 func NewYaqEval(ctx map[string]interface{}) *yaqEval {
 	e := &yaqEval{ctx: ctx, builtins: map[string]BuiltinFunc{}}
 	e.registerStd()

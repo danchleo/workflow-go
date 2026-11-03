@@ -1,6 +1,6 @@
 // Command engine is a standalone engine process.
 //
-// Mirrors Python mistral's mistral/engine/engine_server.py:
+// Mirrors Python reference's reference/engine/engine_server.py:
 // This process owns the DefaultEngine + scheduler + DB store, listens on
 // an HTTP port for engine RPC calls (StartWorkflow, OnActionComplete, etc.)
 // from API processes or a caller that uses HttpEngineClient.

@@ -84,7 +84,7 @@ func TestParseIfElse(t *testing.T) {
 	}
 }
 
-// ---------- Evaluator tests (Python-mistral YAQL parity) ----------
+// ---------- Evaluator tests (Python-reference YAQL parity) ----------
 
 func TestYaqArithmetic(t *testing.T) {
 	ctx := map[string]interface{}{"x": 10, "y": 3}
@@ -353,9 +353,9 @@ func TestBuiltinLength(t *testing.T) {
 	}
 }
 
-// TestRealMistralYAMLScenarios covers the actual patterns Python
-// mistral-master uses in production workflows.
-func TestRealMistralYAMLScenarios(t *testing.T) {
+// TestRealWorkflowYAMLScenarios covers the actual patterns the Python
+// reference implementation uses in production workflows.
+func TestRealWorkflowYAMLScenarios(t *testing.T) {
 	ctx := map[string]interface{}{
 		"input": map[string]interface{}{
 			"message": "hello",

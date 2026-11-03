@@ -19,7 +19,7 @@ import (
 	"github.com/danchleo/workflow-go/internal/workflow"
 )
 
-// Ported from mistral-master/mistral/engine/default_engine.py
+// Ported from reference/engine/default_engine.py
 type DefaultEngine struct {
 	store      db.Store
 	dispatcher *Dispatcher
@@ -219,7 +219,7 @@ func registerEngineJobHandlers(e *DefaultEngine) {
 // a delayed callback via the shared scheduler (or time.AfterFunc as fallback)
 // that will force the ActionExecution to ERROR after timeoutSec seconds if
 // it's still not completed. Mirrors Python TimeoutPolicy.before_task_start
-// (mistral/engine/policies.py ~line 412) which schedules _fail_if_incomplete
+// (reference/engine/policies.py ~line 412) which schedules _fail_if_incomplete
 // via the system scheduler.
 func (e *DefaultEngine) scheduleTaskTimeout(
 	actionEx *db.ActionExecution, taskEx *db.TaskExecution, taskSpec *v2.TaskSpec,
@@ -265,7 +265,7 @@ func (e *DefaultEngine) scheduleTaskTimeout(
 }
 
 // failIfIncomplete is the Go equivalent of Python's
-// policies._fail_task_if_incomplete (mistral/engine/policies.py ~line 545).
+// policies._fail_task_if_incomplete (reference/engine/policies.py ~line 545).
 // If the action is still not completed after the timeout, call
 // OnActionComplete with an error Result so retry/with-items/on-error
 // policies run correctly through the normal pipeline.
@@ -883,7 +883,7 @@ func (e *DefaultEngine) StartTaskWithQueue(
 
 	// Create ActionExecution so that OnActionComplete flows correctly through
 	// ActionExecution → TaskExecution → WorkflowExecution chain (port of Python
-	// mistral/engine/actions.py:RegularAction.schedule).
+	// reference/engine/actions.py:RegularAction.schedule).
 	sync := true
 	actionEx := &db.ActionExecution{
 		Name:              taskSpec.GetActionName(),
@@ -947,7 +947,7 @@ func (e *DefaultEngine) startWithItemsTask(
 			// Expression form: "var in <% $.items %>" → evaluate against context.
 			val = expressions.EvaluateRecursively(v, ctxMap)
 		case []interface{}:
-			// Literal list form (Mistral YAML map syntax): with-items: {item: [a, b]}.
+			// Literal list form (Workflow YAML map syntax): with-items: {item: [a, b]}.
 			val = v
 		default:
 			return fmt.Errorf(
@@ -2044,7 +2044,7 @@ func (e *DefaultEngine) checkAndCompleteWorkflow(
 }
 
 // resolveWorkflowName evaluates a potential YAQL expression in a workflow:
-// field value. Python mistral's engine_utils.resolve_workflow_definition
+// field value. Python reference's engine_utils.resolve_workflow_definition
 // first evaluates `workflow: <% $.wf_name %>` expressions against context
 // before doing the scope-aware lookup. Returns the raw string if it's not
 // an expression (backward-compat).
@@ -2148,7 +2148,7 @@ func evaluateOutput(output map[string]interface{}, ctx map[string]interface{}) m
 }
 
 // --- P0: join-task refresh logic -------------------------------------------
-// Ported from mistral/engine/task_handler.py:
+// Ported from reference/engine/task_handler.py:
 //   _check_affected_tasks → scheduleRefreshTaskState → refreshTaskState
 
 // checkAffectedTasks examines the completed task and wakes any waiting join
@@ -2332,7 +2332,7 @@ func (e *DefaultEngine) continueTask(taskEx *db.TaskExecution, wfEx *db.Workflow
 
 // ================================================================
 // P2.1: on_action_update — subworkflow PAUSE/RUNNING cascade to parent workflow.
-// Ported from Python mistral/engine/task_handler.py:_on_action_update.
+// Ported from Python reference/engine/task_handler.py:_on_action_update.
 //
 // Called externally whenever an ActionExecution transitions to a non-terminal
 // state (e.g. PAUSE, RUNNING). The logic is:
@@ -2414,7 +2414,7 @@ func (e *DefaultEngine) OnActionUpdate(wfExID string) error {
 // ================================================================
 // D3: DispatchAction — executor integration.
 //
-// Ported from Python mistral/engine/default_engine.py:_run_action.
+// Ported from Python reference/engine/default_engine.py:_run_action.
 // The Go engine originally left action execution entirely to external test
 // drivers (tests run the action and invoke OnActionComplete). This method
 // closes the loop: given an ActionExecution ID, resolve the matching action
@@ -2527,7 +2527,7 @@ func (e *DefaultEngine) dispatchActionLocked(ctx context.Context, actionExID str
 
 // ================================================================
 // _check_and_fix_integrity — crash-recovery sweep for stuck RUNNING tasks.
-// Ported from Python mistral/engine/workflow_handler.py ~line 110.
+// Ported from Python reference/engine/workflow_handler.py ~line 110.
 //
 // The pattern: a workflow may be left with taskEx.State=RUNNING but NO
 // actionEx=RUNNING (engine crashed in between). The integrity check fires

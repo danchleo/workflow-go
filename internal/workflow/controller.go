@@ -1,7 +1,7 @@
 // Package workflow provides workflow control logic — the algorithms that
 // decide which tasks to run next based on the current state of task executions.
 //
-// Ported from mistral-master/mistral/workflow/
+// Ported from Python reference/workflow/
 package workflow
 
 import (
@@ -16,7 +16,7 @@ import (
 
 // WorkflowController determines the next tasks to run given the current state.
 // Different workflow types (direct, reverse) have different algorithms.
-// Ported from mistral-master/mistral/workflow/base.py
+// Ported from Python reference/workflow/base.py
 type WorkflowController interface {
 	// ContinueWorkflow calculates a list of commands to continue the workflow.
 	// If taskEx is specified, it was the task that just completed.
@@ -48,7 +48,7 @@ type WorkflowController interface {
 
 	// FindIndirectlyAffectedTasks walks outbound transitions from the given task
 	// and returns TaskExecution IDs of join tasks that are transitively affected.
-	// Ported from mistral/workflow/direct_workflow.py find_indirectly_affected_task_executions.
+	// Ported from reference/workflow/direct_workflow.py find_indirectly_affected_task_executions.
 	// Reverse workflow returns nil — there are no join tasks.
 	FindIndirectlyAffectedTasks(taskName string) []string
 }
@@ -65,7 +65,7 @@ type TaskLogicalState struct {
 
 // BuildTaskResultMap builds a nested map like {"task1": {"result": ..., "published": ...}}
 // so that expressions like <% $.task1.result %> resolve correctly.
-// This mirrors data_flow.ContextView from mistral-master/mistral/workflow/data_flow.py
+// This mirrors data_flow.ContextView from reference/workflow/data_flow.py
 func BuildTaskResultMap(taskExecs []*db.TaskExecution) map[string]interface{} {
 	result := make(map[string]interface{})
 	for _, te := range taskExecs {
@@ -159,7 +159,7 @@ func BuildFullContext(
 	}
 	ctx["__task_results"] = taskResults
 
-	// Env — Python mistral calls this __env; we expose both.
+	// Env — Python reference calls this __env; we expose both.
 	var envMap map[string]interface{}
 	if e, ok := wfEx.Params["env"].(map[string]interface{}); ok {
 		envMap = e
@@ -193,7 +193,7 @@ func BuildFullContext(
 }
 
 // BuildTaskExpressionContext adds per-task execution details to ctx.
-// In Python mistral this is the __task_execution special key.
+// In Python reference this is the __task_execution special key.
 // Also makes task() (no-arg) work by pointing __current_task.
 func BuildTaskExpressionContext(ctx map[string]interface{}, taskEx *db.TaskExecution) map[string]interface{} {
 	if ctx == nil {
@@ -217,7 +217,7 @@ func BuildTaskExpressionContext(ctx map[string]interface{}, taskEx *db.TaskExecu
 // --- DirectWorkflowController ---
 
 // DirectWorkflowController implements the direct workflow algorithm.
-// Ported from mistral-master/mistral/workflow/direct_workflow.py
+// Ported from Python reference/workflow/direct_workflow.py
 type DirectWorkflowController struct {
 	wfEx   *db.WorkflowExecution
 	wfSpec *v2.WorkflowSpec
@@ -334,7 +334,7 @@ func (c *DirectWorkflowController) findNextCommands(taskEx *db.TaskExecution) []
 				truthy, err := expressions.EvaluateBool(next.When, ctxView)
 				if err != nil {
 					// Fail-open? Python expr.evaluate returns truthy on error.
-					// We log but default to true to match mistral's resilient behavior.
+					// We log but default to true to match reference's resilient behavior.
 					truthy = true
 				}
 				if !truthy {
@@ -812,7 +812,7 @@ func (c *DirectWorkflowController) MayCompleteWorkflow(taskEx *db.TaskExecution)
 // AND that join task has a TaskExecution row in DB.
 //
 // This is what wakes waiting join tasks when a dependency completes.
-// Ported from mistral/workflow/direct_workflow.py: find_indirectly_affected_task_executions
+// Ported from reference/workflow/direct_workflow.py: find_indirectly_affected_task_executions
 func (c *DirectWorkflowController) FindIndirectlyAffectedTasks(taskName string) []string {
 	// Collect all join task spec names.
 	allJoins := map[string]bool{}
@@ -896,7 +896,7 @@ func (c *DirectWorkflowController) FindIndirectlyAffectedTasks(taskName string) 
 // --- ReverseWorkflowController ---
 
 // ReverseWorkflowController implements the reverse (pull-based) workflow algorithm.
-// Ported from mistral-master/mistral/workflow/reverse_workflow.py
+// Ported from Python reference/workflow/reverse_workflow.py
 type ReverseWorkflowController struct {
 	wfEx   *db.WorkflowExecution
 	wfSpec *v2.WorkflowSpec

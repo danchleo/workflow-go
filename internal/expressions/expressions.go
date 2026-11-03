@@ -1,7 +1,7 @@
-// Package expressions provides expression evaluation for Mistral DSL.
-// Mistral supports YAQL (<% ... %>) and Jinja2 ({{ ... }}) expression syntax.
+// Package expressions provides expression evaluation for Workflow DSL.
+// Supports YAQL (<% ... %>) and Jinja2 ({{ ... }}) expression syntax.
 //
-// Ported from mistral-master/mistral/expressions/
+// Ported from Python reference/expressions/
 package expressions
 
 import (
@@ -163,7 +163,7 @@ func GetDefaultEvaluator() Evaluator { return defaultEvaluator }
 
 // EvaluateBool evaluates the expression and coerces the result to bool.
 // Used for "when:" conditions in on-clauses — returns true on error
-// (fail-open matches Python mistral's resilient expression evaluation).
+// (fail-open matches Python reference's resilient expression evaluation).
 func EvaluateBool(expr string, ctx map[string]interface{}) (bool, error) {
 	val, err := defaultEvaluator.Evaluate(expr, ctx)
 	if err != nil {

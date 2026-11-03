@@ -1,6 +1,6 @@
 // Package engine implements the core execution engine that drives workflow execution.
 //
-// Ported from mistral-master/mistral/engine/
+// Ported from Python reference/engine/
 //
 // Core components:
 //   - Engine: Public interface / entry point
@@ -55,7 +55,7 @@ type Engine interface {
 
 // PostTxQueue collects callbacks that should run after an engine entry
 // method returns. This is the Go equivalent of the @post_tx_queue.run
-// decorator in mistral-master/mistral/engine/post_tx_queue.py.
+// decorator in reference/engine/post_tx_queue.py.
 //
 // Each engine entry method creates its OWN PostTxQueue as a local variable
 // and defers q.Drain() — after the method returns, Drain() starts a fresh
@@ -157,7 +157,7 @@ func safeRun(fn func()) {
 // --- Dispatcher ---
 
 // Dispatcher turns workflow commands into actual task starts.
-// Ported from mistral-master/mistral/engine/dispatcher.py
+// Ported from Python reference/engine/dispatcher.py
 // TaskStarter is a subset of Engine that dispatcher needs to kick off tasks.
 type TaskStarter interface {
 	StartTask(
@@ -480,7 +480,7 @@ func generateUniqueKey(wfExID, taskName string) string {
 
 // ================================================================
 // LocalEngineClient — in-process implementation of rpc.EngineClient.
-// Ported from mistral-master/mistral/rpc/clients.py LocalEngineClient.
+// Ported from Python reference/rpc/clients.py LocalEngineClient.
 //
 // 为什么在 engine 包而不是 rpc 包？
 //   循环依赖问题：rpc 包 import engine → executors import rpc → 循环！

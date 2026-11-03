@@ -1,7 +1,7 @@
-// Package lang implements the Mistral DSL (Domain Specific Language) parser.
+// Package lang implements the reference DSL (Domain Specific Language) parser.
 // It provides structures for parsing and validating workflow definitions in YAML format.
 //
-// Ported from mistral-master/mistral/lang/
+// Ported from Python reference/lang/
 package lang
 
 import (
@@ -10,7 +10,7 @@ import (
 )
 
 // NotDefined is a sentinel value for undefined input fields.
-var NotDefined = "__MISTRAL_NOT_DEFINED__"
+var NotDefined = "__NOT_DEFINED__"
 
 // Specification is the common interface for all parsed DSL specifications.
 type Specification interface {

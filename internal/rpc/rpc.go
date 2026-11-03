@@ -1,6 +1,6 @@
 // Package rpc provides an RPC abstraction for cross-process engine communication.
 //
-// Ported from mistral-master/mistral/rpc/
+// Ported from reference/rpc/
 //
 // 架构（与 Python 对齐）：
 //
@@ -29,7 +29,7 @@ import (
 )
 
 // EngineClient is the client side of engine RPC.
-// Mirror of Python mistral.rpc.clients.EngineClient (oslo.messaging based).
+// Mirror of Python reference/rpc.clients.EngineClient (oslo.messaging based).
 //
 // Implementations:
 //   - engine.LocalEngineClient  → in-process direct call to engine.Engine
@@ -50,7 +50,7 @@ type EngineClient interface {
 }
 
 // HttpEngineClient is an HTTP/JSON implementation of EngineClient.
-// It POSTs JSON payloads to a remote Mistral API server — the HTTP API
+// It POSTs JSON payloads to a remote Workflow API server — the HTTP API
 // server must expose matching endpoints (/rpc/*).
 //
 // 用途：executor 进程里的 DefaultExecutor 持有 HttpEngineClient，

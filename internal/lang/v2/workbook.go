@@ -6,8 +6,8 @@ import (
 	"github.com/danchleo/workflow-go/internal/lang"
 )
 
-// WorkbookSpec represents a Mistral workbook (container for actions and workflows).
-// Ported from mistral-master/mistral/lang/v2/workbook.py
+// WorkbookSpec represents a Workflow workbook (container for actions and workflows).
+// Ported from reference/lang/v2/workbook.py
 type WorkbookSpec struct {
 	name        string
 	description string

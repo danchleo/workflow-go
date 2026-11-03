@@ -2,7 +2,7 @@
 // workflow-go's components in one process — useful for development, demos,
 // and Docker single-container deployments.
 //
-// Mirrors Python mistral's mistral/cmd/launch.py:
+// Mirrors Python reference's reference/cmd/launch.py:
 //
 //	LAUNCH_OPTIONS = { 'api': launch_api, 'engine': launch_engine,
 //	                   'executor': launch_executor, ... }
@@ -21,7 +21,7 @@
 //	# API only (talking to a separate engine via HttpEngineClient)
 //	workflowd --server api --engine-url http://engine:8951
 //
-// Each component listens on its own port (defaults match mistral convention):
+// Each component listens on its own port (defaults match reference convention):
 //
 //	API      :8080  (REST + embedded engine RPC)
 //	Engine   :8951  (RPC only, scheduler, auto-execute)

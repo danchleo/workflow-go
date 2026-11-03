@@ -1,7 +1,7 @@
 package v2
 
 // PoliciesSpec aggregates all task-level policy settings.
-// Ported from mistral-master/mistral/lang/v2/policies.py
+// Ported from Python reference/lang/v2/policies.py
 type PoliciesSpec struct {
 	retry       *RetrySpec
 	waitBefore  interface{}

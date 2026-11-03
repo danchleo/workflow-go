@@ -1,6 +1,6 @@
 // Package db: SQL/GORM-backed Store implementation.
 //
-// This mirrors Python mistral-master/mistral/db/v2/sqlalchemy/api.py
+// This mirrors Python reference-master/reference/db/v2/sqlalchemy/api.py
 // but uses gorm.io/gorm + gorm.io/driver/sqlite for the Go ecosystem.
 // All interface{} fields (RuntimeContext, Input, Output, etc.) are
 // serialized as JSON text columns.
@@ -76,7 +76,7 @@ func NewSQLStore(dsn string) (Store, error) {
 
 	if err := gormDB.AutoMigrate(
 		&gWorkflowDef{}, &gActionDef{}, &gWfEx{}, &gTaskEx{}, &gActEx{}, &gEnv{}, &gCronTrigger{}, &gScheduledJob{},
-		&gWorkbook{}, &gDynamicActionDef{}, &gEventTrigger{}, &gResourceMember{}, &gNamedLock{}, &gCodeSource{}, &gMistralMetrics{},
+		&gWorkbook{}, &gDynamicActionDef{}, &gEventTrigger{}, &gResourceMember{}, &gNamedLock{}, &gCodeSource{}, &gMetrics{},
 	); err != nil {
 		return nil, fmt.Errorf("autmigrate: %w", err)
 	}
@@ -146,7 +146,7 @@ func (s *sqlStore) DynamicActionDefinitions() DynamicActionDefinitionStore {
 func (s *sqlStore) EventTriggers() EventTriggerStore     { return &sqlEventTriggerStore{store: s} }
 func (s *sqlStore) ResourceMembers() ResourceMemberStore { return &sqlResourceMemberStore{store: s} }
 func (s *sqlStore) CodeSources() CodeSourceStore         { return &sqlCodeSourceStore{store: s} }
-func (s *sqlStore) MistralMetrics() MistralMetricsStore  { return &sqlMistralMetricsStore{store: s} }
+func (s *sqlStore) Metrics() MetricsStore  { return &sqlMetricsStore{store: s} }
 
 // Lock returns a per-named re-entrant mutex.
 //
@@ -154,7 +154,7 @@ func (s *sqlStore) MistralMetrics() MistralMetricsStore  { return &sqlMistralMet
 //
 //	SQLite   → in-process reentrantLock (process-level serialisation)
 //	PG/MySQL → sqlNamedLock (INSERT into named_locks table, unique
-//	           constraint blocks cross-process — Python Mistral pattern)
+//	           constraint blocks cross-process — Python reference pattern)
 func (s *sqlStore) Lock(name string) ReentrantLock {
 	switch s.driver {
 	case DriverPostgres, DriverMySQL:
@@ -295,17 +295,17 @@ type gCodeSource struct {
 
 func (gCodeSource) TableName() string { return "code_sources" }
 
-type gMistralMetrics struct {
+type gMetrics struct {
 	ID    int    `gorm:"primaryKey;autoIncrement"`
 	Name  string `gorm:"uniqueIndex"`
 	Value string
 }
 
-func (gMistralMetrics) TableName() string { return "mistral_metrics" }
+func (gMetrics) TableName() string { return "metrics" }
 
 // --- sqlNamedLock: cross-process lock via named_locks table ---
 //
-// Mirrors Python mistral/db/v2/sqlalchemy/api.py named_lock():
+// Mirrors Python reference/db/v2/sqlalchemy/api.py named_lock():
 //   with db_api.transaction():
 //       lock_id = create_named_lock(name)  # INSERT → UNIQUE wait
 //       yield

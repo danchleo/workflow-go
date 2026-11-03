@@ -22,7 +22,7 @@ func TestIsYAQLExpression(t *testing.T) {
 func TestEvaluateDotPath(t *testing.T) {
 	ctx := map[string]interface{}{
 		"input": map[string]interface{}{
-			"name":    "Mistral",
+			"name":    "Workflow",
 			"greeting": "Hi",
 		},
 		"env": map[string]interface{}{
@@ -37,8 +37,8 @@ func TestEvaluateDotPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "Mistral" {
-		t.Errorf("got %v (%T), want Mistral", result, result)
+	if result != "Workflow" {
+		t.Errorf("got %v (%T), want Workflow", result, result)
 	}
 
 	// Different key.

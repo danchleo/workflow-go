@@ -1,5 +1,5 @@
 // Package states defines valid task and workflow states and transition rules.
-// Ported from mistral-master/mistral/workflow/states.py
+// Ported from reference/workflow/states.py
 package states
 
 // Valid states for tasks, actions, and workflows.
@@ -66,7 +66,7 @@ func IsError(state string) bool {
 
 // IsFailed reports whether state represents a failure that should block
 // downstream transitions. Maps to ERROR and CANCELLED (mirrors Python
-// mistral.workflow.states.is_invalid_transition — failed terminal states).
+// reference/workflow.states.is_invalid_transition — failed terminal states).
 func IsFailed(state string) bool {
 	return state == ERROR || state == CANCELLED
 }

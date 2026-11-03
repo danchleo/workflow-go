@@ -1,6 +1,6 @@
 // Package executorapi exposes an HTTP endpoint for remote action execution.
 //
-// This is the Go equivalent of Python mistral's ExecutorServer: the engine
+// This is the Go equivalent of Python reference's ExecutorServer: the engine
 // (or any caller with an HttpEngineClient-compatible interface) POSTs a
 // JSON runActionRequest to /v1/actions/run, this server runs the action
 // locally via LocalExecutor, and returns the JSON result.

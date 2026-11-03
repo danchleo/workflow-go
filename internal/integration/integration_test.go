@@ -1,6 +1,6 @@
 // Package integration runs end-to-end engine tests against YAML fixtures in testdata/.
 //
-// Each fixture is a complete Mistral v2 workflow definition. Tests load it,
+// Each fixture is a complete v2 workflow definition. Tests load it,
 // create a workflow definition, start an execution, drive tasks to completion
 // via the real engine (as callers would), then assert final state and output.
 package integration
@@ -481,7 +481,7 @@ func TestIntegration_Join_Parallel(t *testing.T) {
 // --- helpers ---
 // (CoerceInt is provided by db.CoerceInt — integration tests import db so use it directly.)
 
-// yamlWorkflowName extracts the top-level `name:` field from a Mistral YAML
+// yamlWorkflowName extracts the top-level `name:` field from a Workflow YAML
 // definition. This is what the engine uses to look up sub-workflows.
 func yamlWorkflowName(yamlText string) string {
 	var m map[string]interface{}
@@ -2528,8 +2528,8 @@ func TestIntegration_RetryContinueOn_KeepsRetryingOnSuccess(t *testing.T) {
 }
 
 // =============================================================================
-// Python mistral native workflow YAML fixtures
-// These are ADAPTED from mistral/tests/resources/workbook/v2/my_workbook.yaml
+// Python reference native workflow YAML fixtures
+// These are ADAPTED from reference/tests/resources/workbook/v2/my_workbook.yaml
 // and test previously-missing Go behaviors (when-conditions, join variants,
 // params expressions).
 // =============================================================================
@@ -2660,11 +2660,11 @@ func TestIntegration_PythonNative_WithItemsParams(t *testing.T) {
 }
 
 // =============================================================================
-// Python mistral my_workbook.yaml — full multi-workflow + nested + join test
+// Python reference my_workbook.yaml — full multi-workflow + nested + join test
 // =============================================================================
 
 // TestIntegration_PythonNative_MyWorkbook exercises the Go-adapted version of
-// Python mistral's workbook/v2/my_workbook.yaml — the richest Python test
+// Python reference's workbook/v2/my_workbook.yaml — the richest Python test
 // workflow. Features covered:
 //
 //	✅ Multi-workflow workbook (wf1 reverse + wf2 direct)
@@ -2748,7 +2748,7 @@ func TestIntegration_PythonNative_MyWorkbook(t *testing.T) {
 	t.Logf("  my_workbook (Python native) all checks passed")
 }
 
-// --- Python mistral workbook/nested tests (WB1, WB2, wb_with_nested_wf) ---
+// --- Python reference workbook/nested tests (WB1, WB2, wb_with_nested_wf) ---
 
 // TestIntegration_Nested_ReverseCalledByDirect ports Python WB1: a reverse
 // workflow (wf1) gets nested-called by a direct workflow (wf2), with
