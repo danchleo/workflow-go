@@ -2,30 +2,47 @@
 // workflow-go's components in one process — useful for development, demos,
 // and Docker single-container deployments.
 //
-// Mirrors Python reference's reference/cmd/launch.py:
+// Mirrors Python reference/cmd/launch.py exactly:
 //
-//	LAUNCH_OPTIONS = { 'api': launch_api, 'engine': launch_engine,
-//	                   'executor': launch_executor, ... }
+//	Python                          Go
+//	═════════                       ═══
+//	launch_engine()                 workflowd --server engine
+//	  rpc.get_rpc_transport()         rpc.NewInProcessTransport()
+//	  EngClient = topic='engine'      NewEngineRPCClient(transport)
+//	  rpc_server.register_endpoint   enginerpc.NewServer(transport, engine)
+//	  rpc_server.start()              enginerpcServer.Start(ctx)
 //
-// You specify which components to run with --server (comma-separated):
+//	launch_executor()               workflowd --server executor
+//	  (same transport)                (same transport)
+//	  ExecClient = topic='executor'   NewExecutorRPCClient(transport)
+//	  rpc_server.register_endpoint    executorrpc.NewServer(transport, registry)
+//	  rpc_server.start()              executorrpcServer.Start(ctx)
 //
-//	# Everything (single-process — simplest dev experience)
+// Architecture:
+//
+//	All cross-process calls go through topic-based MQ RPC (not HTTP).
+//
+//	engine ──AsyncCall('executor', 'run_action')──▶ executor
+//	executor ──AsyncCall('engine', 'on_action_complete')──▶ engine
+//
+// Transport:
+//   - InProcessTransport (进程内内存 MQ, 对齐 Python fake:/ transport)
+//     默认。单进程部署 + 多进程单节点测试。
+//   - AMQPTransport (生产, 对齐 Python rabbit://)
+//     未来实现。跨节点多进程部署。架构完全准备好了。
+//
+// Usage:
+//
+//	# Everything (single-process, InProcessTransport — simplest)
 //	workflowd --server all
 //
-//	# API + Engine + Executor all in one process
-//	workflowd --server api,engine,executor
+//	# Engine + Executor in one process, sharing DB (multi-process simulation)
+//	workflowd --server api,engine,executor --db /tmp/wf.db
 //
-//	# Engine only (talking to a separate executor)
-//	workflowd --server engine --executor-url http://exec:8952
-//
-//	# API only (talking to a separate engine via HttpEngineClient)
-//	workflowd --server api --engine-url http://engine:8951
-//
-// Each component listens on its own port (defaults match reference convention):
-//
-//	API      :8080  (REST + embedded engine RPC)
-//	Engine   :8951  (RPC only, scheduler, auto-execute)
-//	Executor :8952  (/v1/actions/run, LocalExecutor only)
+//	# Engine process, talking to separate Executor process (will need AMQP transport)
+//	workflowd --server engine
+//	workflowd --server executor  (separate terminal)
+//	# Both share same InProcessTransport if same process, otherwise need AMQP
 package main
 
 import (
@@ -41,30 +58,25 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/danchleo/workflow-go/internal/actions"
 	"github.com/danchleo/workflow-go/internal/db"
 	"github.com/danchleo/workflow-go/internal/engine"
 	"github.com/danchleo/workflow-go/internal/executors"
 	"github.com/danchleo/workflow-go/internal/rpc"
 	"github.com/danchleo/workflow-go/internal/scheduler"
 	"github.com/danchleo/workflow-go/pkg/api"
-	"github.com/danchleo/workflow-go/pkg/executorapi"
+	enginerpc "github.com/danchleo/workflow-go/pkg/enginerpc"
+	executorrpc "github.com/danchleo/workflow-go/pkg/executorrpc"
 )
 
 // config holds flag values parsed once at startup.
 type config struct {
-	servers      []string // api | engine | executor
-	dbURL        string
-	executorType string // local | remote
-	executorURL  string
-	engineURL    string // used by api server when engine is remote
-	apiAddr      string
-	engineAddr   string
-	executorAddr string
+	servers []string // api | engine | executor
+	dbURL   string
 }
 
 func main() {
 	cfg := parseFlags()
-
 	if err := run(cfg); err != nil {
 		log.Fatal(err)
 	}
@@ -72,14 +84,10 @@ func main() {
 
 func parseFlags() config {
 	var (
-		serverFlag   = flag.String("server", "all", "Comma-separated list of components to run: api,engine,executor,all")
-		dbURL        = flag.String("db", ":memory:", "DB URL — ':memory:' or SQLite path (shared across api+engine in one process)")
-		execType     = flag.String("executor", "local", "Executor type for engine: 'local' or 'remote'")
-		execURL      = flag.String("executor-url", "", "Remote executor URL (when engine runs with --executor=remote)")
-		engineURL    = flag.String("engine-url", "", "Remote engine URL (when api runs with separate engine, uses HttpEngineClient)")
-		apiAddr      = flag.String("api-addr", ":8080", "API listen address")
-		engineAddr   = flag.String("engine-addr", ":8951", "Engine RPC listen address")
-		executorAddr = flag.String("executor-addr", ":8952", "Executor listen address")
+		serverFlag = flag.String("server", "all",
+			"Comma-separated list of components: api,engine,executor,all")
+		dbURL = flag.String("db", ":memory:",
+			"DB URL — ':memory:' or SQLite path (shared across api+engine)")
 	)
 	flag.Parse()
 
@@ -104,16 +112,7 @@ func parseFlags() config {
 		log.Fatal("--server must specify at least one component")
 	}
 
-	return config{
-		servers:      servers,
-		dbURL:        *dbURL,
-		executorType: *execType,
-		executorURL:  *execURL,
-		engineURL:    *engineURL,
-		apiAddr:      *apiAddr,
-		engineAddr:   *engineAddr,
-		executorAddr: *executorAddr,
-	}
+	return config{servers: servers, dbURL: *dbURL}
 }
 
 func run(cfg config) error {
@@ -131,14 +130,22 @@ func run(cfg config) error {
 		}
 	}
 
-	// --- Engine + Executor setup ---
-	// Python: exe.get_executor() → DefaultExecutor(rpc.get_engine_client())
-	// DefaultExecutor 在构造时就持有 engine client。
-	// 所以必须先有 engine，再有 DefaultExecutor。
-	var eng *engine.DefaultEngine
-	var engClient rpc.EngineClient
+	// --- MQ Transport ---
+	// 默认 InProcessTransport（进程内内存 MQ，对齐 Python oslo.messaging fake:/）。
+	// 生产多节点部署：未来用 NewAMQPTransport("amqp://...") 替换这一行即可。
+	transport := rpc.NewInProcessTransport()
+	defer transport.Close()
+	log.Printf("mq transport: in-process memory")
 
-	if has(cfg.servers, "engine") || has(cfg.servers, "api") && cfg.engineURL == "" {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+
+	// --- Engine ---
+	var eng *engine.DefaultEngine
+	var engServer *rpc.RPCServer
+	if has(cfg.servers, "engine") || has(cfg.servers, "api") {
 		eng = engine.NewDefaultEngine(store)
 		if has(cfg.servers, "engine") {
 			sched := scheduler.NewDefaultScheduler(store, 500*time.Millisecond, 0, 30*time.Second, 10*time.Second, 10)
@@ -146,79 +153,52 @@ func run(cfg config) error {
 			eng.WithScheduler(sched)
 			defer sched.Stop()
 		}
-		engClient = engine.NewLocalEngineClient(eng)
-	}
-	if cfg.engineURL != "" {
-		engClient = rpc.NewHttpEngineClient(cfg.engineURL)
-	}
-	if engClient == nil {
-		return fmt.Errorf("no engine configured — either include 'engine' in --server or set --engine-url")
-	}
 
-	// --- Executor (必须在 engine client 有了之后) ---
-	switch cfg.executorType {
-	case "local":
-		// DefaultExecutor 持有 engine client，RunAction 内部回调 engine
-		executors.SetDefaultExecutor(executors.NewDefaultExecutor(engClient))
-	case "remote":
-		// RemoteExecutor 只做 HTTP transport，不负责回调
-		if cfg.executorURL == "" {
-			return fmt.Errorf("--executor-url required with --executor=remote")
+		// Engine MQ RPC server — topic 'engine', 8 methods.
+		// 对齐 Python EngineServer (engine_server.py)。
+		engServer = enginerpc.NewServer(transport, eng)
+		if err := engServer.Start(ctx); err != nil {
+			return fmt.Errorf("engine mq start: %w", err)
 		}
-		executors.SetDefaultExecutor(executors.NewRemoteExecutor(cfg.executorURL))
+		log.Printf("mq server: engine (topic 'engine')")
 	}
 
-	// --- HTTP servers ---
-	var wg sync.WaitGroup
-	var httpServers []*http.Server
+	// --- Executor ---
+	var executorServer *rpc.RPCServer
+	registry := actions.NewActionRegistry()
 
-	// Executor server (only when requested; LocalExecutor is fine with no HTTP)
 	if has(cfg.servers, "executor") {
-		wg.Add(1)
-		execAPI := executorapi.NewServer()
-		srv := &http.Server{Addr: cfg.executorAddr, Handler: execAPI.Router()}
-		httpServers = append(httpServers, srv)
-		go func() {
-			defer wg.Done()
-			log.Printf("executor listening on %s", cfg.executorAddr)
-			srv.ListenAndServe()
-		}()
+		// Executor MQ RPC server — topic 'executor', 1 method: run_action.
+		// 对齐 Python ExecutorServer (executor_server.py)。
+		executorServer = executorrpc.NewServer(transport, registry)
+		if err := executorServer.Start(ctx); err != nil {
+			return fmt.Errorf("executor mq start: %w", err)
+		}
+		log.Printf("mq server: executor (topic 'executor')")
 	}
 
-	// Engine RPC server
-	if has(cfg.servers, "engine") {
-		wg.Add(1)
-		apiSrv := api.NewServer(store, eng)
-		srv := &http.Server{Addr: cfg.engineAddr, Handler: apiSrv.RouterEngineOnly()}
-		httpServers = append(httpServers, srv)
-		go func() {
-			defer wg.Done()
-			log.Printf("engine listening on %s (executor=%s)", cfg.engineAddr, cfg.executorType)
-			srv.ListenAndServe()
-		}()
+	// --- Wire DefaultExecutor with EngineClient via MQ ---
+	// Python: DefaultExecutor(rpc.get_engine_client()) — client from transport.
+	// Go:     DefaultExecutor(NewEngineRPCClient(transport)) — same.
+	if engServer != nil {
+		engineClient := rpc.NewEngineRPCClient(transport)
+		executors.SetDefaultExecutor(executors.NewDefaultExecutor(engineClient))
+		log.Printf("executor client wired: engine via MQ topic 'engine'")
 	}
 
-	// API server (full REST surface; always embeds /rpc/* so it can self-serve when engine is in-process)
+	// --- HTTP server: API REST surface ---
 	if has(cfg.servers, "api") {
 		wg.Add(1)
-		// When engine runs in-process (eng != nil) api.Server uses it directly;
-		// when --engine-url is set, api.Server's internal engine is unused but
-		// still needed for the /rpc/* endpoints we might want to strip later.
-		var apiEng engine.Engine = eng
+		apiEng := eng
 		if apiEng == nil {
-			// We need *some* engine for api.NewServer — create a throwaway.
-			// Actually api.Server currently takes engine.Engine interface.
-			// If we're in api-only mode with remote engine, we still use a local
-			// engine struct but calls flow through HttpEngineClient for the
-			// actual endpoints. For now, pass a local one.
 			apiEng = engine.NewDefaultEngine(store)
 		}
 		apiSrv := api.NewServer(store, apiEng)
-		srv := &http.Server{Addr: cfg.apiAddr, Handler: apiSrv.Router()}
+		srv := &http.Server{Addr: ":8080", Handler: apiSrv.Router()}
 		httpServers = append(httpServers, srv)
 		go func() {
 			defer wg.Done()
-			log.Printf("api listening on %s", cfg.apiAddr)
+			log.Printf("api listening on :8080")
 			srv.ListenAndServe()
 		}()
 	}
@@ -229,18 +209,17 @@ func run(cfg config) error {
 	sig := <-sigCh
 	log.Printf("received %s, shutting down...", sig)
 
-	// Graceful shutdown with timeout.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	cancel()
+
 	for _, srv := range httpServers {
-		if err := srv.Shutdown(ctx); err != nil {
-			log.Printf("http server shutdown error: %v", err)
-		}
+		srv.Shutdown(context.Background())
 	}
 	wg.Wait()
 	log.Println("all components stopped")
 	return nil
 }
+
+var httpServers []*http.Server
 
 func has(list []string, item string) bool {
 	for _, s := range list {
@@ -254,7 +233,7 @@ func has(list []string, item string) bool {
 func banner(cfg config) string {
 	sb := strings.Join(cfg.servers, " + ")
 	return fmt.Sprintf(
-		"\nworkflowd starting [%s]\n  db:       %s\n  executor: %s\n",
-		sb, cfg.dbURL, cfg.executorType,
+		"\nworkflowd starting [%s]\n  db:      %s\n  transport: mq (in-process)\n",
+		sb, cfg.dbURL,
 	)
 }

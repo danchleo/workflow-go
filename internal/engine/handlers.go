@@ -2346,7 +2346,7 @@ func (e *DefaultEngine) continueTask(taskEx *db.TaskExecution, wfEx *db.Workflow
 // reads childWfEx.TaskExecutionID (the parent's taskEx row) and walks to the
 // parent wfEx to apply cascade rules.
 // ================================================================
-func (e *DefaultEngine) OnActionUpdate(wfExID string) error {
+func (e *DefaultEngine) OnActionUpdate(ctx context.Context, wfExID string) error {
 	// Python @post_tx_queue.run on_action_update → transaction() wrap.
 	return e.store.RunInTransaction(func(tx db.Store) error {
 		childWfEx, err := e.store.WorkflowExecutions().Get(wfExID)

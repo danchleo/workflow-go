@@ -49,6 +49,8 @@ type Engine interface {
 	) error
 	// OnActionComplete handles action completion events.
 	OnActionComplete(ctx context.Context, actionExID string, result *db.Result, wfAction bool) error
+	// OnActionUpdate handles sub-workflow lifecycle events (pause/run).
+	OnActionUpdate(ctx context.Context, wfExID string) error
 }
 
 // --- PostTxQueue ---
