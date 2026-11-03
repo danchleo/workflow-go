@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/danchleo/workflow-go/gen/query"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -146,6 +147,21 @@ func (s *sqlStore) currentDB() *gorm.DB {
 	return s.db
 }
 
+// Q returns a gorm/gen query.Query bound to the active DB handle.
+// This is the primary CRUD entry point — all business code should call
+// store.Q().TableNameV2.WithContext(ctx).Where(...).First() instead of
+// the old store.XxxStore().Method() chain.
+//
+// The returned Query is freshly constructed on each call so it binds to
+// currentDB() — which correctly returns the tx handle inside RunInTransaction
+// (atomic with the SQL transaction) or the top-level pool otherwise.
+func (s *sqlStore) Q() *query.Query {
+	return query.Use(s.currentDB())
+}
+
+// --- Store getter implementations (delegate to gen query) ---
+// These create per-store wrappers that hold a reference back to sqlStore
+// so they can call s.currentDB() for correct tx/pool binding.
 func (s *sqlStore) WorkflowDefinitions() WorkflowDefinitionStore { return &sqlWfDefStoreSQL{store: s} }
 func (s *sqlStore) ActionDefinitions() ActionDefinitionStore     { return &sqlActDefStoreSQL{store: s} }
 func (s *sqlStore) WorkflowExecutions() WorkflowExecutionStore   { return &sqlWfExStoreSQL{store: s} }
@@ -228,12 +244,6 @@ func (s *sqlStore) RunInTransaction(fn func(Store) error) error {
 	enterTx()
 	defer exitTx()
 
-	// Driver selects the atomicity layer:
-	//   SQLite  → rawLock only (no real SQL tx — single connection)
-	//   PG/MySQL → rawLock + gorm.DB.Transaction (SQL BEGIN/COMMIT/ROLLBACK)
-	//
-	// rawLock is kept for ALL drivers — it cheaply serialises engine entries
-	// within a process so multi-connection pools don't contend for writes.
 	switch s.driver {
 	case DriverPostgres, DriverMySQL:
 		return s.db.Transaction(func(tx *gorm.DB) error {

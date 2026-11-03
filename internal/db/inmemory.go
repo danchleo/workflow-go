@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/danchleo/workflow-go/gen/query"
 )
 
 // InMemoryStore provides an in-memory implementation of the Store interface.
@@ -79,6 +81,10 @@ func (m *txRWMutex) RUnlock() {
 func (m *txRWMutex) rawLock()   { m.m.Lock() }
 func (m *txRWMutex) rawUnlock() { m.m.Unlock() }
 
+// Q for InMemoryStore returns nil — pure Go map stores have no real DB handle.
+// Callers that need gen query must use NewSQLStore (MySQL/SQLite).
+func (*InMemoryStore) Q() *query.Query { return nil }
+
 // NewInMemoryStore creates a new in-memory store.
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
@@ -132,7 +138,7 @@ func (s *InMemoryStore) DynamicActionDefinitions() DynamicActionDefinitionStore 
 func (s *InMemoryStore) EventTriggers() EventTriggerStore     { return &memEventTriggerStore{s} }
 func (s *InMemoryStore) ResourceMembers() ResourceMemberStore { return &memResourceMemberStore{s} }
 func (s *InMemoryStore) CodeSources() CodeSourceStore         { return &memCodeSourceStore{s} }
-func (s *InMemoryStore) Metrics() MetricsStore  { return &memMetricsStore{s} }
+func (s *InMemoryStore) Metrics() MetricsStore                { return &memMetricsStore{s} }
 
 func (s *InMemoryStore) AcquireLock(name string) error {
 	s.mu.Lock()
