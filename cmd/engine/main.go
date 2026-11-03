@@ -1,31 +1,39 @@
 // Command engine is a standalone engine process.
 //
-// Mirrors Python reference's reference/engine/engine_server.py:
-// This process owns the DefaultEngine + scheduler + DB store, listens on
-// an HTTP port for engine RPC calls (StartWorkflow, OnActionComplete, etc.)
-// from API processes or a caller that uses HttpEngineClient.
+// Mirrors Python reference's reference/engine/engine_server.py exactly.
 //
-// In single-process deployments (cmd/test) the engine runs in-process with
-// LocalExecutor and no RPC layer. For multi-process deployments you launch:
+// Architecture (topic-based MQ RPC — no HTTP for engine/executor calls):
 //
-//  1. An executor process (cmd/executor) — runs actions locally
-//  2. This engine process — points at the executor via RemoteExecutor
-//  3. An API process (cmd/workflowd --api) or cmd/test → talks to engine
-//     via HttpEngineClient over HTTP
+//	Python                              Go
+//	═══════                             ═══
+//	rpc.get_rpc_transport()             rpc.NewRedisTransport(--mq-url)
+//	rpc_server.register_endpoint        enginerpc.NewServer(transport, engine)
+//	  (EngineServer)                     topic='engine', 8 methods
+//	rpc_server.start()                   enginerpcServer.Start(ctx)
+//	DefaultExecutor(rpc.EngineClient)   executors.SetDefaultExecutor(NewDefaultExecutor(EngineRPCClient))
+//	DefaultExecutor._executor_client    ExecutorRPCClient.RunAction → AsyncCall('executor', 'run_action')
+//	  .run_action(async_=True)
+//
+// Transport options:
+//
+//	--mq-url ""  (default) → InProcessTransport (单进程测试, 对齐 Python fake:/)
+//	--mq-url redis://host:port → RedisTransport (跨进程, 对齐 Python rabbit://)
 //
 // Usage:
 //
-//	go run ./cmd/engine --addr ":8951" --db ":memory:" \
-//	    --executor remote --executor-url http://executor:8952
+//	# 单进程（所有组件）
+//	workflowd --server api,engine,executor --db ":memory:"
 //
-//	go run ./cmd/engine --addr ":8951" --db "sqlite://engine.db"
+//	# 跨进程（需要 Redis broker）
+//	engine    --db engine.db    --mq-url redis://localhost:6379
+//	executor  --mq-url redis://localhost:6379
+//	api       --db engine.db    --mq-url redis://localhost:6379
 package main
 
 import (
 	"context"
 	"flag"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -34,15 +42,15 @@ import (
 	"github.com/danchleo/workflow-go/internal/db"
 	"github.com/danchleo/workflow-go/internal/engine"
 	"github.com/danchleo/workflow-go/internal/executors"
+	"github.com/danchleo/workflow-go/internal/rpc"
 	"github.com/danchleo/workflow-go/internal/scheduler"
-	"github.com/danchleo/workflow-go/pkg/api"
+	enginerpc "github.com/danchleo/workflow-go/pkg/enginerpc"
 )
 
 func main() {
-	addr := flag.String("addr", ":8951", "Engine RPC listen address")
 	dbURL := flag.String("db", ":memory:", "DB URL — ':memory:' or SQLite path")
-	executorType := flag.String("executor", "local", "Executor type: 'local' or 'remote'")
-	executorURL := flag.String("executor-url", "", "Remote executor base URL (required when --executor=remote)")
+	mqURL := flag.String("mq-url", "",
+		"MQ broker URL — empty=process-local (test), redis://host:port=Redis (prod)")
 	schedPoll := flag.Duration("sched-poll", 500*time.Millisecond, "Scheduler poll interval")
 	flag.Parse()
 
@@ -54,74 +62,57 @@ func main() {
 	} else {
 		store, err = db.NewSQLStore(*dbURL)
 		if err != nil {
-			log.Fatalf("failed to open DB %s: %v", *dbURL, err)
+			log.Fatalf("db %s: %v", *dbURL, err)
 		}
 	}
 
-	// --- Engine + Scheduler (先创建 engine，DefaultExecutor 需要 engine client) ---
+	// --- MQ Transport ---
+	var transport rpc.Transport
+	if *mqURL == "" {
+		transport = rpc.NewInProcessTransport()
+		log.Println("mq transport: in-process memory (--mq-url for real broker)")
+	} else {
+		t, err := rpc.NewRedisTransport(*mqURL)
+		if err != nil {
+			log.Fatalf("redis transport %s: %v", *mqURL, err)
+		}
+		transport = t
+		log.Printf("mq transport: redis %s", *mqURL)
+	}
+	defer transport.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// --- Engine + Scheduler ---
 	eng := engine.NewDefaultEngine(store)
-	sched := scheduler.NewDefaultScheduler(
-		store,
-		*schedPoll,     // pollInterval
-		0,              // randomDelay
-		30*time.Second, // captureTimeout
-		10*time.Second, // pickupJobAfter
-		10,             // batchSize
-	)
+	sched := scheduler.NewDefaultScheduler(store, *schedPoll, 0, 30*time.Second, 10*time.Second, 10)
 	sched.Start()
 	eng.WithScheduler(sched)
+	defer sched.Stop()
 
-	// --- Executor (必须在 engine 有了之后) ---
-	switch *executorType {
-	case "local":
-		// DefaultExecutor 持有 engine client，RunAction 内部回调 engine
-		executors.SetDefaultExecutor(executors.NewDefaultExecutor(
-			engine.NewLocalEngineClient(eng),
-		))
-	case "remote":
-		// RemoteExecutor 只做 HTTP transport，不负责回调
-		if *executorURL == "" {
-			log.Fatal("--executor-url required when --executor=remote")
-		}
-		executors.SetDefaultExecutor(executors.NewRemoteExecutor(*executorURL))
-	default:
-		log.Fatalf("unknown --executor type %q (want 'local' or 'remote')", *executorType)
+	// --- Engine MQ RPC server (topic 'engine') ---
+	// 对齐 Python EngineServer.register_endpoint(self).
+	engServer := enginerpc.NewServer(transport, eng)
+	if err := engServer.Start(ctx); err != nil {
+		log.Fatalf("engine mq start: %v", err)
 	}
+	log.Println("engine mq server started — topic 'engine' (8 methods)")
 
-	// --- HTTP server (engine RPC only) ---
-	apiSrv := api.NewServer(store, eng)
-	httpSrv := &http.Server{
-		Addr:         *addr,
-		Handler:      apiSrv.RouterEngineOnly(),
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		log.Printf("engine server listening on %s (executor=%s)", *addr, *executorType)
-		errCh <- httpSrv.ListenAndServe()
-	}()
+	// --- DefaultExecutor with EngineRPCClient over MQ ---
+	// Python: DefaultExecutor(rpc.get_engine_client()).
+	engineClient := rpc.NewEngineRPCClient(transport)
+	executors.SetDefaultExecutor(executors.NewDefaultExecutor(engineClient))
+	log.Println("default executor wired → engine via MQ topic 'engine'")
 
 	// --- Graceful shutdown ---
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	sig := <-sigCh
+	log.Printf("received %s, shutting down...", sig)
 
-	select {
-	case err := <-errCh:
-		if err != nil && err != http.ErrServerClosed {
-			log.Fatalf("engine server error: %v", err)
-		}
-	case sig := <-sigCh:
-		log.Printf("received %s, shutting down...", sig)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := httpSrv.Shutdown(ctx); err != nil {
-		log.Printf("http shutdown error: %v", err)
-	}
+	cancel()
 	sched.Stop()
+	transport.Close()
 	log.Println("engine stopped")
 }

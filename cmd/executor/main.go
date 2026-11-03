@@ -1,50 +1,100 @@
 // Command executor is a standalone action-executor process.
 //
-// Mirrors Python reference's reference/executors/executor_server.py:
-// This process owns the LocalExecutor and exposes it over HTTP at
-// /v1/actions/run. An engine process with --executor=remote points its
-// RemoteExecutor at this server's base URL.
+// Mirrors Python reference's reference/executors/executor_server.py exactly.
 //
-// The executor does NOT own a DB store or engine — it's purely a compute
-// worker. It receives runActionRequest JSON, runs the action, and returns
-// runActionResponse JSON.
+// Architecture (topic-based MQ RPC — no HTTP):
 //
-// Usage:
+//	Python                              Go
+//	═══════                             ═══
+//	rpc.get_rpc_transport()             rpc.NewRedisTransport(--mq-url)
+//	rpc_server.register_endpoint        executorrpc.NewServer(transport, registry)
+//	  (ExecutorServer)                  topic='executor', 1 method: run_action
+//	rpc_server.start()                  executorServer.Start(ctx)
 //
-//	go run ./cmd/executor --addr ":8952"
+// Engine → Executor call (engine进程):
+//
+//	self._executor_client.run_action(async_=True)
+//	→ ExecutorRPCClient.RunAction → AsyncCall('executor', 'run_action')
+//
+// Executor → Engine callback (本进程, 通过 EngineRPCClient):
+//
+//	DefaultExecutor 持有 EngineRPCClient
+//	→ EngineRPCClient.OnActionComplete → AsyncCall('engine', 'on_action_complete')
+//
+// Transport options (同 cmd/engine):
+//
+//	--mq-url ""  (default) → InProcessTransport (单进程测试)
+//	--mq-url redis://host:port → RedisTransport (跨进程)
+//
+// Usage (配合 Redis broker):
+//
+//	# Start Redis first: docker run -p 6379:6379 redis:7-alpine
+//	go run ./cmd/engine   --db engine.db --mq-url redis://localhost:6379
+//	go run ./cmd/executor --mq-url redis://localhost:6379
+//	go run ./cmd/workflowd --server api --db engine.db --mq-url redis://localhost:6379
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/danchleo/workflow-go/pkg/executorapi"
+	"github.com/danchleo/workflow-go/internal/actions"
+	"github.com/danchleo/workflow-go/internal/executors"
+	"github.com/danchleo/workflow-go/internal/rpc"
+	executorrpc "github.com/danchleo/workflow-go/pkg/executorrpc"
 )
 
 func main() {
-	addr := flag.String("addr", ":8952", "Executor HTTP listen address")
+	mqURL := flag.String("mq-url", "",
+		"MQ broker URL — empty=process-local (test), redis://host:port=Redis (prod)")
 	flag.Parse()
 
-	srv := executorapi.NewServer()
+	// --- MQ Transport ---
+	var transport rpc.Transport
+	if *mqURL == "" {
+		transport = rpc.NewInProcessTransport()
+		log.Println("mq transport: in-process memory")
+	} else {
+		t, err := rpc.NewRedisTransport(*mqURL)
+		if err != nil {
+			log.Fatalf("redis transport %s: %v", *mqURL, err)
+		}
+		transport = t
+		log.Printf("mq transport: redis %s", *mqURL)
+	}
+	defer transport.Close()
 
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.Start(*addr)
-	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
+	// --- Action Registry ---
+	registry := actions.NewActionRegistry()
+
+	// --- Executor MQ RPC server (topic 'executor') ---
+	// Python: rpc_server.register_endpoint(ExecutorServer)
+	execServer := executorrpc.NewServer(transport, registry)
+	if err := execServer.Start(ctx); err != nil {
+		log.Fatalf("executor mq start: %v", err)
+	}
+	log.Println("executor mq server started — topic 'executor' (run_action)")
+
+	// --- DefaultExecutor wired with EngineRPCClient (for callbacks) ---
+	// Python: DefaultExecutor(rpc.get_engine_client())
+	engineClient := rpc.NewEngineRPCClient(transport)
+	executors.SetDefaultExecutor(executors.NewDefaultExecutor(engineClient))
+	log.Println("default executor → engine via MQ topic 'engine'")
+
+	// --- Graceful shutdown ---
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	sig := <-sigCh
+	log.Printf("received %s, shutting down...", sig)
 
-	select {
-	case err := <-errCh:
-		if err != nil {
-			log.Fatalf("executor server error: %v", err)
-		}
-	case sig := <-sigCh:
-		log.Printf("received %s, shutting down executor...", sig)
-		// executorapi.Server doesn't expose Shutdown yet; just exit.
-	}
+	cancel()
+	transport.Close()
+	log.Println("executor stopped")
 }
