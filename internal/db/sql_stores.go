@@ -25,7 +25,7 @@ type gWorkflowDef struct {
 	Data string // JSON blob of *WorkflowDefinition
 }
 
-func (gWorkflowDef) TableName() string { return "workflow_definitions" }
+func (gWorkflowDef) TableName() string { return "workflow_definitions_v2" }
 
 type sqlWfDefStoreSQL struct{ store *sqlStore }
 
@@ -103,7 +103,7 @@ type gActionDef struct {
 	Data string
 }
 
-func (gActionDef) TableName() string { return "action_definitions" }
+func (gActionDef) TableName() string { return "action_definitions_v2" }
 
 type sqlActDefStoreSQL struct{ store *sqlStore }
 
@@ -171,7 +171,7 @@ type gWfEx struct {
 	Data       string
 }
 
-func (gWfEx) TableName() string { return "workflow_executions" }
+func (gWfEx) TableName() string { return "workflow_executions_v2" }
 
 type sqlWfExStoreSQL struct{ store *sqlStore }
 
@@ -246,7 +246,7 @@ type gTaskEx struct {
 	Data                string
 }
 
-func (gTaskEx) TableName() string { return "task_executions" }
+func (gTaskEx) TableName() string { return "task_executions_v2" }
 
 type sqlTaskExStoreSQL struct{ store *sqlStore }
 
@@ -362,7 +362,7 @@ type gActEx struct {
 	Data            string
 }
 
-func (gActEx) TableName() string { return "action_executions" }
+func (gActEx) TableName() string { return "action_executions_v2" }
 
 type sqlActExStoreSQL struct{ store *sqlStore }
 
@@ -427,7 +427,7 @@ type gEnv struct {
 	Data string
 }
 
-func (gEnv) TableName() string { return "environments" }
+func (gEnv) TableName() string { return "environments_v2" }
 
 type sqlEnvStoreSQL struct{ store *sqlStore }
 
@@ -487,7 +487,7 @@ type gCronTrigger struct {
 	Data                string // blob with full CronTrigger JSON
 }
 
-func (gCronTrigger) TableName() string { return "cron_triggers" }
+func (gCronTrigger) TableName() string { return "cron_triggers_v2" }
 
 type sqlCronTriggerStore struct{ store *sqlStore }
 
@@ -568,7 +568,7 @@ type gScheduledJob struct {
 	CreatedAt  string  // ISO8601
 }
 
-func (gScheduledJob) TableName() string { return "scheduled_jobs" }
+func (gScheduledJob) TableName() string { return "scheduled_jobs_v2" }
 
 type sqlScheduledJobStore struct{ store *sqlStore }
 

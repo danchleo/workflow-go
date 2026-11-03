@@ -73,7 +73,7 @@ func NewAMQPTransport(url string) (*AMQPTransport, error) {
 	t := &AMQPTransport{
 		conn:    conn,
 		channel: ch,
-		prefix:  "workflow",
+		prefix:  "mistral",
 		pending: make(map[string]chan *Reply),
 	}
 

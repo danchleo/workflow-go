@@ -91,6 +91,7 @@ func NewSQLStore(dsn string) (Store, error) {
 	if err := gormDB.AutoMigrate(
 		&gWorkflowDef{}, &gActionDef{}, &gWfEx{}, &gTaskEx{}, &gActEx{}, &gEnv{}, &gCronTrigger{}, &gScheduledJob{},
 		&gWorkbook{}, &gDynamicActionDef{}, &gEventTrigger{}, &gResourceMember{}, &gNamedLock{}, &gCodeSource{}, &gMetrics{},
+		&gDelayedCall{},
 	); err != nil {
 		return nil, fmt.Errorf("autmigrate: %w", err)
 	}
@@ -269,7 +270,7 @@ type gWorkbook struct {
 	Data string
 }
 
-func (gWorkbook) TableName() string { return "workbooks" }
+func (gWorkbook) TableName() string { return "workbooks_v2" }
 
 type gDynamicActionDef struct {
 	ID   string `gorm:"primaryKey"`
@@ -285,14 +286,14 @@ type gEventTrigger struct {
 	Data string
 }
 
-func (gEventTrigger) TableName() string { return "event_triggers" }
+func (gEventTrigger) TableName() string { return "event_triggers_v2" }
 
 type gResourceMember struct {
 	ID   string `gorm:"primaryKey"`
 	Data string
 }
 
-func (gResourceMember) TableName() string { return "resource_members" }
+func (gResourceMember) TableName() string { return "resource_members_v2" }
 
 type gNamedLock struct {
 	ID   string `gorm:"primaryKey"`
@@ -315,7 +316,24 @@ type gMetrics struct {
 	Value string
 }
 
-func (gMetrics) TableName() string { return "metrics" }
+func (gMetrics) TableName() string { return "mistral_metrics" }
+
+// gDelayedCall mirrors Python DelayedCall (mistral/db/v2/sqlalchemy/models.py).
+// Python uses this for scheduler-queued tasks; our scheduler uses scheduled_jobs_v2
+// instead, but we keep the table for full schema parity.
+type gDelayedCall struct {
+	ID              string    `gorm:"primaryKey;size:36"`
+	FactoryMethod   string    `gorm:"size:200"`
+	TargetMethod    string    `gorm:"size:80;not null"`
+	MethodArguments string    `gorm:"type:text"`
+	Serializers     string    `gorm:"type:text"`
+	Key             string    `gorm:"size:250"`
+	AuthContext     string    `gorm:"type:text"`
+	ExecutionTime   time.Time `gorm:"not null;index"`
+	Processing      bool      `gorm:"default:false;not null"`
+}
+
+func (gDelayedCall) TableName() string { return "delayed_calls_v2" }
 
 // --- sqlNamedLock: cross-process lock via named_locks table ---
 //
