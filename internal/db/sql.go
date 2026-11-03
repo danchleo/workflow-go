@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -70,8 +71,21 @@ func NewSQLStore(dsn string) (Store, error) {
 			sqlDB.SetMaxOpenConns(1)
 			sqlDB.SetMaxIdleConns(1)
 		}
+	} else if driver == DriverMySQL {
+		gormDB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
+			Logger: logger.Default.LogMode(logger.Warn),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("open mysql %s: %w", dsn, err)
+		}
+		sqlDB, _ := gormDB.DB()
+		sqlDB.SetMaxOpenConns(20)
+		sqlDB.SetMaxIdleConns(5)
+		sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	} else if driver == DriverPostgres {
+		return nil, fmt.Errorf("postgres driver not yet wired — mysql works today; postgres is TODO")
 	} else {
-		return nil, fmt.Errorf("driver %q not yet implemented — use pgx/MySQL driver; sqlite is the only supported backend today", driver)
+		return nil, fmt.Errorf("unknown driver %q (sqlite, mysql, postgres)", driver)
 	}
 
 	if err := gormDB.AutoMigrate(
@@ -146,7 +160,7 @@ func (s *sqlStore) DynamicActionDefinitions() DynamicActionDefinitionStore {
 func (s *sqlStore) EventTriggers() EventTriggerStore     { return &sqlEventTriggerStore{store: s} }
 func (s *sqlStore) ResourceMembers() ResourceMemberStore { return &sqlResourceMemberStore{store: s} }
 func (s *sqlStore) CodeSources() CodeSourceStore         { return &sqlCodeSourceStore{store: s} }
-func (s *sqlStore) Metrics() MetricsStore  { return &sqlMetricsStore{store: s} }
+func (s *sqlStore) Metrics() MetricsStore                { return &sqlMetricsStore{store: s} }
 
 // Lock returns a per-named re-entrant mutex.
 //
