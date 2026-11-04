@@ -1,3 +1,11 @@
+// Package db — gorm/gen-backed SQL CRUD for all 16 Python-parity tables.
+//
+// Every wrapper type (sqlWfDefStoreSQL, sqlActDefStoreSQL, ...) still exists
+// so the Store interface stays stable. All methods now delegate to
+// s.store.Q() → gorm/gen query.Query.
+//
+// Exception: ScheduledJobStore.Capture/GetDueJobs use raw s.store.currentDB()
+// because gen lacks IS NULL semantics on nullable string fields.
 package db
 
 import (
@@ -5,12 +13,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/danchleo/workflow-go/gen/model"
+	"gorm.io/gen/field"
 	"gorm.io/gorm"
 )
-
-// Each GORM model stores the complete db model as a JSON blob in TEXT.
-// This avoids hand-mapping every field — the db structs already carry
-// all the data we need; we just serialize them for SQLite.
 
 func blobMarshal(v interface{}) string {
 	b, _ := json.Marshal(v)
@@ -19,25 +25,21 @@ func blobMarshal(v interface{}) string {
 
 // --- WorkflowDefinitionStore ---
 
-type gWorkflowDef struct {
-	ID   string `gorm:"primaryKey"`
-	Name string `gorm:"index"`
-	Data string // JSON blob of *WorkflowDefinition
-}
-
-func (gWorkflowDef) TableName() string { return "workflow_definitions_v2" }
-
 type sqlWfDefStoreSQL struct{ store *sqlStore }
 
 func (s *sqlWfDefStoreSQL) Create(wf *WorkflowDefinition) error {
 	if wf.ID == "" {
 		wf.ID = GenerateID()
 	}
-	return s.store.currentDB().Create(&gWorkflowDef{ID: wf.ID, Name: wf.Name, Data: blobMarshal(wf)}).Error
+	return s.store.Q().WorkflowDefinitionsV2.WithContext(nil).Create(
+		&model.WorkflowDefinitionsV2{ID: wf.ID, Name: wf.Name, Data: blobMarshal(wf)},
+	)
 }
+
 func (s *sqlWfDefStoreSQL) Get(id string) (*WorkflowDefinition, error) {
-	var g gWorkflowDef
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.WorkflowDefinitionsV2.WithContext(nil).Where(q.WorkflowDefinitionsV2.ID.Eq(id)).First()
+	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, &NotFoundError{Entity: "WorkflowDefinition", ID: id}
 		}
@@ -49,9 +51,10 @@ func (s *sqlWfDefStoreSQL) Get(id string) (*WorkflowDefinition, error) {
 	}
 	return &wf, nil
 }
+
 func (s *sqlWfDefStoreSQL) GetByName(name, namespace, projectID string) (*WorkflowDefinition, error) {
-	var all []gWorkflowDef
-	if err := s.store.currentDB().Find(&all).Error; err != nil {
+	all, err := s.store.Q().WorkflowDefinitionsV2.WithContext(nil).Find()
+	if err != nil {
 		return nil, err
 	}
 	for _, g := range all {
@@ -69,9 +72,10 @@ func (s *sqlWfDefStoreSQL) GetByName(name, namespace, projectID string) (*Workfl
 	}
 	return nil, &NotFoundError{Entity: "WorkflowDefinition", ID: name}
 }
+
 func (s *sqlWfDefStoreSQL) List(namespace, projectID string) ([]*WorkflowDefinition, error) {
-	var all []gWorkflowDef
-	if err := s.store.currentDB().Find(&all).Error; err != nil {
+	all, err := s.store.Q().WorkflowDefinitionsV2.WithContext(nil).Find()
+	if err != nil {
 		return nil, err
 	}
 	out := make([]*WorkflowDefinition, 0, len(all))
@@ -88,22 +92,20 @@ func (s *sqlWfDefStoreSQL) List(namespace, projectID string) ([]*WorkflowDefinit
 	}
 	return out, nil
 }
+
 func (s *sqlWfDefStoreSQL) Update(wf *WorkflowDefinition) error {
-	return s.store.currentDB().Save(&gWorkflowDef{ID: wf.ID, Name: wf.Name, Data: blobMarshal(wf)}).Error
+	return s.store.Q().WorkflowDefinitionsV2.WithContext(nil).Save(
+		&model.WorkflowDefinitionsV2{ID: wf.ID, Name: wf.Name, Data: blobMarshal(wf)},
+	)
 }
+
 func (s *sqlWfDefStoreSQL) Delete(id string) error {
-	return s.store.currentDB().Delete(&gWorkflowDef{}, "id = ?", id).Error
+	q := s.store.Q()
+	_, err := q.WorkflowDefinitionsV2.WithContext(nil).Where(q.WorkflowDefinitionsV2.ID.Eq(id)).Delete()
+	return err
 }
 
-// --- ActionDefinitionStore (same blob pattern) ---
-
-type gActionDef struct {
-	ID   string `gorm:"primaryKey"`
-	Name string `gorm:"index"`
-	Data string
-}
-
-func (gActionDef) TableName() string { return "action_definitions_v2" }
+// --- ActionDefinitionStore ---
 
 type sqlActDefStoreSQL struct{ store *sqlStore }
 
@@ -111,11 +113,18 @@ func (s *sqlActDefStoreSQL) Create(a *ActionDefinition) error {
 	if a.ID == "" {
 		a.ID = GenerateID()
 	}
-	return s.store.currentDB().Create(&gActionDef{ID: a.ID, Name: a.Name, Data: blobMarshal(a)}).Error
+	return s.store.Q().ActionDefinitionsV2.WithContext(nil).Create(
+		&model.ActionDefinitionsV2{ID: a.ID, Name: a.Name, Data: blobMarshal(a)},
+	)
 }
+
 func (s *sqlActDefStoreSQL) Get(id string) (*ActionDefinition, error) {
-	var g gActionDef
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.ActionDefinitionsV2.WithContext(nil).Where(q.ActionDefinitionsV2.ID.Eq(id)).First()
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, &NotFoundError{Entity: "ActionDefinition", ID: id}
+		}
 		return nil, err
 	}
 	var a ActionDefinition
@@ -124,9 +133,10 @@ func (s *sqlActDefStoreSQL) Get(id string) (*ActionDefinition, error) {
 	}
 	return &a, nil
 }
+
 func (s *sqlActDefStoreSQL) GetByName(name, namespace, projectID string) (*ActionDefinition, error) {
-	var all []gActionDef
-	if err := s.store.currentDB().Find(&all).Error; err != nil {
+	all, err := s.store.Q().ActionDefinitionsV2.WithContext(nil).Find()
+	if err != nil {
 		return nil, err
 	}
 	for _, g := range all {
@@ -138,9 +148,9 @@ func (s *sqlActDefStoreSQL) GetByName(name, namespace, projectID string) (*Actio
 	}
 	return nil, &NotFoundError{Entity: "ActionDefinition", ID: name}
 }
+
 func (s *sqlActDefStoreSQL) List(namespace, projectID string) ([]*ActionDefinition, error) {
-	var all []gActionDef
-	_ = s.store.currentDB().Find(&all).Error
+	all, _ := s.store.Q().ActionDefinitionsV2.WithContext(nil).Find()
 	out := make([]*ActionDefinition, 0, len(all))
 	for _, g := range all {
 		var a ActionDefinition
@@ -155,23 +165,20 @@ func (s *sqlActDefStoreSQL) List(namespace, projectID string) ([]*ActionDefiniti
 	}
 	return out, nil
 }
+
 func (s *sqlActDefStoreSQL) Update(a *ActionDefinition) error {
-	return s.store.currentDB().Save(&gActionDef{ID: a.ID, Name: a.Name, Data: blobMarshal(a)}).Error
+	return s.store.Q().ActionDefinitionsV2.WithContext(nil).Save(
+		&model.ActionDefinitionsV2{ID: a.ID, Name: a.Name, Data: blobMarshal(a)},
+	)
 }
+
 func (s *sqlActDefStoreSQL) Delete(id string) error {
-	return s.store.currentDB().Delete(&gActionDef{}, "id = ?", id).Error
+	q := s.store.Q()
+	_, err := q.ActionDefinitionsV2.WithContext(nil).Where(q.ActionDefinitionsV2.ID.Eq(id)).Delete()
+	return err
 }
 
 // --- WorkflowExecutionStore ---
-
-type gWfEx struct {
-	ID         string `gorm:"primaryKey"`
-	WorkflowID string `gorm:"index"`
-	State      string `gorm:"index"`
-	Data       string
-}
-
-func (gWfEx) TableName() string { return "workflow_executions_v2" }
 
 type sqlWfExStoreSQL struct{ store *sqlStore }
 
@@ -180,11 +187,15 @@ func (s *sqlWfExStoreSQL) Create(wf *WorkflowExecution) error {
 		wf.ID = GenerateID()
 	}
 	wf.Validate()
-	return s.store.currentDB().Create(&gWfEx{ID: wf.ID, WorkflowID: wf.WorkflowID, State: wf.State, Data: blobMarshal(wf)}).Error
+	return s.store.Q().WorkflowExecutionsV2.WithContext(nil).Create(
+		&model.WorkflowExecutionsV2{ID: wf.ID, WorkflowID: wf.WorkflowID, State: wf.State, Data: blobMarshal(wf)},
+	)
 }
+
 func (s *sqlWfExStoreSQL) Get(id string) (*WorkflowExecution, error) {
-	var g gWfEx
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.WorkflowExecutionsV2.WithContext(nil).Where(q.WorkflowExecutionsV2.ID.Eq(id)).First()
+	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, &NotFoundError{Entity: "WorkflowExecution", ID: id}
 		}
@@ -196,9 +207,9 @@ func (s *sqlWfExStoreSQL) Get(id string) (*WorkflowExecution, error) {
 	}
 	return &wf, nil
 }
+
 func (s *sqlWfExStoreSQL) List(projectID string) ([]*WorkflowExecution, error) {
-	var all []gWfEx
-	_ = s.store.currentDB().Find(&all).Error
+	all, _ := s.store.Q().WorkflowExecutionsV2.WithContext(nil).Find()
 	out := make([]*WorkflowExecution, 0, len(all))
 	for _, g := range all {
 		var wf WorkflowExecution
@@ -210,13 +221,18 @@ func (s *sqlWfExStoreSQL) List(projectID string) ([]*WorkflowExecution, error) {
 	}
 	return out, nil
 }
+
 func (s *sqlWfExStoreSQL) Update(wf *WorkflowExecution) error {
 	wf.Validate()
-	return s.store.currentDB().Save(&gWfEx{ID: wf.ID, WorkflowID: wf.WorkflowID, State: wf.State, Data: blobMarshal(wf)}).Error
+	return s.store.Q().WorkflowExecutionsV2.WithContext(nil).Save(
+		&model.WorkflowExecutionsV2{ID: wf.ID, WorkflowID: wf.WorkflowID, State: wf.State, Data: blobMarshal(wf)},
+	)
 }
+
 func (s *sqlWfExStoreSQL) UpdateState(id, curState, newState string) (*WorkflowExecution, error) {
-	var g gWfEx
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.WorkflowExecutionsV2.WithContext(nil).Where(q.WorkflowExecutionsV2.ID.Eq(id)).First()
+	if err != nil {
 		return nil, err
 	}
 	var wf WorkflowExecution
@@ -229,24 +245,19 @@ func (s *sqlWfExStoreSQL) UpdateState(id, curState, newState string) (*WorkflowE
 	wf.State = newState
 	g.State = newState
 	g.Data = blobMarshal(&wf)
-	if err := s.store.currentDB().Save(&g).Error; err != nil {
+	if err := q.WorkflowExecutionsV2.WithContext(nil).Save(g); err != nil {
 		return nil, err
 	}
 	return &wf, nil
 }
-func (s *sqlWfExStoreSQL) Delete(id string) error { return s.store.currentDB().Delete(&gWfEx{}, "id = ?", id).Error }
 
-// --- TaskExecutionStore ---
-
-type gTaskEx struct {
-	ID                  string `gorm:"primaryKey"`
-	WorkflowExecutionID string `gorm:"index"`
-	UniqueKey           string `gorm:"index"`
-	State               string `gorm:"index"`
-	Data                string
+func (s *sqlWfExStoreSQL) Delete(id string) error {
+	q := s.store.Q()
+	_, err := q.WorkflowExecutionsV2.WithContext(nil).Where(q.WorkflowExecutionsV2.ID.Eq(id)).Delete()
+	return err
 }
 
-func (gTaskEx) TableName() string { return "task_executions_v2" }
+// --- TaskExecutionStore ---
 
 type sqlTaskExStoreSQL struct{ store *sqlStore }
 
@@ -255,14 +266,16 @@ func (s *sqlTaskExStoreSQL) Create(t *TaskExecution) error {
 		t.ID = GenerateID()
 	}
 	t.Validate()
-	return s.store.currentDB().Create(&gTaskEx{
+	return s.store.Q().TaskExecutionsV2.WithContext(nil).Create(&model.TaskExecutionsV2{
 		ID: t.ID, WorkflowExecutionID: t.WorkflowExecutionID,
 		UniqueKey: t.UniqueKey, State: t.State, Data: blobMarshal(t),
-	}).Error
+	})
 }
+
 func (s *sqlTaskExStoreSQL) Get(id string) (*TaskExecution, error) {
-	var g gTaskEx
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.TaskExecutionsV2.WithContext(nil).Where(q.TaskExecutionsV2.ID.Eq(id)).First()
+	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, &NotFoundError{Entity: "TaskExecution", ID: id}
 		}
@@ -274,53 +287,63 @@ func (s *sqlTaskExStoreSQL) Get(id string) (*TaskExecution, error) {
 	}
 	return &t, nil
 }
+
 func (s *sqlTaskExStoreSQL) List(workflowExecutionID, state string) ([]*TaskExecution, error) {
-	var gs []gTaskEx
-	q := s.store.currentDB()
+	q := s.store.Q()
+	qb := q.TaskExecutionsV2.WithContext(nil)
 	if workflowExecutionID != "" {
-		q = q.Where("workflow_execution_id = ?", workflowExecutionID)
+		qb = qb.Where(q.TaskExecutionsV2.WorkflowExecutionID.Eq(workflowExecutionID))
 	}
 	if state != "" {
-		q = q.Where("state = ?", state)
+		qb = qb.Where(q.TaskExecutionsV2.State.Eq(state))
 	}
-	if err := q.Order("COALESCE(data->>'FinishedAt', '0') ASC").Find(&gs).Error; err != nil {
+	gs, err := qb.Find()
+	if err != nil {
 		return nil, err
 	}
 	out := make([]*TaskExecution, len(gs))
-	for i := range gs {
+	for i, g := range gs {
 		var t TaskExecution
-		_ = json.Unmarshal([]byte(gs[i].Data), &t)
+		_ = json.Unmarshal([]byte(g.Data), &t)
 		out[i] = &t
 	}
 	return out, nil
 }
+
 func (s *sqlTaskExStoreSQL) GetByUniqueKey(workflowExecutionID, uniqueKey, state string) ([]*TaskExecution, error) {
-	var gs []gTaskEx
-	q := s.store.currentDB().Where("workflow_execution_id = ? AND unique_key = ?", workflowExecutionID, uniqueKey)
+	q := s.store.Q()
+	qb := q.TaskExecutionsV2.WithContext(nil).Where(
+		q.TaskExecutionsV2.WorkflowExecutionID.Eq(workflowExecutionID),
+		q.TaskExecutionsV2.UniqueKey.Eq(uniqueKey),
+	)
 	if state != "" {
-		q = q.Where("state = ?", state)
+		qb = qb.Where(q.TaskExecutionsV2.State.Eq(state))
 	}
-	if err := q.Find(&gs).Error; err != nil {
+	gs, err := qb.Find()
+	if err != nil {
 		return nil, err
 	}
 	out := make([]*TaskExecution, len(gs))
-	for i := range gs {
+	for i, g := range gs {
 		var t TaskExecution
-		_ = json.Unmarshal([]byte(gs[i].Data), &t)
+		_ = json.Unmarshal([]byte(g.Data), &t)
 		out[i] = &t
 	}
 	return out, nil
 }
+
 func (s *sqlTaskExStoreSQL) Update(t *TaskExecution) error {
 	t.Validate()
-	return s.store.currentDB().Save(&gTaskEx{
+	return s.store.Q().TaskExecutionsV2.WithContext(nil).Save(&model.TaskExecutionsV2{
 		ID: t.ID, WorkflowExecutionID: t.WorkflowExecutionID,
 		UniqueKey: t.UniqueKey, State: t.State, Data: blobMarshal(t),
-	}).Error
+	})
 }
+
 func (s *sqlTaskExStoreSQL) UpdateState(id, curState, newState string) (*TaskExecution, error) {
-	var g gTaskEx
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.TaskExecutionsV2.WithContext(nil).Where(q.TaskExecutionsV2.ID.Eq(id)).First()
+	if err != nil {
 		return nil, err
 	}
 	var t TaskExecution
@@ -333,36 +356,29 @@ func (s *sqlTaskExStoreSQL) UpdateState(id, curState, newState string) (*TaskExe
 	t.State = newState
 	g.State = newState
 	g.Data = blobMarshal(&t)
-	if err := s.store.currentDB().Save(&g).Error; err != nil {
+	if err := q.TaskExecutionsV2.WithContext(nil).Save(g); err != nil {
 		return nil, err
 	}
 	return &t, nil
 }
+
 func (s *sqlTaskExStoreSQL) Count(workflowExecutionID, state string) (int, error) {
-	q := s.store.currentDB().Model(&gTaskEx{}).Where("workflow_execution_id = ?", workflowExecutionID)
+	q := s.store.Q()
+	qb := q.TaskExecutionsV2.WithContext(nil).Where(q.TaskExecutionsV2.WorkflowExecutionID.Eq(workflowExecutionID))
 	if state != "" {
-		q = q.Where("state = ?", state)
+		qb = qb.Where(q.TaskExecutionsV2.State.Eq(state))
 	}
-	var n int64
-	if err := q.Count(&n).Error; err != nil {
-		return 0, err
-	}
-	return int(n), nil
+	n, err := qb.Count()
+	return int(n), err
 }
+
 func (s *sqlTaskExStoreSQL) Delete(id string) error {
-	return s.store.currentDB().Delete(&gTaskEx{}, "id = ?", id).Error
+	q := s.store.Q()
+	_, err := q.TaskExecutionsV2.WithContext(nil).Where(q.TaskExecutionsV2.ID.Eq(id)).Delete()
+	return err
 }
 
 // --- ActionExecutionStore ---
-
-type gActEx struct {
-	ID              string `gorm:"primaryKey"`
-	TaskExecutionID string `gorm:"index"`
-	State           string
-	Data            string
-}
-
-func (gActEx) TableName() string { return "action_executions_v2" }
 
 type sqlActExStoreSQL struct{ store *sqlStore }
 
@@ -371,14 +387,16 @@ func (s *sqlActExStoreSQL) Create(a *ActionExecution) error {
 		a.ID = GenerateID()
 	}
 	a.Validate()
-	return s.store.currentDB().Create(&gActEx{
+	return s.store.Q().ActionExecutionsV2.WithContext(nil).Create(&model.ActionExecutionsV2{
 		ID: a.ID, TaskExecutionID: a.TaskExecutionID,
 		State: a.State, Data: blobMarshal(a),
-	}).Error
+	})
 }
+
 func (s *sqlActExStoreSQL) Get(id string) (*ActionExecution, error) {
-	var g gActEx
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.ActionExecutionsV2.WithContext(nil).Where(q.ActionExecutionsV2.ID.Eq(id)).First()
+	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, &NotFoundError{Entity: "ActionExecution", ID: id}
 		}
@@ -390,44 +408,44 @@ func (s *sqlActExStoreSQL) Get(id string) (*ActionExecution, error) {
 	}
 	return &a, nil
 }
+
 func (s *sqlActExStoreSQL) List(taskExecutionID, state string) ([]*ActionExecution, error) {
-	var gs []gActEx
-	q := s.store.currentDB()
+	q := s.store.Q()
+	qb := q.ActionExecutionsV2.WithContext(nil)
 	if taskExecutionID != "" {
-		q = q.Where("task_execution_id = ?", taskExecutionID)
+		qb = qb.Where(q.ActionExecutionsV2.TaskExecutionID.Eq(taskExecutionID))
 	}
 	if state != "" {
-		q = q.Where("state = ?", state)
+		qb = qb.Where(q.ActionExecutionsV2.State.Eq(state))
 	}
-	if err := q.Find(&gs).Error; err != nil {
+	gs, err := qb.Find()
+	if err != nil {
 		return nil, err
 	}
 	out := make([]*ActionExecution, len(gs))
-	for i := range gs {
+	for i, g := range gs {
 		var a ActionExecution
-		_ = json.Unmarshal([]byte(gs[i].Data), &a)
+		_ = json.Unmarshal([]byte(g.Data), &a)
 		out[i] = &a
 	}
 	return out, nil
 }
+
 func (s *sqlActExStoreSQL) Update(a *ActionExecution) error {
 	a.Validate()
-	return s.store.currentDB().Save(&gActEx{
+	return s.store.Q().ActionExecutionsV2.WithContext(nil).Save(&model.ActionExecutionsV2{
 		ID: a.ID, TaskExecutionID: a.TaskExecutionID,
 		State: a.State, Data: blobMarshal(a),
-	}).Error
+	})
 }
-func (s *sqlActExStoreSQL) Delete(id string) error { return s.store.currentDB().Delete(&gActEx{}, "id = ?", id).Error }
+
+func (s *sqlActExStoreSQL) Delete(id string) error {
+	q := s.store.Q()
+	_, err := q.ActionExecutionsV2.WithContext(nil).Where(q.ActionExecutionsV2.ID.Eq(id)).Delete()
+	return err
+}
 
 // --- EnvironmentStore ---
-
-type gEnv struct {
-	ID   string `gorm:"primaryKey"`
-	Name string `gorm:"index"`
-	Data string
-}
-
-func (gEnv) TableName() string { return "environments_v2" }
 
 type sqlEnvStoreSQL struct{ store *sqlStore }
 
@@ -435,20 +453,22 @@ func (s *sqlEnvStoreSQL) Create(e *Environment) error {
 	if e.ID == "" {
 		e.ID = GenerateID()
 	}
-	return s.store.currentDB().Create(&gEnv{ID: e.ID, Name: e.Name, Data: blobMarshal(e)}).Error
+	return s.store.Q().EnvironmentsV2.WithContext(nil).Create(&model.EnvironmentsV2{ID: e.ID, Name: e.Name, Data: blobMarshal(e)})
 }
+
 func (s *sqlEnvStoreSQL) Get(id string) (*Environment, error) {
-	var g gEnv
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.EnvironmentsV2.WithContext(nil).Where(q.EnvironmentsV2.ID.Eq(id)).First()
+	if err != nil {
 		return nil, err
 	}
 	var e Environment
 	_ = json.Unmarshal([]byte(g.Data), &e)
 	return &e, nil
 }
+
 func (s *sqlEnvStoreSQL) GetByName(name, projectID string) (*Environment, error) {
-	var all []gEnv
-	_ = s.store.currentDB().Find(&all).Error
+	all, _ := s.store.Q().EnvironmentsV2.WithContext(nil).Find()
 	for _, g := range all {
 		var e Environment
 		_ = json.Unmarshal([]byte(g.Data), &e)
@@ -458,9 +478,9 @@ func (s *sqlEnvStoreSQL) GetByName(name, projectID string) (*Environment, error)
 	}
 	return nil, &NotFoundError{Entity: "Environment", ID: name}
 }
+
 func (s *sqlEnvStoreSQL) List(projectID string) ([]*Environment, error) {
-	var all []gEnv
-	_ = s.store.currentDB().Find(&all).Error
+	all, _ := s.store.Q().EnvironmentsV2.WithContext(nil).Find()
 	out := make([]*Environment, 0, len(all))
 	for _, g := range all {
 		var e Environment
@@ -472,22 +492,18 @@ func (s *sqlEnvStoreSQL) List(projectID string) ([]*Environment, error) {
 	}
 	return out, nil
 }
+
 func (s *sqlEnvStoreSQL) Update(e *Environment) error {
-	return s.store.currentDB().Save(&gEnv{ID: e.ID, Name: e.Name, Data: blobMarshal(e)}).Error
-}
-func (s *sqlEnvStoreSQL) Delete(id string) error { return s.store.currentDB().Delete(&gEnv{}, "id = ?", id).Error }
-
-// --- CronTriggerStore (hybrid: key columns + Data blob) ---
-
-type gCronTrigger struct {
-	ID                  string `gorm:"primaryKey"`
-	Name                string `gorm:"index"`
-	NextExecutionTime   string // ISO8601
-	RemainingExecutions int
-	Data                string // blob with full CronTrigger JSON
+	return s.store.Q().EnvironmentsV2.WithContext(nil).Save(&model.EnvironmentsV2{ID: e.ID, Name: e.Name, Data: blobMarshal(e)})
 }
 
-func (gCronTrigger) TableName() string { return "cron_triggers_v2" }
+func (s *sqlEnvStoreSQL) Delete(id string) error {
+	q := s.store.Q()
+	_, err := q.EnvironmentsV2.WithContext(nil).Where(q.EnvironmentsV2.ID.Eq(id)).Delete()
+	return err
+}
+
+// --- CronTriggerStore ---
 
 type sqlCronTriggerStore struct{ store *sqlStore }
 
@@ -498,16 +514,18 @@ func (s *sqlCronTriggerStore) Create(ct *CronTrigger) error {
 	if ct.NextExecutionTime.IsZero() && ct.IntervalSeconds > 0 {
 		ct.NextExecutionTime = Now().Add(time.Duration(ct.IntervalSeconds) * time.Second)
 	}
-	return s.store.currentDB().Create(&gCronTrigger{
+	return s.store.Q().CronTriggersV2.WithContext(nil).Create(&model.CronTriggersV2{
 		ID: ct.ID, Name: ct.Name,
 		NextExecutionTime:   ct.NextExecutionTime.Format(time.RFC3339),
-		RemainingExecutions: ct.RemainingExecutions,
+		RemainingExecutions: int64(ct.RemainingExecutions),
 		Data:                blobMarshal(ct),
-	}).Error
+	})
 }
+
 func (s *sqlCronTriggerStore) Get(id string) (*CronTrigger, error) {
-	var g gCronTrigger
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.CronTriggersV2.WithContext(nil).Where(q.CronTriggersV2.ID.Eq(id)).First()
+	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, &NotFoundError{Entity: "CronTrigger", ID: id}
 		}
@@ -519,9 +537,10 @@ func (s *sqlCronTriggerStore) Get(id string) (*CronTrigger, error) {
 	}
 	return &ct, nil
 }
+
 func (s *sqlCronTriggerStore) GetByName(name string) (*CronTrigger, error) {
-	var all []gCronTrigger
-	if err := s.store.currentDB().Find(&all).Error; err != nil {
+	all, err := s.store.Q().CronTriggersV2.WithContext(nil).Find()
+	if err != nil {
 		return nil, err
 	}
 	for _, g := range all {
@@ -533,9 +552,9 @@ func (s *sqlCronTriggerStore) GetByName(name string) (*CronTrigger, error) {
 	}
 	return nil, &NotFoundError{Entity: "CronTrigger", ID: name}
 }
+
 func (s *sqlCronTriggerStore) List() ([]*CronTrigger, error) {
-	var all []gCronTrigger
-	_ = s.store.currentDB().Find(&all).Error
+	all, _ := s.store.Q().CronTriggersV2.WithContext(nil).Find()
 	out := make([]*CronTrigger, 0, len(all))
 	for _, g := range all {
 		var ct CronTrigger
@@ -544,31 +563,26 @@ func (s *sqlCronTriggerStore) List() ([]*CronTrigger, error) {
 	}
 	return out, nil
 }
+
 func (s *sqlCronTriggerStore) Update(ct *CronTrigger) error {
-	return s.store.currentDB().Save(&gCronTrigger{
+	return s.store.Q().CronTriggersV2.WithContext(nil).Save(&model.CronTriggersV2{
 		ID: ct.ID, Name: ct.Name,
 		NextExecutionTime:   ct.NextExecutionTime.Format(time.RFC3339),
-		RemainingExecutions: ct.RemainingExecutions,
+		RemainingExecutions: int64(ct.RemainingExecutions),
 		Data:                blobMarshal(ct),
-	}).Error
+	})
 }
+
 func (s *sqlCronTriggerStore) Delete(id string) error {
-	return s.store.currentDB().Delete(&gCronTrigger{}, "id = ?", id).Error
+	q := s.store.Q()
+	_, err := q.CronTriggersV2.WithContext(nil).Where(q.CronTriggersV2.ID.Eq(id)).Delete()
+	return err
 }
 
 // --- ScheduledJobStore ---
-
-type gScheduledJob struct {
-	ID         string `gorm:"primaryKey"`
-	JobType    string
-	JobArgs    string  // JSON blob
-	ExecuteAt  string  `gorm:"index:idx_execute_at_captured_at"`
-	CapturedAt *string `gorm:"index:idx_execute_at_captured_at"`
-	Key        string  `gorm:"index:idx_key"`
-	CreatedAt  string  // ISO8601
-}
-
-func (gScheduledJob) TableName() string { return "scheduled_jobs_v2" }
+// gen model's CapturedAt is *string (manually patched) matching MySQL NULL,
+// so GetDueJobs can use gen's field.IsNull().
+// Capture still uses raw gorm because gen has no conditional UPDATE.
 
 type sqlScheduledJobStore struct{ store *sqlStore }
 
@@ -586,7 +600,7 @@ func (s *sqlScheduledJobStore) Create(j *ScheduledJob) error {
 		t := j.CapturedAt.Format(time.RFC3339)
 		captured = &t
 	}
-	return s.store.currentDB().Create(&gScheduledJob{
+	return s.store.Q().ScheduledJobsV2.WithContext(nil).Create(&model.ScheduledJobsV2{
 		ID:         j.ID,
 		JobType:    j.JobType,
 		JobArgs:    string(argsBlob),
@@ -594,15 +608,13 @@ func (s *sqlScheduledJobStore) Create(j *ScheduledJob) error {
 		CapturedAt: captured,
 		Key:        j.Key,
 		CreatedAt:  now.Format(time.RFC3339),
-	}).Error
+	})
 }
 
-func scheduledJobFromGorm(g *gScheduledJob) (*ScheduledJob, error) {
-	j := &ScheduledJob{
-		ID:      g.ID,
-		JobType: g.JobType,
-		Key:     g.Key,
-	}
+// scheduledJobFromGenModel converts gen's model.ScheduledJobsV2 → business ScheduledJob.
+// gen's CapturedAt is *string (patched manually) matching MySQL VARCHAR NULL.
+func scheduledJobFromGenModel(g *model.ScheduledJobsV2) (*ScheduledJob, error) {
+	j := &ScheduledJob{ID: g.ID, JobType: g.JobType, Key: g.Key}
 	args := map[string]interface{}{}
 	if g.JobArgs != "" {
 		if err := json.Unmarshal([]byte(g.JobArgs), &args); err != nil {
@@ -630,21 +642,23 @@ func scheduledJobFromGorm(g *gScheduledJob) (*ScheduledJob, error) {
 }
 
 func (s *sqlScheduledJobStore) Get(id string) (*ScheduledJob, error) {
-	var g gScheduledJob
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.ScheduledJobsV2.WithContext(nil).Where(q.ScheduledJobsV2.ID.Eq(id)).First()
+	if err != nil {
 		return nil, err
 	}
-	return scheduledJobFromGorm(&g)
+	return scheduledJobFromGenModel(g)
 }
 
 func (s *sqlScheduledJobStore) List() ([]*ScheduledJob, error) {
-	var gs []gScheduledJob
-	if err := s.store.currentDB().Find(&gs).Error; err != nil {
+	q := s.store.Q()
+	gs, err := q.ScheduledJobsV2.WithContext(nil).Find()
+	if err != nil {
 		return nil, err
 	}
 	out := make([]*ScheduledJob, 0, len(gs))
 	for _, g := range gs {
-		j, err := scheduledJobFromGorm(&g)
+		j, err := scheduledJobFromGenModel(g)
 		if err != nil {
 			return nil, err
 		}
@@ -654,25 +668,29 @@ func (s *sqlScheduledJobStore) List() ([]*ScheduledJob, error) {
 }
 
 func (s *sqlScheduledJobStore) GetDueJobs(executeCutoff time.Time, now time.Time, captureTimeout time.Duration, batchSize int) ([]*ScheduledJob, error) {
-	// due = (captured_at IS NULL OR captured_at < now - captureTimeout) AND execute_at <= executeCutoff
-	// executeCutoff = now - pickupJobAfter in Python (gives heapDispatcher a head-start)
+	q := s.store.Q()
+	v2 := q.ScheduledJobsV2
 	timeoutBoundary := now.Add(-captureTimeout).Format(time.RFC3339)
 	cutoffStr := executeCutoff.Format(time.RFC3339)
-
-	q := s.store.currentDB().Where(
-		"((captured_at IS NULL OR captured_at < ?) AND execute_at <= ?)",
-		timeoutBoundary, cutoffStr,
+	qb := v2.WithContext(nil).Where(
+		field.And(
+			field.Or(
+				v2.CapturedAt.IsNull(),
+				v2.CapturedAt.Lt(timeoutBoundary),
+			),
+			v2.ExecuteAt.Lte(cutoffStr),
+		),
 	)
 	if batchSize > 0 {
-		q = q.Limit(batchSize)
+		qb = qb.Limit(batchSize)
 	}
-	var gs []gScheduledJob
-	if err := q.Find(&gs).Error; err != nil {
+	gs, err := qb.Find()
+	if err != nil {
 		return nil, err
 	}
 	out := make([]*ScheduledJob, 0, len(gs))
 	for _, g := range gs {
-		j, err := scheduledJobFromGorm(&g)
+		j, err := scheduledJobFromGenModel(g)
 		if err != nil {
 			return nil, err
 		}
@@ -683,20 +701,14 @@ func (s *sqlScheduledJobStore) GetDueJobs(executeCutoff time.Time, now time.Time
 
 func (s *sqlScheduledJobStore) Capture(id string, oldCapturedAt *time.Time, now time.Time) (bool, error) {
 	newCaptured := now.Format(time.RFC3339)
-
-	var result *gorm.DB
+	db := s.store.currentDB().WithContext(nil).Model(&model.ScheduledJobsV2{})
 	if oldCapturedAt == nil {
-		// UPDATE ... SET captured_at = ? WHERE id = ? AND captured_at IS NULL
-		result = s.store.currentDB().Model(&gScheduledJob{}).
-			Where("id = ? AND captured_at IS NULL", id).
-			Update("captured_at", newCaptured)
+		db = db.Where("id = ? AND captured_at IS NULL", id)
 	} else {
-		// UPDATE ... SET captured_at = ? WHERE id = ? AND captured_at = ?
 		oldStr := oldCapturedAt.Format(time.RFC3339)
-		result = s.store.currentDB().Model(&gScheduledJob{}).
-			Where("id = ? AND captured_at = ?", id, oldStr).
-			Update("captured_at", newCaptured)
+		db = db.Where("id = ? AND captured_at = ?", id, oldStr)
 	}
+	result := db.Update("captured_at", newCaptured)
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -704,10 +716,12 @@ func (s *sqlScheduledJobStore) Capture(id string, oldCapturedAt *time.Time, now 
 }
 
 func (s *sqlScheduledJobStore) Delete(id string) error {
-	return s.store.currentDB().Delete(&gScheduledJob{}, "id = ?", id).Error
+	q := s.store.Q()
+	_, err := q.ScheduledJobsV2.WithContext(nil).Where(q.ScheduledJobsV2.ID.Eq(id)).Delete()
+	return err
 }
 
-// --- WorkbookStore (blob pattern) ---
+// --- WorkbookStore ---
 
 type sqlWorkbookStore struct{ store *sqlStore }
 
@@ -715,11 +729,13 @@ func (s *sqlWorkbookStore) Create(wb *Workbook) error {
 	if wb.ID == "" {
 		wb.ID = GenerateID()
 	}
-	return s.store.currentDB().Create(&gWorkbook{ID: wb.ID, Name: wb.Name, Data: blobMarshal(wb)}).Error
+	return s.store.Q().WorkbooksV2.WithContext(nil).Create(&model.WorkbooksV2{ID: wb.ID, Name: wb.Name, Data: blobMarshal(wb)})
 }
+
 func (s *sqlWorkbookStore) Get(id string) (*Workbook, error) {
-	var g gWorkbook
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.WorkbooksV2.WithContext(nil).Where(q.WorkbooksV2.ID.Eq(id)).First()
+	if err != nil {
 		return nil, err
 	}
 	var wb Workbook
@@ -728,9 +744,10 @@ func (s *sqlWorkbookStore) Get(id string) (*Workbook, error) {
 	}
 	return &wb, nil
 }
+
 func (s *sqlWorkbookStore) GetByName(name, namespace, projectID string) (*Workbook, error) {
-	var all []gWorkbook
-	if err := s.store.currentDB().Find(&all).Error; err != nil {
+	all, err := s.store.Q().WorkbooksV2.WithContext(nil).Find()
+	if err != nil {
 		return nil, err
 	}
 	for _, g := range all {
@@ -748,9 +765,10 @@ func (s *sqlWorkbookStore) GetByName(name, namespace, projectID string) (*Workbo
 	}
 	return nil, &NotFoundError{Entity: "Workbook", ID: name}
 }
+
 func (s *sqlWorkbookStore) List(namespace, projectID string) ([]*Workbook, error) {
-	var all []gWorkbook
-	if err := s.store.currentDB().Find(&all).Error; err != nil {
+	all, err := s.store.Q().WorkbooksV2.WithContext(nil).Find()
+	if err != nil {
 		return nil, err
 	}
 	out := make([]*Workbook, 0, len(all))
@@ -767,14 +785,18 @@ func (s *sqlWorkbookStore) List(namespace, projectID string) ([]*Workbook, error
 	}
 	return out, nil
 }
+
 func (s *sqlWorkbookStore) Update(wb *Workbook) error {
-	return s.store.currentDB().Save(&gWorkbook{ID: wb.ID, Name: wb.Name, Data: blobMarshal(wb)}).Error
-}
-func (s *sqlWorkbookStore) Delete(id string) error {
-	return s.store.currentDB().Delete(&gWorkbook{}, "id = ?", id).Error
+	return s.store.Q().WorkbooksV2.WithContext(nil).Save(&model.WorkbooksV2{ID: wb.ID, Name: wb.Name, Data: blobMarshal(wb)})
 }
 
-// --- DynamicActionDefinitionStore (blob pattern) ---
+func (s *sqlWorkbookStore) Delete(id string) error {
+	q := s.store.Q()
+	_, err := q.WorkbooksV2.WithContext(nil).Where(q.WorkbooksV2.ID.Eq(id)).Delete()
+	return err
+}
+
+// --- DynamicActionDefinitionStore ---
 
 type sqlDynamicActionDefStore struct{ store *sqlStore }
 
@@ -782,11 +804,15 @@ func (s *sqlDynamicActionDefStore) Create(d *DynamicActionDefinition) error {
 	if d.ID == "" {
 		d.ID = GenerateID()
 	}
-	return s.store.currentDB().Create(&gDynamicActionDef{ID: d.ID, Name: d.Name, Data: blobMarshal(d)}).Error
+	return s.store.Q().DynamicActionDefinition.WithContext(nil).Create(
+		&model.DynamicActionDefinition{ID: d.ID, Name: d.Name, Data: blobMarshal(d)},
+	)
 }
+
 func (s *sqlDynamicActionDefStore) Get(id string) (*DynamicActionDefinition, error) {
-	var g gDynamicActionDef
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.DynamicActionDefinition.WithContext(nil).Where(q.DynamicActionDefinition.ID.Eq(id)).First()
+	if err != nil {
 		return nil, err
 	}
 	var d DynamicActionDefinition
@@ -795,9 +821,10 @@ func (s *sqlDynamicActionDefStore) Get(id string) (*DynamicActionDefinition, err
 	}
 	return &d, nil
 }
+
 func (s *sqlDynamicActionDefStore) GetByName(name, namespace, projectID string) (*DynamicActionDefinition, error) {
-	var all []gDynamicActionDef
-	if err := s.store.currentDB().Find(&all).Error; err != nil {
+	all, err := s.store.Q().DynamicActionDefinition.WithContext(nil).Find()
+	if err != nil {
 		return nil, err
 	}
 	for _, g := range all {
@@ -809,9 +836,9 @@ func (s *sqlDynamicActionDefStore) GetByName(name, namespace, projectID string) 
 	}
 	return nil, &NotFoundError{Entity: "DynamicActionDefinition", ID: name}
 }
+
 func (s *sqlDynamicActionDefStore) List(namespace, projectID string) ([]*DynamicActionDefinition, error) {
-	var all []gDynamicActionDef
-	_ = s.store.currentDB().Find(&all).Error
+	all, _ := s.store.Q().DynamicActionDefinition.WithContext(nil).Find()
 	out := make([]*DynamicActionDefinition, 0, len(all))
 	for _, g := range all {
 		var d DynamicActionDefinition
@@ -826,14 +853,20 @@ func (s *sqlDynamicActionDefStore) List(namespace, projectID string) ([]*Dynamic
 	}
 	return out, nil
 }
+
 func (s *sqlDynamicActionDefStore) Update(d *DynamicActionDefinition) error {
-	return s.store.currentDB().Save(&gDynamicActionDef{ID: d.ID, Name: d.Name, Data: blobMarshal(d)}).Error
-}
-func (s *sqlDynamicActionDefStore) Delete(id string) error {
-	return s.store.currentDB().Delete(&gDynamicActionDef{}, "id = ?", id).Error
+	return s.store.Q().DynamicActionDefinition.WithContext(nil).Save(
+		&model.DynamicActionDefinition{ID: d.ID, Name: d.Name, Data: blobMarshal(d)},
+	)
 }
 
-// --- EventTriggerStore (blob pattern) ---
+func (s *sqlDynamicActionDefStore) Delete(id string) error {
+	q := s.store.Q()
+	_, err := q.DynamicActionDefinition.WithContext(nil).Where(q.DynamicActionDefinition.ID.Eq(id)).Delete()
+	return err
+}
+
+// --- EventTriggerStore ---
 
 type sqlEventTriggerStore struct{ store *sqlStore }
 
@@ -841,11 +874,13 @@ func (s *sqlEventTriggerStore) Create(e *EventTrigger) error {
 	if e.ID == "" {
 		e.ID = GenerateID()
 	}
-	return s.store.currentDB().Create(&gEventTrigger{ID: e.ID, Name: e.Name, Data: blobMarshal(e)}).Error
+	return s.store.Q().EventTriggersV2.WithContext(nil).Create(&model.EventTriggersV2{ID: e.ID, Name: e.Name, Data: blobMarshal(e)})
 }
+
 func (s *sqlEventTriggerStore) Get(id string) (*EventTrigger, error) {
-	var g gEventTrigger
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.EventTriggersV2.WithContext(nil).Where(q.EventTriggersV2.ID.Eq(id)).First()
+	if err != nil {
 		return nil, err
 	}
 	var e EventTrigger
@@ -854,9 +889,10 @@ func (s *sqlEventTriggerStore) Get(id string) (*EventTrigger, error) {
 	}
 	return &e, nil
 }
+
 func (s *sqlEventTriggerStore) GetByExchangeTopicEvent(exchange, topic, event, projectID string) (*EventTrigger, error) {
-	var all []gEventTrigger
-	if err := s.store.currentDB().Find(&all).Error; err != nil {
+	all, err := s.store.Q().EventTriggersV2.WithContext(nil).Find()
+	if err != nil {
 		return nil, err
 	}
 	for _, g := range all {
@@ -871,9 +907,9 @@ func (s *sqlEventTriggerStore) GetByExchangeTopicEvent(exchange, topic, event, p
 	}
 	return nil, &NotFoundError{Entity: "EventTrigger", ID: exchange + "/" + topic + "/" + event}
 }
+
 func (s *sqlEventTriggerStore) List() ([]*EventTrigger, error) {
-	var all []gEventTrigger
-	_ = s.store.currentDB().Find(&all).Error
+	all, _ := s.store.Q().EventTriggersV2.WithContext(nil).Find()
 	out := make([]*EventTrigger, 0, len(all))
 	for _, g := range all {
 		var e EventTrigger
@@ -882,14 +918,18 @@ func (s *sqlEventTriggerStore) List() ([]*EventTrigger, error) {
 	}
 	return out, nil
 }
+
 func (s *sqlEventTriggerStore) Update(e *EventTrigger) error {
-	return s.store.currentDB().Save(&gEventTrigger{ID: e.ID, Name: e.Name, Data: blobMarshal(e)}).Error
-}
-func (s *sqlEventTriggerStore) Delete(id string) error {
-	return s.store.currentDB().Delete(&gEventTrigger{}, "id = ?", id).Error
+	return s.store.Q().EventTriggersV2.WithContext(nil).Save(&model.EventTriggersV2{ID: e.ID, Name: e.Name, Data: blobMarshal(e)})
 }
 
-// --- ResourceMemberStore (blob pattern) ---
+func (s *sqlEventTriggerStore) Delete(id string) error {
+	q := s.store.Q()
+	_, err := q.EventTriggersV2.WithContext(nil).Where(q.EventTriggersV2.ID.Eq(id)).Delete()
+	return err
+}
+
+// --- ResourceMemberStore ---
 
 type sqlResourceMemberStore struct{ store *sqlStore }
 
@@ -897,11 +937,13 @@ func (s *sqlResourceMemberStore) Create(m *ResourceMember) error {
 	if m.ID == "" {
 		m.ID = GenerateID()
 	}
-	return s.store.currentDB().Create(&gResourceMember{ID: m.ID, Data: blobMarshal(m)}).Error
+	return s.store.Q().ResourceMembersV2.WithContext(nil).Create(&model.ResourceMembersV2{ID: m.ID, Data: blobMarshal(m)})
 }
+
 func (s *sqlResourceMemberStore) Get(id string) (*ResourceMember, error) {
-	var g gResourceMember
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.ResourceMembersV2.WithContext(nil).Where(q.ResourceMembersV2.ID.Eq(id)).First()
+	if err != nil {
 		return nil, err
 	}
 	var m ResourceMember
@@ -910,9 +952,10 @@ func (s *sqlResourceMemberStore) Get(id string) (*ResourceMember, error) {
 	}
 	return &m, nil
 }
+
 func (s *sqlResourceMemberStore) ListByResource(resourceID, resourceType string) ([]*ResourceMember, error) {
-	var all []gResourceMember
-	if err := s.store.currentDB().Find(&all).Error; err != nil {
+	all, err := s.store.Q().ResourceMembersV2.WithContext(nil).Find()
+	if err != nil {
 		return nil, err
 	}
 	out := make([]*ResourceMember, 0, len(all))
@@ -925,14 +968,18 @@ func (s *sqlResourceMemberStore) ListByResource(resourceID, resourceType string)
 	}
 	return out, nil
 }
+
 func (s *sqlResourceMemberStore) Update(m *ResourceMember) error {
-	return s.store.currentDB().Save(&gResourceMember{ID: m.ID, Data: blobMarshal(m)}).Error
-}
-func (s *sqlResourceMemberStore) Delete(id string) error {
-	return s.store.currentDB().Delete(&gResourceMember{}, "id = ?", id).Error
+	return s.store.Q().ResourceMembersV2.WithContext(nil).Save(&model.ResourceMembersV2{ID: m.ID, Data: blobMarshal(m)})
 }
 
-// --- CodeSourceStore (blob pattern) ---
+func (s *sqlResourceMemberStore) Delete(id string) error {
+	q := s.store.Q()
+	_, err := q.ResourceMembersV2.WithContext(nil).Where(q.ResourceMembersV2.ID.Eq(id)).Delete()
+	return err
+}
+
+// --- CodeSourceStore ---
 
 type sqlCodeSourceStore struct{ store *sqlStore }
 
@@ -940,11 +987,13 @@ func (s *sqlCodeSourceStore) Create(c *CodeSource) error {
 	if c.ID == "" {
 		c.ID = GenerateID()
 	}
-	return s.store.currentDB().Create(&gCodeSource{ID: c.ID, Name: c.Name, Data: blobMarshal(c)}).Error
+	return s.store.Q().CodeSource.WithContext(nil).Create(&model.CodeSource{ID: c.ID, Name: c.Name, Data: blobMarshal(c)})
 }
+
 func (s *sqlCodeSourceStore) Get(id string) (*CodeSource, error) {
-	var g gCodeSource
-	if err := s.store.currentDB().First(&g, "id = ?", id).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.CodeSource.WithContext(nil).Where(q.CodeSource.ID.Eq(id)).First()
+	if err != nil {
 		return nil, err
 	}
 	var c CodeSource
@@ -953,9 +1002,10 @@ func (s *sqlCodeSourceStore) Get(id string) (*CodeSource, error) {
 	}
 	return &c, nil
 }
+
 func (s *sqlCodeSourceStore) GetByName(name, namespace, projectID string) (*CodeSource, error) {
-	var all []gCodeSource
-	if err := s.store.currentDB().Find(&all).Error; err != nil {
+	all, err := s.store.Q().CodeSource.WithContext(nil).Find()
+	if err != nil {
 		return nil, err
 	}
 	for _, g := range all {
@@ -967,9 +1017,9 @@ func (s *sqlCodeSourceStore) GetByName(name, namespace, projectID string) (*Code
 	}
 	return nil, &NotFoundError{Entity: "CodeSource", ID: name}
 }
+
 func (s *sqlCodeSourceStore) List(namespace, projectID string) ([]*CodeSource, error) {
-	var all []gCodeSource
-	_ = s.store.currentDB().Find(&all).Error
+	all, _ := s.store.Q().CodeSource.WithContext(nil).Find()
 	out := make([]*CodeSource, 0, len(all))
 	for _, g := range all {
 		var c CodeSource
@@ -984,38 +1034,44 @@ func (s *sqlCodeSourceStore) List(namespace, projectID string) ([]*CodeSource, e
 	}
 	return out, nil
 }
+
 func (s *sqlCodeSourceStore) Update(c *CodeSource) error {
-	return s.store.currentDB().Save(&gCodeSource{ID: c.ID, Name: c.Name, Data: blobMarshal(c)}).Error
-}
-func (s *sqlCodeSourceStore) Delete(id string) error {
-	return s.store.currentDB().Delete(&gCodeSource{}, "id = ?", id).Error
+	return s.store.Q().CodeSource.WithContext(nil).Save(&model.CodeSource{ID: c.ID, Name: c.Name, Data: blobMarshal(c)})
 }
 
-// --- MetricsStore (simple key/value) ---
+func (s *sqlCodeSourceStore) Delete(id string) error {
+	q := s.store.Q()
+	_, err := q.CodeSource.WithContext(nil).Where(q.CodeSource.ID.Eq(id)).Delete()
+	return err
+}
+
+// --- MetricsStore ---
 
 type sqlMetricsStore struct{ store *sqlStore }
 
 func (s *sqlMetricsStore) GetByName(name string) (*Metrics, error) {
-	var m Metrics
-	if err := s.store.currentDB().Where("name = ?", name).First(&m).Error; err != nil {
+	q := s.store.Q()
+	g, err := q.MistralMetric.WithContext(nil).Where(q.MistralMetric.Name.Eq(name)).First()
+	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, &NotFoundError{Entity: "Metrics", ID: name}
 		}
 		return nil, err
 	}
-	return &m, nil
+	return &Metrics{Name: g.Name, Value: g.Value}, nil
 }
 
 func (s *sqlMetricsStore) Set(name, value string) error {
-	var existing Metrics
-	err := s.store.currentDB().Where("name = ?", name).First(&existing).Error
-	if err == nil {
-		existing.Value = value
-		return s.store.currentDB().Save(&existing).Error
+	q := s.store.Q()
+	qb := q.MistralMetric.WithContext(nil).Where(q.MistralMetric.Name.Eq(name))
+	if _, err := qb.First(); err == nil {
+		return qb.Save(&model.MistralMetric{Name: name, Value: value})
 	}
-	return s.store.currentDB().Create(&Metrics{Name: name, Value: value}).Error
+	return q.MistralMetric.WithContext(nil).Create(&model.MistralMetric{Name: name, Value: value})
 }
 
 func (s *sqlMetricsStore) Delete(name string) error {
-	return s.store.currentDB().Where("name = ?", name).Delete(&Metrics{}).Error
+	q := s.store.Q()
+	_, err := q.MistralMetric.WithContext(nil).Where(q.MistralMetric.Name.Eq(name)).Delete()
+	return err
 }

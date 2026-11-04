@@ -12,7 +12,7 @@ type ScheduledJobsV2 struct {
 	JobType    string `gorm:"column:job_type" json:"job_type"`
 	JobArgs    string `gorm:"column:job_args" json:"job_args"`
 	ExecuteAt  string `gorm:"column:execute_at" json:"execute_at"`
-	CapturedAt string `gorm:"column:captured_at" json:"captured_at"`
+	CapturedAt *string `gorm:"column:captured_at" json:"captured_at"`
 	Key        string `gorm:"column:key" json:"key"`
 	CreatedAt  string `gorm:"column:created_at" json:"created_at"`
 }

@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/danchleo/workflow-go/gen/model"
 	"github.com/danchleo/workflow-go/gen/query"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
@@ -90,9 +91,11 @@ func NewSQLStore(dsn string) (Store, error) {
 	}
 
 	if err := gormDB.AutoMigrate(
-		&gWorkflowDef{}, &gActionDef{}, &gWfEx{}, &gTaskEx{}, &gActEx{}, &gEnv{}, &gCronTrigger{}, &gScheduledJob{},
-		&gWorkbook{}, &gDynamicActionDef{}, &gEventTrigger{}, &gResourceMember{}, &gNamedLock{}, &gCodeSource{}, &gMetrics{},
-		&gDelayedCall{},
+		&model.WorkflowDefinitionsV2{}, &model.ActionDefinitionsV2{}, &model.WorkflowExecutionsV2{},
+		&model.TaskExecutionsV2{}, &model.ActionExecutionsV2{}, &model.EnvironmentsV2{},
+		&model.CronTriggersV2{}, &model.ScheduledJobsV2{}, &model.WorkbooksV2{},
+		&model.DynamicActionDefinition{}, &model.EventTriggersV2{}, &model.ResourceMembersV2{},
+		&model.NamedLock{}, &model.CodeSource{}, &model.MistralMetric{}, &model.DelayedCallsV2{},
 	); err != nil {
 		return nil, fmt.Errorf("autmigrate: %w", err)
 	}
