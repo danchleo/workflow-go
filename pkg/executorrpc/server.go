@@ -5,10 +5,10 @@
 //  1. Creates RPC server via rpc.get_rpc_server_driver()(cfg.CONF.executor)
 //  2. Calls rpc_server.register_endpoint(self)
 //  3. Calls rpc_server.start()
-//  4. Endpoint method: run_action(action, action_ex_id, safe_rerun, exec_ctx,
-//     timeout, target) → calls self.executor.run_action() → returns result
+//  4. Every public method becomes an RPC endpoint automatically.
 //
-// Single topic 'executor', single method 'run_action'.
+// Go mirrors this with RegisterEndpoint — public methods become RPC handlers
+// via reflect, map[string]any args → typed request struct via mapstructure.
 package executorrpc
 
 import (
@@ -21,63 +21,48 @@ import (
 	"github.com/danchleo/workflow-go/internal/rpc"
 )
 
+// runActionRequest is the wire-format request — 1:1 with Python endpoint's
+// run_action parameter list.
+type runActionRequest struct {
+	Action     string         `mapstructure:"action"`
+	Input      map[string]any `mapstructure:"input"`
+	ActionExID string         `mapstructure:"action_ex_id"`
+	SafeRerun  bool           `mapstructure:"safe_rerun"`
+	ExecCtx    map[string]any `mapstructure:"exec_ctx"`
+	Target     string         `mapstructure:"target"`
+	TimeoutSec int            `mapstructure:"timeout_sec"`
+}
+
+// ExecutorEndpoint is the endpoint object passed to RegisterEndpoint.
+// Every public method (RunAction here) becomes an RPC handler.
+//
+//   - Method names are converted PascalCase → snake_case (RunAction → run_action)
+//   - Signature: (ctx context.Context, *Req) (any, error)
+//   - Args are decoded via mapstructure into *Req — WeaklyTypedInput handles
+//     JSON float64 → int automatically.
+type ExecutorEndpoint struct {
+	Registry *actions.ActionRegistry
+	Executor *executors.DefaultExecutor
+}
+
+// RunAction is the RPC endpoint — called automatically when topic=executor
+// receives method='run_action'.
+func (e *ExecutorEndpoint) RunAction(ctx context.Context, req *runActionRequest) (any, error) {
+	desc, ok := e.Registry.Get(req.Action)
+	if !ok {
+		return nil, fmt.Errorf("unknown action %q", req.Action)
+	}
+	inst := desc.Factory()
+	timeout := time.Duration(req.TimeoutSec) * time.Second
+	return e.Executor.RunAction(ctx, inst, req.Input, req.ActionExID, req.SafeRerun, req.ExecCtx, req.Target, timeout)
+}
+
 // NewServer creates an Executor RPC server bound to transport on topic 'executor'.
 func NewServer(t rpc.Transport, registry *actions.ActionRegistry) *rpc.RPCServer {
-	// Python DefaultExecutor in executor process holds rpc.EngineClient so it
-	// can call back on_action_complete. We pass nil here — the executor server
-	// is pure: runs action, returns result. Caller (engine) handles callback.
-	exec := executors.NewDefaultExecutor(nil)
-
 	s := rpc.NewRPCServer(t, "executor")
-	s.Handle("run_action", func(ctx context.Context, args map[string]any) (any, error) {
-		actionName := strOf(args, "action")
-		input := mapOf(args, "input")
-		actionExID := strOf(args, "action_ex_id")
-		safeRerun := boolOf(args, "safe_rerun")
-		execCtx := mapOf(args, "exec_ctx")
-		target := strOf(args, "target")
-		timeout := 0 * time.Second
-		if to, ok := args["timeout_sec"].(float64); ok {
-			timeout = time.Duration(to) * time.Second
-		}
-
-		desc, ok := registry.Get(actionName)
-		if !ok {
-			return nil, fmt.Errorf("unknown action %q", actionName)
-		}
-		inst := desc.Factory()
-		res, err := exec.RunAction(ctx, inst, input, actionExID, safeRerun, execCtx, target, timeout)
-		if err != nil {
-			return nil, err
-		}
-		return res, nil
+	s.RegisterEndpoint(&ExecutorEndpoint{
+		Registry: registry,
+		Executor: executors.NewDefaultExecutor(nil),
 	})
 	return s
 }
-
-func strOf(m map[string]any, k string) string {
-	if v, ok := m[k]; ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
-	}
-	return ""
-}
-func boolOf(m map[string]any, k string) bool {
-	if v, ok := m[k]; ok {
-		if b, ok := v.(bool); ok {
-			return b
-		}
-	}
-	return false
-}
-func mapOf(m map[string]any, k string) map[string]any {
-	if v, ok := m[k]; ok && v != nil {
-		if mm, ok := v.(map[string]any); ok {
-			return mm
-		}
-	}
-	return nil
-}
-
-var _ = fmt.Errorf

@@ -2,33 +2,40 @@
 //
 // Architecture (mirrors oslo.messaging exactly):
 //
-//   Transport — abstract MQ transport layer
-//     ├── InProcessTransport (进程内内存, 对等 oslo.messaging fake:/ transport)
-//     └── AMQPTransport      (生产, 对等 oslo.messaging rabbit://)
+//	Transport — abstract MQ transport layer
+//	  ├── InProcessTransport (进程内内存, 对等 oslo.messaging fake:/ transport)
+//	  └── AMQPTransport      (生产, 对等 oslo.messaging rabbit://)
 //
-//   RPCClient{Transport, Topic}  — 发出 RPC 调用
-//     SyncCall(ctx, method, args, &result)  — request-reply, 阻塞等结果
-//     AsyncCall(ctx, method, args)          — fire-and-forget publish
+//	RPCClient{Transport, Topic}  — 发出 RPC 调用
+//	  SyncCall(ctx, method, args, &result)  — request-reply, 阻塞等结果
+//	  AsyncCall(ctx, method, args)          — fire-and-forget publish
 //
-//   RPCServer{Transport, Topic}  — 注册 endpoint, 启动监听
-//     Handle(method, handler)              — 注册 handler
-//     Start(ctx)                           — 开始接收并分发
+//	RPCServer{Transport, Topic}  — 注册 endpoint, 启动监听
+//	  Handle(method, handler)              — 注册 handler
+//	  Start(ctx)                           — 开始接收并分发
 //
 // Topic 命名（完全对齐 Python）：
-//   'engine'   → EngineServer  (start_workflow, on_action_complete, ...)
-//   'executor' → ExecutorServer (run_action)
+//
+//	'engine'   → EngineServer  (start_workflow, on_action_complete, ...)
+//	'executor' → ExecutorServer (run_action)
 //
 // Wire protocol（JSON，完全自定义）：
-//   Request:  {id, method, args}
-//   Reply:    {id, result, error}
-//   Publish:  {method, args}  (no reply expected)
+//
+//	Request:  {id, method, args}
+//	Reply:    {id, result, error}
+//	Publish:  {method, args}  (no reply expected)
 package rpc
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"strings"
 	"sync"
+	"unicode"
+
+	"github.com/mitchellh/mapstructure"
 )
 
 // Transport is the abstract MQ layer — mirror of oslo.messaging transport.
@@ -55,9 +62,9 @@ type Dispatcher interface {
 
 // Request is a sync_call request — expects a reply.
 type Request struct {
-	ID     string           `json:"id"`
-	Method string           `json:"method"`
-	Args   map[string]any   `json:"args"`
+	ID     string         `json:"id"`
+	Method string         `json:"method"`
+	Args   map[string]any `json:"args"`
 }
 
 // Reply is the response to a Request.
@@ -120,8 +127,8 @@ func GetGlobalInProcess() *inProcessTransport {
 
 type inProcessTransport struct {
 	mu        sync.Mutex
-	endpoints map[string]Dispatcher         // topic → dispatcher
-	pending   map[string]chan *Reply        // request_id → reply chan
+	endpoints map[string]Dispatcher  // topic → dispatcher
+	pending   map[string]chan *Reply // request_id → reply chan
 	seq       uint64
 	closed    bool
 }
@@ -182,6 +189,153 @@ func (t *inProcessTransport) Close() error {
 	t.closed = true
 	return nil
 }
+
+// --- DecodeArgs: map[string]any → typed struct (Python **kwargs → endpoint method params) ---
+
+// DecodeArgs decodes a JSON-RPC args map into a typed request struct via
+// JSON round-trip. This mirrors Python oslo.messaging's automatic
+// kwargs-to-parameter reflection — the Go equivalent is a typed struct
+// with json tags that match the wire protocol's snake_case keys.
+//
+// Usage:
+//
+//	type runActionRequest struct {
+//	    Action     string         `mapstructure:"action"`
+//	    Input      map[string]any `mapstructure:"input"`
+//	    TimeoutSec int            `mapstructure:"timeout_sec"`
+//	}
+//
+//	s.Handle("run_action", func(ctx context.Context, args map[string]any) (any, error) {
+//	    var req runActionRequest
+//	    if err := rpc.DecodeArgs(args, &req); err != nil {
+//	        return nil, err
+//	    }
+//	    ... use req.Action, req.Input, time.Duration(req.TimeoutSec)*time.Second ...
+//	})
+func DecodeArgs(args map[string]any, into interface{}) error {
+	cfg := &mapstructure.DecoderConfig{
+		Result:           into,
+		WeaklyTypedInput: true, // float64→int, string→int 等宽松转换（JSON unmarshal 副作用）
+		TagName:          "mapstructure",
+	}
+	dec, err := mapstructure.NewDecoder(cfg)
+	if err != nil {
+		return fmt.Errorf("mapstructure decoder: %w", err)
+	}
+	if err := dec.Decode(args); err != nil {
+		return fmt.Errorf("decode args: %w", err)
+	}
+	return nil
+}
+
+// --- RegisterEndpoint: reflect-based Python-style endpoint registration ---
+
+// EndpointMethod is the signature every registered endpoint method must have:
+//
+//	Method(ctx context.Context, *ReqStruct) (Result, error)
+//	Method(ctx context.Context, *ReqStruct) error
+//
+// RegisterEndpoint scans endpoint's public methods, converts PascalCase → snake_case
+// (RunAction → run_action), and registers each as an RPC handler.
+// This mirrors Python oslo.messaging's endpoint registration where every
+// public method on the endpoint object becomes an RPC endpoint automatically.
+func (s *RPCServer) RegisterEndpoint(endpoint interface{}) {
+	t := reflect.TypeOf(endpoint)
+	v := reflect.ValueOf(endpoint)
+
+	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
+
+	for i := 0; i < t.NumMethod(); i++ {
+		m := t.Method(i)
+		mt := m.Type
+
+		// Skip non-matching signatures. Valid patterns:
+		//   (context.Context, *Req) → (any, error)
+		//   (context.Context, *Req) → error
+		if mt.NumIn() != 3 { // receiver, ctx, req
+			continue
+		}
+		if !mt.In(1).Implements(ctxType) {
+			continue
+		}
+		reqType := mt.In(2) // e.g. *runActionRequest
+		if reqType.Kind() != reflect.Ptr {
+			continue
+		}
+
+		// Validate return types: (error) or (any, error)
+		hasError := false
+		hasResult := false
+		switch mt.NumOut() {
+		case 1:
+			if mt.Out(0) == errorType {
+				hasError = true
+			} else {
+				continue
+			}
+		case 2:
+			if mt.Out(1) != errorType {
+				continue
+			}
+			hasResult = true
+			hasError = true
+		default:
+			continue
+		}
+		_ = hasError // always true past validation
+
+		methodName := toSnakeCase(m.Name)
+		s.Handle(methodName, func(ctx context.Context, args map[string]any) (any, error) {
+			req := reflect.New(reqType.Elem()).Interface()
+			if err := DecodeArgs(args, req); err != nil {
+				return nil, fmt.Errorf("decode %s args: %w", methodName, err)
+			}
+			results := m.Func.Call([]reflect.Value{
+				v,                    // receiver
+				reflect.ValueOf(ctx), // context.Context
+				reflect.ValueOf(req), // *ReqStruct
+			})
+			// Extract error (last return value if present)
+			var err error
+			switch mt.NumOut() {
+			case 1:
+				if e := results[0].Interface(); e != nil {
+					err = e.(error)
+				}
+			case 2:
+				if e := results[1].Interface(); e != nil {
+					err = e.(error)
+				}
+			}
+			if err != nil {
+				return nil, err
+			}
+			if hasResult {
+				return results[0].Interface(), nil
+			}
+			return nil, nil
+		})
+	}
+}
+
+// toSnakeCase converts RunAction → run_action, HTTPServer → http_server.
+func toSnakeCase(name string) string {
+	var b strings.Builder
+	runes := []rune(name)
+	for i, r := range runes {
+		if unicode.IsUpper(r) {
+			if i > 0 {
+				b.WriteByte('_')
+			}
+			b.WriteRune(unicode.ToLower(r))
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+var errorType = reflect.TypeOf((*error)(nil)).Elem()
 
 // --- RPCClient / RPCServer wrappers ---
 
@@ -296,7 +450,10 @@ func generateReqID() string {
 
 var reqCounter reqIDCounter
 
-type reqIDCounter struct{ sync.Mutex; n uint64 }
+type reqIDCounter struct {
+	sync.Mutex
+	n uint64
+}
 
 func (c *reqIDCounter) Add(any uint64) uint64 {
 	c.Mutex.Lock()

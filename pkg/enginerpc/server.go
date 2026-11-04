@@ -5,126 +5,113 @@
 //  1. Creates EngineServer(self.engine)
 //  2. Creates RPC server via rpc.get_rpc_server_driver()(cfg.CONF.engine)
 //  3. Calls rpc_server.register_endpoint(engine_server)
-//  4. Calls rpc_server.start()
+//  4. Every public method is auto-registered as RPC endpoint.
 //
-// Each public method is a @rpc_method — oslo.messaging dispatches by name.
-// Go mirrors this: each method becomes server.Handle('name', handler).
+// Go mirrors this with RegisterEndpoint — public methods → reflect → handlers,
+// mapstructure decodes map[string]any args into typed request structs.
 package enginerpc
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/danchleo/workflow-go/internal/db"
 	"github.com/danchleo/workflow-go/internal/engine"
 	"github.com/danchleo/workflow-go/internal/rpc"
 )
 
+// --- Wire-format request structs (1:1 with Python endpoint method params) ---
+
+type startWorkflowRequest struct {
+	WFDefID     string                 `mapstructure:"wf_def_id"`
+	WFNamespace string                 `mapstructure:"wf_namespace"`
+	WFExID      string                 `mapstructure:"wf_ex_id"`
+	WFInput     map[string]interface{} `mapstructure:"wf_input"`
+	Description string                 `mapstructure:"description"`
+	Params      map[string]interface{} `mapstructure:"params"`
+}
+
+type startTaskRequest struct {
+	TaskExID    string                   `mapstructure:"task_ex_id"`
+	FirstRun    bool                     `mapstructure:"first_run"`
+	Waiting     bool                     `mapstructure:"waiting"`
+	TriggeredBy []map[string]interface{} `mapstructure:"triggered_by"`
+	Rerun       bool                     `mapstructure:"rerun"`
+	Reset       bool                     `mapstructure:"reset"`
+}
+
+type onActionCompleteRequest struct {
+	ActionExID string     `mapstructure:"action_ex_id"`
+	Result     *db.Result `mapstructure:"result"`
+	WFAction   bool       `mapstructure:"wf_action"`
+}
+
+type pauseWorkflowRequest struct {
+	WFExID string `mapstructure:"wf_ex_id"`
+}
+
+type resumeWorkflowRequest struct {
+	WFExID string                 `mapstructure:"wf_ex_id"`
+	Env    map[string]interface{} `mapstructure:"env"`
+}
+
+type stopWorkflowRequest struct {
+	WFExID  string `mapstructure:"wf_ex_id"`
+	State   string `mapstructure:"state"`
+	Message string `mapstructure:"message"`
+}
+
+type rerunWorkflowRequest struct {
+	TaskExID string                 `mapstructure:"task_ex_id"`
+	Reset    bool                   `mapstructure:"reset"`
+	Skip     bool                   `mapstructure:"skip"`
+	Env      map[string]interface{} `mapstructure:"env"`
+}
+
+type onActionUpdateRequest struct {
+	WFExID string `mapstructure:"wf_ex_id"`
+}
+
+// EngineEndpoint is the object RegisterEndpoint scans for public methods.
+// Each public method → one RPC endpoint.
+type EngineEndpoint struct {
+	Engine engine.Engine
+}
+
+func (e *EngineEndpoint) StartWorkflow(ctx context.Context, req *startWorkflowRequest) (any, error) {
+	return e.Engine.StartWorkflow(ctx, req.WFDefID, req.WFNamespace, req.WFExID, req.WFInput, req.Description, req.Params)
+}
+
+func (e *EngineEndpoint) StartTask(ctx context.Context, req *startTaskRequest) error {
+	return e.Engine.StartTask(ctx, req.TaskExID, req.FirstRun, req.Waiting, req.TriggeredBy, req.Rerun, req.Reset)
+}
+
+func (e *EngineEndpoint) OnActionComplete(ctx context.Context, req *onActionCompleteRequest) error {
+	return e.Engine.OnActionComplete(ctx, req.ActionExID, req.Result, req.WFAction)
+}
+
+func (e *EngineEndpoint) PauseWorkflow(ctx context.Context, req *pauseWorkflowRequest) error {
+	return e.Engine.PauseWorkflow(ctx, req.WFExID)
+}
+
+func (e *EngineEndpoint) ResumeWorkflow(ctx context.Context, req *resumeWorkflowRequest) error {
+	return e.Engine.ResumeWorkflow(ctx, req.WFExID, req.Env)
+}
+
+func (e *EngineEndpoint) StopWorkflow(ctx context.Context, req *stopWorkflowRequest) error {
+	return e.Engine.StopWorkflow(ctx, req.WFExID, req.State, req.Message)
+}
+
+func (e *EngineEndpoint) RerunWorkflow(ctx context.Context, req *rerunWorkflowRequest) error {
+	return e.Engine.RerunWorkflow(ctx, req.TaskExID, req.Reset, req.Skip, req.Env)
+}
+
+func (e *EngineEndpoint) OnActionUpdate(ctx context.Context, req *onActionUpdateRequest) error {
+	return e.Engine.OnActionUpdate(ctx, req.WFExID)
+}
+
 // NewServer creates an Engine RPC server bound to transport on topic 'engine'.
-// This mirrors Python's EngineServer class — its methods become RPC endpoints.
 func NewServer(t rpc.Transport, eng engine.Engine) *rpc.RPCServer {
 	s := rpc.NewRPCServer(t, "engine")
-	s.Handle("start_workflow", func(ctx context.Context, args map[string]any) (any, error) {
-		return eng.StartWorkflow(ctx,
-			strOf(args, "wf_def_id"), strOf(args, "wf_namespace"),
-			strOf(args, "wf_ex_id"),
-			mapOf(args, "wf_input"), strOf(args, "description"), mapOf(args, "params"))
-	})
-	s.Handle("start_task", func(ctx context.Context, args map[string]any) (any, error) {
-		return nil, eng.StartTask(ctx, strOf(args, "task_ex_id"),
-			boolOf(args, "first_run"), boolOf(args, "waiting"),
-			sliceOf(args, "triggered_by"),
-			boolOf(args, "rerun"), boolOf(args, "reset"))
-	})
-	s.Handle("on_action_complete", func(ctx context.Context, args map[string]any) (any, error) {
-		res := resultOf(args, "result")
-		return nil, eng.OnActionComplete(ctx, strOf(args, "action_ex_id"), res, boolOf(args, "wf_action"))
-	})
-	s.Handle("pause_workflow", func(ctx context.Context, args map[string]any) (any, error) {
-		return nil, eng.PauseWorkflow(ctx, strOf(args, "wf_ex_id"))
-	})
-	s.Handle("resume_workflow", func(ctx context.Context, args map[string]any) (any, error) {
-		return nil, eng.ResumeWorkflow(ctx, strOf(args, "wf_ex_id"), mapOf(args, "env"))
-	})
-	s.Handle("stop_workflow", func(ctx context.Context, args map[string]any) (any, error) {
-		return nil, eng.StopWorkflow(ctx, strOf(args, "wf_ex_id"), strOf(args, "state"), strOf(args, "message"))
-	})
-	s.Handle("rerun_workflow", func(ctx context.Context, args map[string]any) (any, error) {
-		return nil, eng.RerunWorkflow(ctx, strOf(args, "task_ex_id"),
-			boolOf(args, "reset"), boolOf(args, "skip"), mapOf(args, "env"))
-	})
-	s.Handle("on_action_update", func(ctx context.Context, args map[string]any) (any, error) {
-		return nil, eng.OnActionUpdate(ctx, strOf(args, "wf_ex_id"))
-	})
+	s.RegisterEndpoint(&EngineEndpoint{Engine: eng})
 	return s
-}
-
-// --- helpers ---
-
-func strOf(m map[string]any, k string) string {
-	if v, ok := m[k]; ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
-	}
-	return ""
-}
-
-func boolOf(m map[string]any, k string) bool {
-	if v, ok := m[k]; ok {
-		switch b := v.(type) {
-		case bool:
-			return b
-		case string:
-			return b == "true"
-		}
-	}
-	return false
-}
-
-func mapOf(m map[string]any, k string) map[string]any {
-	if v, ok := m[k]; ok && v != nil {
-		if mm, ok := v.(map[string]any); ok {
-			return mm
-		}
-		// fallback: round-trip JSON for nested types
-		b, err := json.Marshal(v)
-		if err == nil {
-			var out map[string]any
-			if err := json.Unmarshal(b, &out); err == nil {
-				return out
-			}
-		}
-	}
-	return nil
-}
-
-func sliceOf(m map[string]any, k string) []map[string]any {
-	v, ok := m[k]
-	if !ok || v == nil {
-		return nil
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil
-	}
-	var out []map[string]any
-	_ = json.Unmarshal(b, &out)
-	return out
-}
-
-func resultOf(m map[string]any, k string) *db.Result {
-	v, ok := m[k]
-	if !ok || v == nil {
-		return nil
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil
-	}
-	var r db.Result
-	if err := json.Unmarshal(b, &r); err == nil {
-		return &r
-	}
-	return nil
 }
