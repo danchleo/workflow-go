@@ -14,17 +14,39 @@ import (
 
 	"github.com/danchleo/workflow-go/internal/db"
 	"github.com/danchleo/workflow-go/internal/expressions"
+	"github.com/mitchellh/mapstructure"
 )
 
 // Action is the interface that all Workflow actions must implement.
 // Ported from reference_lib.actions.Action
 type Action interface {
-	// Run executes the action.
+	// Run executes the action. input is decoded via mapstructure into a
+	// typed request struct per action; see individual Run implementations.
 	Run(input map[string]interface{}) (*db.Result, error)
 	// Name returns the action name.
 	Name() string
 	// IsSync reports whether the action is synchronous (blocking).
 	IsSync() bool
+}
+
+// --- shared mapstructure decoder: WeaklyTypedInput lets float64→int ---
+
+var actionDecoderConfig = &mapstructure.DecoderConfig{
+	WeaklyTypedInput: true,
+	Result:           nil,
+}
+
+func decodeActionInput(input map[string]interface{}, out interface{}) error {
+	if input == nil {
+		input = map[string]interface{}{}
+	}
+	cfg := *actionDecoderConfig
+	cfg.Result = out
+	dec, err := mapstructure.NewDecoder(&cfg)
+	if err != nil {
+		return err
+	}
+	return dec.Decode(input)
 }
 
 // ActionDescriptor describes an action that can be instantiated.
@@ -62,17 +84,20 @@ func (a *EchoAction) Run(input map[string]interface{}) (*db.Result, error) {
 func (a *EchoAction) Name() string { return "std.echo" }
 func (a *EchoAction) IsSync() bool { return true }
 
-// HttpAction performs an HTTP request. Input keys (mirroring reference std.http):
-//
-//	method   — GET/POST/PUT/DELETE/PATCH/HEAD (default GET)
-//	url      — required
-//	body     — request body (string or JSON-compatible value)
-//	headers  — map[string]string
-//	timeout  — seconds (default 30)
-//	auth     — {"username": "...", "password": "..."}
-//	verify_ssl — bool (default true)
-//
-// Result.Data keys: status, reason, headers, content, ok, url
+// --- HttpAction ---
+
+// httpActionInput mirrors Python std.http input keys.
+type httpActionInput struct {
+	Method    string                 `mapstructure:"method"`
+	URL       string                 `mapstructure:"url"`
+	Body      interface{}            `mapstructure:"body"`
+	Headers   map[string]interface{} `mapstructure:"headers"`
+	Timeout   float64                `mapstructure:"timeout"`
+	Auth      map[string]interface{} `mapstructure:"auth"`
+	VerifySSL bool                   `mapstructure:"verify_ssl"`
+}
+
+// HttpAction performs an HTTP request.
 type HttpAction struct{}
 
 func NewHttpAction() Action { return &HttpAction{} }
@@ -81,18 +106,23 @@ func (a *HttpAction) Name() string { return "std.http" }
 func (a *HttpAction) IsSync() bool { return true }
 
 func (a *HttpAction) Run(input map[string]interface{}) (*db.Result, error) {
-	method := "GET"
-	if m, ok := input["method"].(string); ok && m != "" {
-		method = strings.ToUpper(m)
+	var in httpActionInput
+	if err := decodeActionInput(input, &in); err != nil {
+		return nil, fmt.Errorf("std.http: decode input: %w", err)
 	}
 
-	url, _ := input["url"].(string)
-	if url == "" {
+	method := in.Method
+	if method == "" {
+		method = "GET"
+	} else {
+		method = strings.ToUpper(method)
+	}
+	if in.URL == "" {
 		return &db.Result{Error: "std.http requires 'url' input"}, nil
 	}
 
 	var bodyReader io.Reader
-	switch b := input["body"].(type) {
+	switch b := in.Body.(type) {
 	case string:
 		bodyReader = strings.NewReader(b)
 	case []byte:
@@ -108,29 +138,29 @@ func (a *HttpAction) Run(input map[string]interface{}) (*db.Result, error) {
 	}
 
 	var headers http.Header
-	if h, ok := input["headers"].(map[string]interface{}); ok {
+	if len(in.Headers) > 0 {
 		headers = http.Header{}
-		for k, v := range h {
+		for k, v := range in.Headers {
 			if s, ok := v.(string); ok {
 				headers.Set(k, s)
 			}
 		}
 	}
 
-	timeoutSec := 30.0
-	if t, ok := input["timeout"].(float64); ok && t > 0 {
-		timeoutSec = t
+	timeoutSec := in.Timeout
+	if timeoutSec <= 0 {
+		timeoutSec = 30
 	}
 
-	req, err := http.NewRequest(method, url, bodyReader)
+	req, err := http.NewRequest(method, in.URL, bodyReader)
 	if err != nil {
 		return &db.Result{Error: fmt.Sprintf("std.http: invalid request: %v", err)}, nil
 	}
 	req.Header = headers
 
-	if auth, ok := input["auth"].(map[string]interface{}); ok {
-		u, _ := auth["username"].(string)
-		p, _ := auth["password"].(string)
+	if len(in.Auth) > 0 {
+		u, _ := in.Auth["username"].(string)
+		p, _ := in.Auth["password"].(string)
 		if u != "" {
 			req.SetBasicAuth(u, p)
 		}
@@ -141,7 +171,7 @@ func (a *HttpAction) Run(input map[string]interface{}) (*db.Result, error) {
 	if err != nil {
 		return &db.Result{
 			Error: fmt.Sprintf("std.http request failed: %v", err),
-			Data:  map[string]interface{}{"url": url, "method": method},
+			Data:  map[string]interface{}{"url": in.URL, "method": method},
 		}, nil
 	}
 	defer resp.Body.Close()
@@ -163,22 +193,24 @@ func (a *HttpAction) Run(input map[string]interface{}) (*db.Result, error) {
 			"headers": respHeaders,
 			"content": string(respBody),
 			"ok":      ok,
-			"url":     url,
+			"url":     in.URL,
 		},
 	}, nil
 }
 
+// --- WorkflowHTTPAction ---
+
+// wfHTTPActionInput mirrors Python std.workflow_http input keys.
+type wfHTTPActionInput struct {
+	URL      string                 `mapstructure:"url"`
+	Workflow string                 `mapstructure:"workflow"`
+	Input    map[string]interface{} `mapstructure:"input"`
+	Params   map[string]interface{} `mapstructure:"params"`
+	Headers  map[string]interface{} `mapstructure:"headers"`
+	Timeout  float64                `mapstructure:"timeout"`
+}
+
 // WorkflowHTTPAction triggers a workflow in this engine via HTTP.
-// Input keys:
-//
-//	url       — engine API base, e.g. "http://localhost:8989" (default)
-//	workflow  — workflow name (required)
-//	input     — workflow input map
-//	params    — workflow params map
-//	headers   — extra HTTP headers
-//	timeout   — seconds (default 30)
-//
-// Output contains the new workflow execution ID and state.
 type WorkflowHTTPAction struct{}
 
 func NewWorkflowHTTPAction() Action { return &WorkflowHTTPAction{} }
@@ -187,23 +219,27 @@ func (a *WorkflowHTTPAction) Name() string { return "std.workflow_http" }
 func (a *WorkflowHTTPAction) IsSync() bool { return true }
 
 func (a *WorkflowHTTPAction) Run(input map[string]interface{}) (*db.Result, error) {
-	base := "http://localhost:8989"
-	if b, ok := input["url"].(string); ok && b != "" {
-		base = b
+	var in wfHTTPActionInput
+	if err := decodeActionInput(input, &in); err != nil {
+		return nil, fmt.Errorf("std.workflow_http: decode input: %w", err)
 	}
-	wfName, _ := input["workflow"].(string)
-	if wfName == "" {
+
+	base := in.URL
+	if base == "" {
+		base = "http://localhost:8989"
+	}
+	if in.Workflow == "" {
 		return &db.Result{Error: "std.workflow_http requires 'workflow' input"}, nil
 	}
 
 	payload := map[string]interface{}{
-		"workflow_name": wfName,
+		"workflow_name": in.Workflow,
 	}
-	if inp, ok := input["input"]; ok {
-		payload["input"] = inp
+	if in.Input != nil {
+		payload["input"] = in.Input
 	}
-	if p, ok := input["params"]; ok {
-		payload["params"] = p
+	if in.Params != nil {
+		payload["params"] = in.Params
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -216,24 +252,22 @@ func (a *WorkflowHTTPAction) Run(input map[string]interface{}) (*db.Result, erro
 		return &db.Result{Error: fmt.Sprintf("std.workflow_http: req: %v", err)}, nil
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if h, ok := input["headers"].(map[string]interface{}); ok {
-		for k, v := range h {
-			if s, ok := v.(string); ok {
-				req.Header.Set(k, s)
-			}
+	for k, v := range in.Headers {
+		if s, ok := v.(string); ok {
+			req.Header.Set(k, s)
 		}
 	}
 
-	timeoutSec := 30.0
-	if t, ok := input["timeout"].(float64); ok && t > 0 {
-		timeoutSec = t
+	timeoutSec := in.Timeout
+	if timeoutSec <= 0 {
+		timeoutSec = 30
 	}
 	client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return &db.Result{
 			Error: fmt.Sprintf("std.workflow_http: request failed: %v", err),
-			Data:  map[string]interface{}{"url": url, "workflow": wfName},
+			Data:  map[string]interface{}{"url": url, "workflow": in.Workflow},
 		}, nil
 	}
 	defer resp.Body.Close()
@@ -252,21 +286,22 @@ func (a *WorkflowHTTPAction) Run(input map[string]interface{}) (*db.Result, erro
 	}, nil
 }
 
-// EmailAction sends a simple plain-text email via SMTP.
-// Input keys:
-//
-//	from      — "Alice <alice@example.com>" or just "alice@example.com" (required)
-//	to        — string or []string (required)
-//	subject   — string (default "")
-//	body      — plain text body (default "")
-//	smtp_host — default "localhost"
-//	smtp_port — default 25
-//	username / password — optional SMTP auth
-//	use_tls   — bool (default false)
-//
-// In Go we always return SUCCESS with a log message — actually connecting
-// to an SMTP server requires external infrastructure. Production users
-// would override this with a provider-specific implementation.
+// --- EmailAction ---
+
+// emailActionInput mirrors Python std.email input keys.
+type emailActionInput struct {
+	From     string `mapstructure:"from"`
+	To       string `mapstructure:"to"`
+	Subject  string `mapstructure:"subject"`
+	Body     string `mapstructure:"body"`
+	SMTPHost string `mapstructure:"smtp_host"`
+	SMTPPort int    `mapstructure:"smtp_port"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+	UseTLS   bool   `mapstructure:"use_tls"`
+}
+
+// EmailAction sends a simple plain-text email via SMTP (simulated).
 type EmailAction struct{}
 
 func NewEmailAction() Action { return &EmailAction{} }
@@ -275,34 +310,41 @@ func (a *EmailAction) Name() string { return "std.email" }
 func (a *EmailAction) IsSync() bool { return true }
 
 func (a *EmailAction) Run(input map[string]interface{}) (*db.Result, error) {
-	from, _ := input["from"].(string)
-	if from == "" {
+	var in emailActionInput
+	if err := decodeActionInput(input, &in); err != nil {
+		return nil, fmt.Errorf("std.email: decode input: %w", err)
+	}
+
+	if in.From == "" {
 		return &db.Result{Error: "std.email requires 'from'"}, nil
 	}
-	to, _ := input["to"].(string)
-	if to == "" {
+	if in.To == "" {
 		return &db.Result{Error: "std.email requires 'to'"}, nil
 	}
-	subject, _ := input["subject"].(string)
-	body, _ := input["body"].(string)
 
-	log.Printf("std.email (simulated) — from=%s to=%s subject=%q", from, to, subject)
+	log.Printf("std.email (simulated) — from=%s to=%s subject=%q", in.From, in.To, in.Subject)
 
 	return &db.Result{
 		Data: map[string]interface{}{
 			"sent":    true,
-			"from":    from,
-			"to":      to,
-			"subject": subject,
-			"body":    body,
+			"from":    in.From,
+			"to":      in.To,
+			"subject": in.Subject,
+			"body":    in.Body,
 		},
 	}, nil
 }
 
-// SSHAction is a simplified stub that returns the input as if it were the
-// remote command's stdout. Real SSH would require crypto keys + network;
-// this keeps the engine usable for tests and demos while signalling the
-// semantics correctly.
+// --- SSHAction ---
+
+// sshActionInput mirrors Python std.ssh input keys.
+type sshActionInput struct {
+	Command string `mapstructure:"command"`
+	Host    string `mapstructure:"host"`
+	Port    int    `mapstructure:"port"`
+}
+
+// SSHAction simulates SSH — returns command as stdout.
 type SSHAction struct{}
 
 func NewSSHAction() Action { return &SSHAction{} }
@@ -311,39 +353,41 @@ func (a *SSHAction) Name() string { return "std.ssh" }
 func (a *SSHAction) IsSync() bool { return true }
 
 func (a *SSHAction) Run(input map[string]interface{}) (*db.Result, error) {
-	command, _ := input["command"].(string)
-	host, _ := input["host"].(string)
-	port := 22
-	if p, ok := input["port"].(float64); ok {
-		port = int(p)
+	var in sshActionInput
+	if err := decodeActionInput(input, &in); err != nil {
+		return nil, fmt.Errorf("std.ssh: decode input: %w", err)
+	}
+	if in.Port == 0 {
+		in.Port = 22
 	}
 
-	log.Printf("std.ssh (simulated) — command=%q host=%s:%d", command, host, port)
+	log.Printf("std.ssh (simulated) — command=%q host=%s:%d", in.Command, in.Host, in.Port)
 
 	return &db.Result{
 		Data: map[string]interface{}{
-			"stdout":   command,
-			"host":     host,
-			"port":     port,
+			"stdout":   in.Command,
+			"host":     in.Host,
+			"port":     in.Port,
 			"exitcode": 0,
 		},
 	}, nil
 }
 
-// SSHProxiedAction is SSHAction routed through a gateway (bastion) host.
-// Input keys mirror the Python std_actions.py SSHProxiedAction:
-//
-//	command              — required
-//	host                 — target host
-//	username             — target user
-//	password             — optional
-//	private_key          — optional
-//	gateway_host         — bastion host (required)
-//	gateway_username     — bastion user (defaults to username)
-//	proxy_command        — optional custom proxy command
-//
-// Go version is a simulated stub (real SSH + proxy would need crypto libs)
-// but preserves the exact reference DSL action name and parameter contract.
+// --- SSHProxiedAction ---
+
+// sshProxiedActionInput mirrors Python std.ssh_proxied input keys.
+type sshProxiedActionInput struct {
+	Command      string `mapstructure:"command"`
+	Host         string `mapstructure:"host"`
+	Username     string `mapstructure:"username"`
+	Password     string `mapstructure:"password"`
+	PrivateKey   string `mapstructure:"private_key"`
+	GatewayHost  string `mapstructure:"gateway_host"`
+	GatewayUser  string `mapstructure:"gateway_username"`
+	ProxyCommand string `mapstructure:"proxy_command"`
+}
+
+// SSHProxiedAction is SSHAction routed through a bastion host.
 type SSHProxiedAction struct{}
 
 func NewSSHProxiedAction() Action { return &SSHProxiedAction{} }
@@ -352,47 +396,42 @@ func (a *SSHProxiedAction) Name() string { return "std.ssh_proxied" }
 func (a *SSHProxiedAction) IsSync() bool { return true }
 
 func (a *SSHProxiedAction) Run(input map[string]interface{}) (*db.Result, error) {
-	command, _ := input["command"].(string)
-	host, _ := input["host"].(string)
-	gatewayHost, _ := input["gateway_host"].(string)
-	gatewayUsername, _ := input["gateway_username"].(string)
-	if gatewayUsername == "" {
-		gatewayUsername, _ = input["username"].(string)
+	var in sshProxiedActionInput
+	if err := decodeActionInput(input, &in); err != nil {
+		return nil, fmt.Errorf("std.ssh_proxied: decode input: %w", err)
 	}
-	proxyCommand, _ := input["proxy_command"].(string)
+
+	gatewayUser := in.GatewayUser
+	if gatewayUser == "" {
+		gatewayUser = in.Username
+	}
 
 	log.Printf(
 		"std.ssh_proxied (simulated) — command=%q target=%s via %s@%s",
-		command, host, gatewayUsername, gatewayHost,
+		in.Command, in.Host, gatewayUser, in.GatewayHost,
 	)
 
 	return &db.Result{
 		Data: map[string]interface{}{
-			"stdout":        command,
-			"target_host":   host,
-			"gateway_host":  gatewayHost,
-			"gateway_user":  gatewayUsername,
-			"proxy_command": proxyCommand,
+			"stdout":        in.Command,
+			"target_host":   in.Host,
+			"gateway_host":  in.GatewayHost,
+			"gateway_user":  gatewayUser,
+			"proxy_command": in.ProxyCommand,
 			"exitcode":      0,
 		},
 	}, nil
 }
 
+// --- JavaScriptAction ---
+
+// jsActionInput mirrors Python std.javascript input keys.
+type jsActionInput struct {
+	Script  string                 `mapstructure:"script"`
+	Context map[string]interface{} `mapstructure:"context"`
+}
+
 // JavaScriptAction evaluates a JavaScript script with a context map.
-//
-// Ported from Python reference/actions/std_actions.py JavaScriptAction which
-// uses py_mini_racer. The full-featured JS interpreter (v8, goja) can be
-// plugged in later; for now we implement the reference-standard semantics by
-// routing the script through the expressions engine for simple expressions
-// plus a set of built-in functions. Users who need real JS evaluation should
-// depend on a goja/v8 binding and replace this implementation.
-//
-// Input keys:
-//
-//	script   — required JavaScript code as string
-//	context  — map[string]interface{} injected as `ctx`
-//
-// Output: the result value of the last evaluated expression.
 type JavaScriptAction struct{}
 
 func NewJavaScriptAction() Action { return &JavaScriptAction{} }
@@ -401,39 +440,41 @@ func (a *JavaScriptAction) Name() string { return "std.javascript" }
 func (a *JavaScriptAction) IsSync() bool { return true }
 
 func (a *JavaScriptAction) Run(input map[string]interface{}) (*db.Result, error) {
-	script, _ := input["script"].(string)
-	if script == "" {
+	var in jsActionInput
+	if err := decodeActionInput(input, &in); err != nil {
+		return nil, fmt.Errorf("std.javascript: decode input: %w", err)
+	}
+
+	if in.Script == "" {
 		return &db.Result{Error: "std.javascript requires 'script'"}, nil
 	}
 
-	// If the script is a simple expression like `<% $.foo + 1 %>` (Workflow
-	// expression syntax), route through the expressions engine directly.
-	if strings.HasPrefix(script, "<%") || strings.Contains(script, "${") {
-		ctx, _ := input["context"].(map[string]interface{})
-		if ctx == nil {
-			ctx = map[string]interface{}{}
-		}
-		result := expressions.EvaluateRecursively(script, ctx)
+	if in.Context == nil {
+		in.Context = map[string]interface{}{}
+	}
+
+	if strings.HasPrefix(in.Script, "<%") || strings.Contains(in.Script, "${") {
+		result := expressions.EvaluateRecursively(in.Script, in.Context)
 		return &db.Result{Data: result}, nil
 	}
 
-	// Fallback: try JSON unmarshal of the whole script as a literal.
 	var parsed interface{}
-	if err := json.Unmarshal([]byte(script), &parsed); err == nil {
+	if err := json.Unmarshal([]byte(in.Script), &parsed); err == nil {
 		return &db.Result{Data: parsed}, nil
 	}
 
-	// Still no result — echo back the script itself so the caller sees
-	// something. This mirrors the Python version's graceful degradation.
 	log.Printf("std.javascript: no interpreter available, echoing script as-is")
-	return &db.Result{Data: script}, nil
+	return &db.Result{Data: in.Script}, nil
+}
+
+// --- TestDictAction ---
+
+// testDictActionInput mirrors Python std.test_dict input keys.
+type testDictActionInput struct {
+	Keys []string `mapstructure:"keys"`
 }
 
 // TestDictAction returns a fixed dict useful for testing.
-// Ported from Python std_actions.py TestDictAction.
-// Input keys: keys (list of strings, optional).
-// If provided, returns {"k": "<value>" for k in keys}; otherwise returns
-// {"test": "dict", "key1": "value1", "key2": "value2"}.
 type TestDictAction struct{}
 
 func NewTestDictAction() Action { return &TestDictAction{} }
@@ -442,12 +483,15 @@ func (a *TestDictAction) Name() string { return "std.test_dict" }
 func (a *TestDictAction) IsSync() bool { return true }
 
 func (a *TestDictAction) Run(input map[string]interface{}) (*db.Result, error) {
-	if keys, ok := input["keys"].([]interface{}); ok && len(keys) > 0 {
+	var in testDictActionInput
+	if err := decodeActionInput(input, &in); err != nil {
+		return nil, fmt.Errorf("std.test_dict: decode input: %w", err)
+	}
+
+	if len(in.Keys) > 0 {
 		out := map[string]interface{}{}
-		for _, k := range keys {
-			if s, ok := k.(string); ok {
-				out[s] = fmt.Sprintf("value-of-%s", s)
-			}
+		for _, k := range in.Keys {
+			out[k] = fmt.Sprintf("value-of-%s", k)
 		}
 		return &db.Result{Data: out}, nil
 	}
@@ -462,8 +506,6 @@ func (a *TestDictAction) Run(input map[string]interface{}) (*db.Result, error) {
 
 // NoopAction does nothing and returns nil.
 type NoopAction struct{}
-
-func NewNoopAction() Action { return &NoopAction{} }
 
 func (a *NoopAction) Run(input map[string]interface{}) (*db.Result, error) {
 	return &db.Result{}, nil
@@ -481,6 +523,9 @@ func (a *AsyncNoopAction) IsSync() bool { return false }
 
 // NewAsyncNoopAction creates an async noop action.
 func NewAsyncNoopAction() Action { return &AsyncNoopAction{} }
+
+// NewNoopAction creates a sync noop action.
+func NewNoopAction() Action { return &NoopAction{} }
 
 // FailAction always fails — useful for testing error handling.
 type FailAction struct {
@@ -500,9 +545,17 @@ func (a *FailAction) Run(input map[string]interface{}) (*db.Result, error) {
 func (a *FailAction) Name() string { return "std.fail" }
 func (a *FailAction) IsSync() bool { return true }
 
+// --- SleepAction ---
+
+// sleepActionInput: struct attr SleepAction.Seconds takes priority;
+// input["seconds"] is the fallback (matching original behavior).
+type sleepActionInput struct {
+	Seconds float64 `mapstructure:"seconds"`
+}
+
 // SleepAction waits for the given number of seconds.
 type SleepAction struct {
-	Seconds float64
+	Seconds float64 // struct attribute (higher priority than input)
 }
 
 func NewSleepAction() Action {
@@ -512,9 +565,9 @@ func NewSleepAction() Action {
 func (a *SleepAction) Run(input map[string]interface{}) (*db.Result, error) {
 	seconds := a.Seconds
 	if seconds <= 0 {
-		if s, ok := input["seconds"].(float64); ok {
-			seconds = s
-		}
+		var in sleepActionInput
+		_ = decodeActionInput(input, &in)
+		seconds = in.Seconds
 	}
 	time.Sleep(time.Duration(seconds * float64(time.Second)))
 	return &db.Result{Data: fmt.Sprintf("slept for %v seconds", seconds)}, nil
@@ -522,8 +575,16 @@ func (a *SleepAction) Run(input map[string]interface{}) (*db.Result, error) {
 func (a *SleepAction) Name() string { return "std.sleep" }
 func (a *SleepAction) IsSync() bool { return true }
 
-// WaitSSHAction simulates SSH wait. In the Python version this polls until a pattern appears.
-// For Go we keep it simple: sleep then return.
+// --- WaitSSHAction ---
+
+// waitSSHActionInput mirrors Python std.wait_ssh input keys.
+type waitSSHActionInput struct {
+	Host    string  `mapstructure:"host"`
+	Port    int     `mapstructure:"port"`
+	Timeout float64 `mapstructure:"timeout"`
+}
+
+// WaitSSHAction simulates SSH wait — sleeps for a configurable amount.
 type WaitSSHAction struct {
 	Host    string
 	Port    int
@@ -535,12 +596,23 @@ func NewWaitSSHAction() Action {
 }
 
 func (a *WaitSSHAction) Run(input map[string]interface{}) (*db.Result, error) {
-	// Simplified: just sleep for a configurable amount.
-	time.Sleep(time.Duration(a.Timeout * float64(time.Second)))
+	// struct attrs take priority, input overrides as fallback.
+	timeout := a.Timeout
+	if timeout <= 0 {
+		var in waitSSHActionInput
+		_ = decodeActionInput(input, &in)
+		timeout = in.Timeout
+	}
+	if timeout <= 0 {
+		timeout = 300
+	}
+	time.Sleep(time.Duration(timeout * float64(time.Second)))
 	return &db.Result{Data: "SSH wait complete"}, nil
 }
 func (a *WaitSSHAction) Name() string { return "std.wait_ssh" }
 func (a *WaitSSHAction) IsSync() bool { return false }
+
+// --- ActionRegistry ---
 
 // ActionRegistry stores registered action descriptors.
 type ActionRegistry struct {
@@ -720,11 +792,9 @@ func (r *ActionRegistry) Get(name string) (*ActionDescriptor, bool) {
 
 // Find looks up an action descriptor by name, trying namespace variants.
 func (r *ActionRegistry) Find(name, namespace string) (*ActionDescriptor, bool) {
-	// Try full name first.
 	if d, ok := r.Get(name); ok {
 		return d, ok
 	}
-	// Try with namespace prefix.
 	if namespace != "" {
 		if d, ok := r.Get(namespace + "." + name); ok {
 			return d, ok
@@ -763,20 +833,16 @@ func (s *syncLock) RUnlock() { s.Unlock() }
 
 // ActionProvider resolves action names to descriptors. Mirrors Python's
 // reference_lib.actions.ActionProvider and the CompositeActionProvider facade.
-// Go's ActionRegistry is a built-in system provider; tests can add a
-// TestActionProvider to inject mock actions without creating real workflows.
 type ActionProvider interface {
 	Find(name, namespace string) (*ActionDescriptor, bool)
 	List(namespace string) []*ActionDescriptor
 }
 
 // CompositeActionProvider chains multiple providers; first hit wins.
-// Mirrors Python's ml_actions.CompositeActionProvider.
 type CompositeActionProvider struct {
 	Providers []ActionProvider
 }
 
-// NewCompositeActionProvider returns a provider that chains delegates.
 func NewCompositeActionProvider(providers ...ActionProvider) *CompositeActionProvider {
 	return &CompositeActionProvider{Providers: providers}
 }
@@ -804,7 +870,6 @@ func (c *CompositeActionProvider) List(namespace string) []*ActionDescriptor {
 	return out
 }
 
-// RegistryAsProvider wraps *ActionRegistry into an ActionProvider.
 func RegistryAsProvider(r *ActionRegistry) ActionProvider {
 	return &registryProvider{r: r}
 }
@@ -818,19 +883,15 @@ func (p *registryProvider) List(namespace string) []*ActionDescriptor { return p
 
 // TestActionProvider allows tests to register ad-hoc action descriptors
 // at runtime. Mirrors Python's reference/actions/test.py TestActionProvider.
-// Useful for integration tests where you need a one-off "mock" action
-// without creating a full workflow definition.
 type TestActionProvider struct {
 	mu    syncLock
 	descs map[string]*ActionDescriptor
 }
 
-// NewTestActionProvider creates an empty test provider.
 func NewTestActionProvider() *TestActionProvider {
 	return &TestActionProvider{descs: make(map[string]*ActionDescriptor)}
 }
 
-// Register adds a test descriptor. Panics on duplicate name.
 func (p *TestActionProvider) Register(desc *ActionDescriptor) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -840,13 +901,10 @@ func (p *TestActionProvider) Register(desc *ActionDescriptor) {
 	p.descs[desc.Name] = desc
 }
 
-// RegisterFunc is a convenience wrapper that builds an ActionDescriptor
-// from a name + factory.
 func (p *TestActionProvider) RegisterFunc(name string, factory func() Action) {
 	p.Register(&ActionDescriptor{Name: name, Factory: factory})
 }
 
-// Cleanup removes all registered test descriptors.
 func (p *TestActionProvider) Cleanup() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -878,15 +936,7 @@ func (p *TestActionProvider) List(namespace string) []*ActionDescriptor {
 }
 
 // AdHocAction wraps a base action with resolved input from an ad-hoc
-// action definition (YAML "action" object with base/base-input).
-// Mirrors Python's reference/actions/adhoc.py AdHocAction / AdHocActionDescriptor.
-//
-// Example: a user defines "actions: { my_action: { base: std.echo,
-// base-input: { output: <% $.foo %> } } }". At runtime the engine first
-// evaluates base-input against the workflow context, then runs the base
-// action with those resolved args. The Go engine does this resolution at
-// task-handler time in engine/task_handler, so AdHocAction here is a
-// thin wrapper that merely delegates Run() to the underlying action.
+// action definition. Delegates Run() to the underlying base action.
 type AdHocAction struct {
 	Base Action
 }
@@ -913,22 +963,20 @@ func (a *AdHocAction) IsSync() bool {
 }
 
 // AdHocActionDescriptor represents a user-defined action that wraps a system
-// base action with input/output transformations. The Go engine currently
-// handles the input resolution inline in the task handler, so this struct
-// is mostly a placeholder for future user-defined action support — it
-// carries base name + base-input attributes but delegates instantiation
-// directly to the underlying system descriptor.
+// base action with input/output transformations. Currently handles the
+// input resolution inline in the task handler — this struct carries base
+// name + base-input attributes and delegates instantiation to the underlying
+// system descriptor.
 type AdHocActionDescriptor struct {
 	Name       string
 	BaseName   string
-	BaseInput  map[string]interface{} // evaluated against task context before Run
-	OutputExpr interface{}            // optional output transformation expression
+	BaseInput  map[string]interface{}
+	OutputExpr interface{}
 	Namespace  string
 	ProjectID  string
-	SystemProv ActionProvider // where to resolve BaseName
+	SystemProv ActionProvider
 }
 
-// Instantiate creates an AdHocAction wrapping the resolved base action.
 func (d *AdHocActionDescriptor) Instantiate(input map[string]interface{}) (Action, error) {
 	if d.SystemProv == nil {
 		return nil, fmt.Errorf("AdHocActionDescriptor %q: SystemProv is not set", d.Name)
@@ -955,7 +1003,6 @@ type AdHocActionProvider struct {
 	descs      map[string]*AdHocActionDescriptor
 }
 
-// Register adds or replaces an ad-hoc action descriptor.
 func (p *AdHocActionProvider) Register(d *AdHocActionDescriptor) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -969,10 +1016,8 @@ func (p *AdHocActionProvider) Find(name, namespace string) (*ActionDescriptor, b
 	if !ok {
 		return nil, false
 	}
-	// Pre-resolve base descriptor now so the closure below doesn't need
-	// to touch p.descs or p.mu at Factory time (avoids data race).
 	baseDesc, _ := p.systemProv.Find(d.BaseName, d.Namespace)
-	ahdCopy := *d // value-copy for the closure
+	ahdCopy := *d
 	return &ActionDescriptor{
 		Name:        d.Name,
 		Description: "ad-hoc action wrapping " + d.BaseName,
