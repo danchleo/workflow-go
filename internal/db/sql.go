@@ -33,6 +33,7 @@ import (
 	"github.com/danchleo/workflow-go/gen/model"
 	"github.com/danchleo/workflow-go/gen/query"
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -85,7 +86,14 @@ func NewSQLStore(dsn string) (Store, error) {
 		sqlDB.SetMaxIdleConns(5)
 		sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	} else if driver == DriverPostgres {
-		return nil, fmt.Errorf("postgres driver not yet wired — mysql works today; postgres is TODO")
+		gormDB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Warn)})
+		if err != nil {
+			return nil, fmt.Errorf("open postgres %s: %w", dsn, err)
+		}
+		sqlDB, _ := gormDB.DB()
+		sqlDB.SetMaxOpenConns(20)
+		sqlDB.SetMaxIdleConns(5)
+		sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	} else {
 		return nil, fmt.Errorf("unknown driver %q (sqlite, mysql, postgres)", driver)
 	}

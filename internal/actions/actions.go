@@ -7,14 +7,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"net"
 	"net/http"
+	"net/smtp"
 	"strings"
 	"time"
 
 	"github.com/danchleo/workflow-go/internal/db"
 	"github.com/danchleo/workflow-go/internal/expressions"
+	"github.com/dop251/goja"
 	"github.com/mitchellh/mapstructure"
+	"golang.org/x/crypto/ssh"
 )
 
 // Action is the interface that all Workflow actions must implement.
@@ -337,14 +340,14 @@ type emailActionInput struct {
 	UseTLS   bool   `mapstructure:"use_tls"`
 }
 
-// EmailAction sends a simple plain-text email via SMTP (simulated).
+// EmailAction sends a simple plain-text email via SMTP.
 type EmailAction struct {
 	GenericAction[emailActionInput]
 }
 
 func NewEmailAction() Action {
 	a := &EmailAction{}
-	a.GenericAction = GenericAction[emailActionInput]{NameStr: "std.email", Sync: true, DescStr: "Sends an email via SMTP (simulated)", System: true, DoFn: a.emailImpl}
+	a.GenericAction = GenericAction[emailActionInput]{NameStr: "std.email", Sync: true, DescStr: "Sends an email via SMTP", System: true, DoFn: a.emailImpl}
 	return a
 }
 
@@ -356,7 +359,42 @@ func (a *EmailAction) emailImpl(in *emailActionInput) (*db.Result, error) {
 		return &db.Result{Error: "std.email requires 'to'"}, nil
 	}
 
-	log.Printf("std.email (simulated) — from=%s to=%s subject=%q", in.From, in.To, in.Subject)
+	host := in.SMTPHost
+	if host == "" {
+		return &db.Result{Error: "std.email requires 'smtp_host'"}, nil
+	}
+	port := in.SMTPPort
+	if port == 0 {
+		if in.UseTLS {
+			port = 465
+		} else {
+			port = 25
+		}
+	}
+
+	addr := fmt.Sprintf("%s:%d", host, port)
+
+	// 构造邮件头 + body
+	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s",
+		in.From, in.To, in.Subject, in.Body)
+
+	var err error
+	if in.UseTLS {
+		// STARTTLS 或直连 TLS — 用 net/smtp 包
+		auth := smtp.PlainAuth("", in.Username, in.Password, host)
+		err = smtp.SendMail(addr, auth, in.From, []string{in.To}, []byte(msg))
+	} else if in.Username != "" {
+		// 有用户名但没标 TLS → 也走 PlainAuth（smtp.SendMail 会自动 STARTTLS）
+		auth := smtp.PlainAuth("", in.Username, in.Password, host)
+		err = smtp.SendMail(addr, auth, in.From, []string{in.To}, []byte(msg))
+	} else {
+		// 匿名
+		err = smtp.SendMail(addr, nil, in.From, []string{in.To}, []byte(msg))
+	}
+
+	if err != nil {
+		return &db.Result{Error: fmt.Sprintf("std.email send: %v", err)}, nil
+	}
 
 	return &db.Result{
 		Data: map[string]interface{}{
@@ -364,7 +402,6 @@ func (a *EmailAction) emailImpl(in *emailActionInput) (*db.Result, error) {
 			"from":    in.From,
 			"to":      in.To,
 			"subject": in.Subject,
-			"body":    in.Body,
 		},
 	}, nil
 }
@@ -373,35 +410,112 @@ func (a *EmailAction) emailImpl(in *emailActionInput) (*db.Result, error) {
 
 // sshActionInput mirrors Python std.ssh input keys.
 type sshActionInput struct {
-	Command string `mapstructure:"command"`
-	Host    string `mapstructure:"host"`
-	Port    int    `mapstructure:"port"`
+	Command    string  `mapstructure:"command"`
+	Host       string  `mapstructure:"host"`
+	Port       int     `mapstructure:"port"`
+	Username   string  `mapstructure:"username"`
+	Password   string  `mapstructure:"password"`
+	PrivateKey string  `mapstructure:"private_key"`
+	Timeout    float64 `mapstructure:"timeout"` // seconds
 }
 
-// SSHAction simulates SSH — returns command as stdout.
+// SSHAction runs a command on a remote host via SSH.
 type SSHAction struct {
 	GenericAction[sshActionInput]
 }
 
 func NewSSHAction() Action {
 	a := &SSHAction{}
-	a.GenericAction = GenericAction[sshActionInput]{NameStr: "std.ssh", Sync: true, DescStr: "Runs a remote command via SSH (simulated)", System: true, DoFn: a.sshImpl}
+	a.GenericAction = GenericAction[sshActionInput]{NameStr: "std.ssh", Sync: true, DescStr: "Runs a remote command via SSH", System: true, DoFn: a.sshImpl}
 	return a
 }
 
+// buildSSHClientConfig 构造 SSH client config，支持 password/private key/both。
+func buildSSHClientConfig(username, password, privateKey string) (*ssh.ClientConfig, error) {
+	var authMethods []ssh.AuthMethod
+
+	if privateKey != "" {
+		signer, err := ssh.ParsePrivateKey([]byte(privateKey))
+		if err != nil {
+			// 可能是带 passphrase 的 key — 尝试空 passphrase
+			signer, err = ssh.ParsePrivateKeyWithPassphrase([]byte(privateKey), nil)
+			if err != nil {
+				return nil, fmt.Errorf("parse private key: %w", err)
+			}
+		}
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
+	}
+	if password != "" {
+		authMethods = append(authMethods, ssh.Password(password))
+	}
+	if len(authMethods) == 0 {
+		return nil, fmt.Errorf("std.ssh: requires 'password' or 'private_key'")
+	}
+
+	timeout := 30 * time.Second
+	return &ssh.ClientConfig{
+		User:            username,
+		Auth:            authMethods,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         timeout,
+	}, nil
+}
+
 func (a *SSHAction) sshImpl(in *sshActionInput) (*db.Result, error) {
+	if in.Host == "" {
+		return &db.Result{Error: "std.ssh requires 'host'"}, nil
+	}
+	if in.Command == "" {
+		return &db.Result{Error: "std.ssh requires 'command'"}, nil
+	}
 	if in.Port == 0 {
 		in.Port = 22
 	}
+	if in.Username == "" {
+		return &db.Result{Error: "std.ssh requires 'username'"}, nil
+	}
 
-	log.Printf("std.ssh (simulated) — command=%q host=%s:%d", in.Command, in.Host, in.Port)
+	cfg, err := buildSSHClientConfig(in.Username, in.Password, in.PrivateKey)
+	if err != nil {
+		return &db.Result{Error: err.Error()}, nil
+	}
+	if in.Timeout > 0 {
+		cfg.Timeout = time.Duration(in.Timeout * float64(time.Second))
+	}
+
+	addr := net.JoinHostPort(in.Host, fmt.Sprintf("%d", in.Port))
+	client, err := ssh.Dial("tcp", addr, cfg)
+	if err != nil {
+		return &db.Result{Error: fmt.Sprintf("std.ssh dial %s: %v", addr, err)}, nil
+	}
+	defer client.Close()
+
+	sess, err := client.NewSession()
+	if err != nil {
+		return &db.Result{Error: fmt.Sprintf("std.ssh session: %v", err)}, nil
+	}
+	defer sess.Close()
+
+	var stdout, stderr bytes.Buffer
+	sess.Stdout = &stdout
+	sess.Stderr = &stderr
+
+	exitCode := 0
+	if err := sess.Run(in.Command); err != nil {
+		if exitErr, ok := err.(*ssh.ExitError); ok {
+			exitCode = exitErr.ExitStatus()
+		} else {
+			return &db.Result{Error: fmt.Sprintf("std.ssh run: %v", err)}, nil
+		}
+	}
 
 	return &db.Result{
 		Data: map[string]interface{}{
-			"stdout":   in.Command,
+			"stdout":   stdout.String(),
+			"stderr":   stderr.String(),
 			"host":     in.Host,
 			"port":     in.Port,
-			"exitcode": 0,
+			"exitcode": exitCode,
 		},
 	}, nil
 }
@@ -410,46 +524,109 @@ func (a *SSHAction) sshImpl(in *sshActionInput) (*db.Result, error) {
 
 // sshProxiedActionInput mirrors Python std.ssh_proxied input keys.
 type sshProxiedActionInput struct {
-	Command      string `mapstructure:"command"`
-	Host         string `mapstructure:"host"`
-	Username     string `mapstructure:"username"`
-	Password     string `mapstructure:"password"`
-	PrivateKey   string `mapstructure:"private_key"`
-	GatewayHost  string `mapstructure:"gateway_host"`
-	GatewayUser  string `mapstructure:"gateway_username"`
-	ProxyCommand string `mapstructure:"proxy_command"`
+	Command      string  `mapstructure:"command"`
+	Host         string  `mapstructure:"host"`
+	Username     string  `mapstructure:"username"`
+	Password     string  `mapstructure:"password"`
+	PrivateKey   string  `mapstructure:"private_key"`
+	GatewayHost  string  `mapstructure:"gateway_host"`
+	GatewayUser  string  `mapstructure:"gateway_username"`
+	ProxyCommand string  `mapstructure:"proxy_command"`
+	Timeout      float64 `mapstructure:"timeout"`
 }
 
-// SSHProxiedAction is SSHAction routed through a bastion host.
+// SSHProxiedAction routes SSH through a bastion/gateway host.
+func NewSSHProxiedAction() Action {
+	a := &SSHProxiedAction{}
+	a.GenericAction = GenericAction[sshProxiedActionInput]{NameStr: "std.ssh_proxied", Sync: true, DescStr: "SSH through bastion/gateway host", System: true, DoFn: a.sshProxiedImpl}
+	return a
+}
+
 type SSHProxiedAction struct {
 	GenericAction[sshProxiedActionInput]
 }
 
-func NewSSHProxiedAction() Action {
-	a := &SSHProxiedAction{}
-	a.GenericAction = GenericAction[sshProxiedActionInput]{NameStr: "std.ssh_proxied", Sync: true, DescStr: "SSH through bastion/gateway host (simulated)", System: true, DoFn: a.sshProxiedImpl}
-	return a
-}
-
 func (a *SSHProxiedAction) sshProxiedImpl(in *sshProxiedActionInput) (*db.Result, error) {
+	if in.GatewayHost == "" {
+		return &db.Result{Error: "std.ssh_proxied requires 'gateway_host'"}, nil
+	}
+	if in.Host == "" {
+		return &db.Result{Error: "std.ssh_proxied requires 'host'"}, nil
+	}
+	if in.Command == "" {
+		return &db.Result{Error: "std.ssh_proxied requires 'command'"}, nil
+	}
+
 	gatewayUser := in.GatewayUser
 	if gatewayUser == "" {
 		gatewayUser = in.Username
 	}
 
-	log.Printf(
-		"std.ssh_proxied (simulated) — command=%q target=%s via %s@%s",
-		in.Command, in.Host, gatewayUser, in.GatewayHost,
-	)
+	// 1. 连 bastion
+	gwCfg, err := buildSSHClientConfig(gatewayUser, in.Password, in.PrivateKey)
+	if err != nil {
+		return &db.Result{Error: fmt.Sprintf("gateway auth: %v", err)}, nil
+	}
+	if in.Timeout > 0 {
+		gwCfg.Timeout = time.Duration(in.Timeout * float64(time.Second))
+	}
+
+	gwClient, err := ssh.Dial("tcp", net.JoinHostPort(in.GatewayHost, "22"), gwCfg)
+	if err != nil {
+		return &db.Result{Error: fmt.Sprintf("std.ssh_proxied gateway %s: %v", in.GatewayHost, err)}, nil
+	}
+	defer gwClient.Close()
+
+	// 2. 通过 bastion 做 TCP 转发到目标机
+	targetCfg, err := buildSSHClientConfig(in.Username, in.Password, in.PrivateKey)
+	if err != nil {
+		return &db.Result{Error: fmt.Sprintf("target auth: %v", err)}, nil
+	}
+	if in.Timeout > 0 {
+		targetCfg.Timeout = time.Duration(in.Timeout * float64(in.Timeout))
+	}
+
+	// 用 bastion 的 SSH 连接做代理拨号
+	conn, err := gwClient.Dial("tcp", net.JoinHostPort(in.Host, "22"))
+	if err != nil {
+		return &db.Result{Error: fmt.Sprintf("std.ssh_proxied dial target via gateway: %v", err)}, nil
+	}
+
+	// 3. 在代理连接上做 SSH handshake → 目标机
+	ncc, chans, reqs, err := ssh.NewClientConn(conn, in.Host, targetCfg)
+	if err != nil {
+		return &db.Result{Error: fmt.Sprintf("std.ssh_proxied target handshake: %v", err)}, nil
+	}
+	targetClient := ssh.NewClient(ncc, chans, reqs)
+	defer targetClient.Close()
+
+	sess, err := targetClient.NewSession()
+	if err != nil {
+		return &db.Result{Error: fmt.Sprintf("std.ssh_proxied session: %v", err)}, nil
+	}
+	defer sess.Close()
+
+	var stdout, stderr bytes.Buffer
+	sess.Stdout = &stdout
+	sess.Stderr = &stderr
+
+	exitCode := 0
+	if err := sess.Run(in.Command); err != nil {
+		if exitErr, ok := err.(*ssh.ExitError); ok {
+			exitCode = exitErr.ExitStatus()
+		} else {
+			return &db.Result{Error: fmt.Sprintf("std.ssh_proxied run: %v", err)}, nil
+		}
+	}
 
 	return &db.Result{
 		Data: map[string]interface{}{
-			"stdout":        in.Command,
-			"target_host":   in.Host,
-			"gateway_host":  in.GatewayHost,
-			"gateway_user":  gatewayUser,
-			"proxy_command": in.ProxyCommand,
-			"exitcode":      0,
+			"stdout":       stdout.String(),
+			"stderr":       stderr.String(),
+			"target_host":  in.Host,
+			"gateway_host": in.GatewayHost,
+			"gateway_user": gatewayUser,
+			"exitcode":     exitCode,
 		},
 	}, nil
 }
@@ -482,18 +659,39 @@ func (a *JavaScriptAction) jsImpl(in *jsActionInput) (*db.Result, error) {
 		in.Context = map[string]interface{}{}
 	}
 
+	// YAQL/Jinja 模板 → 走 expressions 引擎
 	if strings.HasPrefix(in.Script, "<%") || strings.Contains(in.Script, "${") {
 		result := expressions.EvaluateRecursively(in.Script, in.Context)
 		return &db.Result{Data: result}, nil
 	}
 
+	// 纯 JSON → 直接 parse
 	var parsed interface{}
 	if err := json.Unmarshal([]byte(in.Script), &parsed); err == nil {
 		return &db.Result{Data: parsed}, nil
 	}
 
-	log.Printf("std.javascript: no interpreter available, echoing script as-is")
-	return &db.Result{Data: in.Script}, nil
+	// 真正的 JS 脚本 → goja 引擎
+	vm := goja.New()
+	// 把 context 里的变量注入 JS 全局
+	for k, v := range in.Context {
+		if err := vm.Set(k, v); err != nil {
+			return &db.Result{Error: fmt.Sprintf("std.javascript: set var %s: %v", k, err)}, nil
+		}
+	}
+
+	val, err := vm.RunString(in.Script)
+	if err != nil {
+		return &db.Result{Error: fmt.Sprintf("std.javascript: %v", err)}, nil
+	}
+
+	// 把 goja 返回值转回 Go interface{}
+	var result interface{}
+	if err := vm.ExportTo(val, &result); err != nil {
+		// ExportTo 可能因为类型不兼容失败，fallback 到 val.String()
+		result = val.String()
+	}
+	return &db.Result{Data: result}, nil
 }
 
 // --- TestDictAction ---
@@ -628,8 +826,7 @@ type waitSSHActionInput struct {
 	Timeout float64 `mapstructure:"timeout"`
 }
 
-// WaitSSHAction simulates SSH wait — sleeps for a configurable amount.
-// config attrs 优先于 input。
+// WaitSSHAction 等待 SSH 服务就绪 — 端口探测 + SSH banner 验证。
 type WaitSSHAction struct {
 	Host    string
 	Port    int
@@ -639,12 +836,28 @@ type WaitSSHAction struct {
 
 func NewWaitSSHAction() Action {
 	a := &WaitSSHAction{Port: 22, Timeout: 300}
-	a.GenericAction = GenericAction[waitSSHActionInput]{NameStr: "std.wait_ssh", Sync: false, DescStr: "Simulates SSH readiness wait", System: true, DoFn: a.waitSSHImpl}
+	a.GenericAction = GenericAction[waitSSHActionInput]{NameStr: "std.wait_ssh", Sync: false, DescStr: "Waits for SSH port + banner", System: true, DoFn: a.waitSSHImpl}
 	return a
 }
 
+// waitSSHImpl 做真正的 SSH 就绪检测：
+// 1. 轮询 TCP 端口能连上
+// 2. 连上后读 banner 确认是 SSH 服务
 func (a *WaitSSHAction) waitSSHImpl(in *waitSSHActionInput) (*db.Result, error) {
-	// struct attrs take priority, input overrides as fallback.
+	host := a.Host
+	if host == "" && in != nil {
+		host = in.Host
+	}
+	if host == "" {
+		return &db.Result{Error: "std.wait_ssh requires 'host'"}, nil
+	}
+	port := a.Port
+	if port == 0 && in != nil {
+		port = in.Port
+	}
+	if port == 0 {
+		port = 22
+	}
 	timeout := a.Timeout
 	if timeout <= 0 {
 		if in != nil {
@@ -654,8 +867,47 @@ func (a *WaitSSHAction) waitSSHImpl(in *waitSSHActionInput) (*db.Result, error) 
 	if timeout <= 0 {
 		timeout = 300
 	}
-	time.Sleep(time.Duration(timeout * float64(time.Second)))
-	return &db.Result{Data: "SSH wait complete"}, nil
+
+	deadline := time.Now().Add(time.Duration(timeout * float64(time.Second)))
+	start := time.Now()
+	interval := 2 * time.Second
+
+	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+	var lastErr error
+
+	for time.Now().Before(deadline) {
+		// TCP 连接探测 + SSH banner 读取
+		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			lastErr = err
+		} else {
+			// 连上了 → 读 SSH banner（通常是 "SSH-2.0-OpenSSH_..."）
+			conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+			buf := make([]byte, 64)
+			n, _ := conn.Read(buf)
+			conn.Close()
+			if n > 0 && strings.HasPrefix(string(buf[:n]), "SSH-") {
+				return &db.Result{
+					Data: map[string]interface{}{
+						"ready":   true,
+						"host":    host,
+						"port":    port,
+						"banner":  string(buf[:n]),
+						"elapsed": time.Since(start).Seconds(),
+					},
+				}, nil
+			}
+			// 端口开了但不是 SSH（或 banner 还没出）— 继续等
+			lastErr = fmt.Errorf("port open but no SSH banner")
+		}
+
+		time.Sleep(interval)
+	}
+
+	return &db.Result{
+		Error: fmt.Sprintf("std.wait_ssh timeout after %.0fs: %v", timeout, lastErr),
+		Data:  map[string]interface{}{"host": host, "port": port, "ready": false},
+	}, nil
 }
 
 // --- ActionRegistry ---
