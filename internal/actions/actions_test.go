@@ -7,12 +7,82 @@ import (
 	"github.com/danchleo/workflow-go/internal/db"
 )
 
+// ============================================================================
+// Test helpers — 只在测试里用，放在 _test.go 里
+// ============================================================================
+
+// TestActionProvider 允许测试运行时注册 ad-hoc action。
+// 对应 reference/actions/test.py。
+type TestActionProvider struct {
+	mu    syncLock
+	descs map[string]*ActionDescriptor
+}
+
+func NewTestActionProvider() *TestActionProvider {
+	return &TestActionProvider{descs: make(map[string]*ActionDescriptor)}
+}
+
+func (p *TestActionProvider) Register(desc *ActionDescriptor) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, exists := p.descs[desc.Name]; exists {
+		panic("TestActionProvider: duplicate action name " + desc.Name)
+	}
+	p.descs[desc.Name] = desc
+}
+
+func (p *TestActionProvider) RegisterFunc(name string, factory func() Action) {
+	p.Register(&ActionDescriptor{Name: name, Factory: factory})
+}
+
+func (p *TestActionProvider) Cleanup() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.descs = make(map[string]*ActionDescriptor)
+}
+
+func (p *TestActionProvider) Find(name, namespace string) (*ActionDescriptor, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if d, ok := p.descs[name]; ok {
+		return d, true
+	}
+	if namespace != "" {
+		if d, ok := p.descs[namespace+"."+name]; ok {
+			return d, true
+		}
+	}
+	return nil, false
+}
+
+func (p *TestActionProvider) List(namespace string) []*ActionDescriptor {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out := make([]*ActionDescriptor, 0, len(p.descs))
+	for _, d := range p.descs {
+		out = append(out, d)
+	}
+	return out
+}
+
+type countingAction struct {
+	GenericAction[noopInput]
+}
+
+func newCountingAction() Action {
+	a := &countingAction{}
+	a.GenericAction = GenericAction[noopInput]{NameStr: "test.counter", Sync: true, DoFn: func(*noopInput) (*db.Result, error) {
+		return &db.Result{Data: "ok"}, nil
+	}}
+	return a
+}
+
 // ------------------------------------------------------------
 // EchoAction
 // ------------------------------------------------------------
 
 func TestEchoAction_Run(t *testing.T) {
-	a := NewEchoAction()
+	a := NewEchoAction().(Action)
 	res, err := a.Run(map[string]interface{}{"output": "hello"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -40,19 +110,19 @@ func TestEchoAction_Run(t *testing.T) {
 // ------------------------------------------------------------
 
 func TestFailAction_Run(t *testing.T) {
-	a := NewFailAction()
+	a := NewFailAction().(Action)
 	res, err := a.Run(map[string]interface{}{"error_msg": "boom"})
 	if err == nil {
 		t.Fatalf("FailAction should return err, got res=%v", res)
 	}
-	// Result should also carry the error.
 	if res == nil || res.IsSuccess() {
 		t.Error("FailAction result should NOT be success")
 	}
 }
 
 func TestFailAction_Run_WithErrorData(t *testing.T) {
-	a := &FailAction{ErrorData: "custom-msg"}
+	a := NewFailAction().(*FailAction)
+	a.ErrorData = "custom-msg"
 	res, err := a.Run(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -70,7 +140,7 @@ func TestFailAction_Run_WithErrorData(t *testing.T) {
 // ------------------------------------------------------------
 
 func TestNoopAction_Run(t *testing.T) {
-	a := NewNoopAction()
+	a := NewNoopAction().(Action)
 	res, err := a.Run(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +205,7 @@ func TestTestActionProvider_FindAndInstantiate(t *testing.T) {
 	p.RegisterFunc(
 		"test.counter", func() Action {
 			called++
-			return &countingAction{}
+			return newCountingAction()
 		},
 	)
 
@@ -143,7 +213,7 @@ func TestTestActionProvider_FindAndInstantiate(t *testing.T) {
 	if !ok || d == nil {
 		t.Fatal("Find failed")
 	}
-	a := d.Factory()
+	a := d.Factory().(Action)
 	res, err := a.Run(nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -174,14 +244,6 @@ func TestTestActionProvider_DuplicatePanics(t *testing.T) {
 	p.RegisterFunc("dup", func() Action { return NewNoopAction() })
 }
 
-type countingAction struct{}
-
-func (c *countingAction) Run(input map[string]interface{}) (*db.Result, error) {
-	return &db.Result{Data: "ok"}, nil
-}
-func (c *countingAction) Name() string { return "test.counter" }
-func (c *countingAction) IsSync() bool { return true }
-
 // ------------------------------------------------------------
 // CompositeActionProvider — first-hit-wins chain
 // ------------------------------------------------------------
@@ -191,13 +253,13 @@ func TestCompositeActionProvider_FirstHit(t *testing.T) {
 	custom := NewTestActionProvider()
 	custom.RegisterFunc(
 		"test.only", func() Action {
-			return &failActionForTest{}
+			return newCountingAction()
 		},
 	)
 	// same name in both: custom shadows sys.
 	custom.RegisterFunc(
 		"std.echo", func() Action {
-			return &countingAction{}
+			return newCountingAction()
 		},
 	)
 
@@ -211,10 +273,7 @@ func TestCompositeActionProvider_FirstHit(t *testing.T) {
 	if !ok {
 		t.Fatal("std.echo not found")
 	}
-	a := d.Factory()
-	// countingAction (custom) is a plain success; failActionForTest would error.
-	// We can't easily tell them apart by just running — check it doesn't error
-	// and that factory ran without panic.
+	a := d.Factory().(Action)
 	if _, err := a.Run(nil); err != nil {
 		t.Logf("note: custom Run returned err=%v", err)
 	}
@@ -229,68 +288,3 @@ func TestCompositeActionProvider_FirstHit(t *testing.T) {
 		t.Error("should not exist")
 	}
 }
-
-// ------------------------------------------------------------
-// AdHocActionProvider — dynamic actions wrapping a system base
-// ------------------------------------------------------------
-
-func TestAdHocActionProvider_Instantiate(t *testing.T) {
-	sys := NewTestActionProvider()
-	sys.RegisterFunc("std.echo", func() Action { return NewEchoAction() })
-
-	p := NewAdHocActionProvider(sys)
-	desc := &AdHocActionDescriptor{
-		Name:       "my.custom",
-		BaseName:   "std.echo",
-		BaseInput:  map[string]interface{}{"output": "hello-adhoc"},
-		SystemProv: sys, // needed so Instantiate can resolve BaseName
-	}
-	p.Register(desc)
-
-	// Instantiate (the python reference pattern — descriptor has its own Instantiate method).
-	a, err := desc.Instantiate(nil)
-	if err != nil {
-		t.Fatalf("Instantiate: %v", err)
-	}
-	res, err := a.Run(desc.BaseInput)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if !res.IsSuccess() {
-		t.Errorf("Error = %v", res.Error)
-	}
-}
-
-func TestAdHocActionProvider_BaseNotFound(t *testing.T) {
-	sys := NewTestActionProvider()
-	p := NewAdHocActionProvider(sys)
-	desc := &AdHocActionDescriptor{
-		Name:       "broken",
-		BaseName:   "std.does.not.exist",
-		SystemProv: sys,
-	}
-	p.Register(desc)
-
-	if _, err := desc.Instantiate(nil); err == nil {
-		t.Error("Instantiate should fail when base is missing")
-	}
-}
-
-func TestAdHocActionProvider_NilSystemProv(t *testing.T) {
-	desc := &AdHocActionDescriptor{
-		Name:     "broken-sys",
-		BaseName: "std.echo",
-		// SystemProv intentionally nil
-	}
-	if _, err := desc.Instantiate(nil); err == nil {
-		t.Error("Instantiate should fail when SystemProv is nil")
-	}
-}
-
-type failActionForTest struct{}
-
-func (f *failActionForTest) Run(input map[string]interface{}) (*db.Result, error) {
-	return &db.Result{Error: "test-fail"}, nil
-}
-func (f *failActionForTest) Name() string { return "test.fail" }
-func (f *failActionForTest) IsSync() bool { return true }

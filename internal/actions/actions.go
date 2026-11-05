@@ -19,14 +19,20 @@ import (
 
 // Action is the interface that all Workflow actions must implement.
 // Ported from reference_lib.actions.Action
+// Action 是所有 action 的统一接口。
+// 所有标准 action 都嵌入 GenericAction[T] 自动获得完整实现。
 type Action interface {
 	// Run executes the action. input is decoded via mapstructure into a
 	// typed request struct per action; see individual Run implementations.
 	Run(input map[string]interface{}) (*db.Result, error)
-	// Name returns the action name.
+	// Name returns the action name (e.g. "std.http").
 	Name() string
 	// IsSync reports whether the action is synchronous (blocking).
 	IsSync() bool
+	// Description 人类可读的描述（可选）。
+	Description() string
+	// IsSystem 是否是内置系统 action。
+	IsSystem() bool
 }
 
 // --- shared mapstructure decoder: WeaklyTypedInput lets float64→int ---
@@ -49,7 +55,10 @@ func decodeActionInput(input map[string]interface{}, out interface{}) error {
 	return dec.Decode(input)
 }
 
-// ActionDescriptor describes an action that can be instantiated.
+// ActionDescriptor 是 Registry 内部存储的壳。
+// 所有字段都可以从 Action 接口实现自动提取，注册时不需要手动填。
+// 保留它作为返回值类型是因为 Registry.Get 返回它；外部如果需要 Attributes/ActionClass/Namespace
+// 这些不常变化的元信息，可以在 Register 时手动传入覆盖。
 type ActionDescriptor struct {
 	Name        string
 	Description string
@@ -58,31 +67,60 @@ type ActionDescriptor struct {
 	IsSystem    bool
 	Namespace   string
 
-	// Action factory — creates a new Action instance with resolved attributes.
+	// Factory 创建 action 实例。
 	Factory func() Action
+}
+
+// makeDescriptor 从 Factory 返回的 Action 实例自动填充 Name/Description/IsSystem，
+// 已显式设置的字段不会被覆盖。
+func makeDescriptor(desc ActionDescriptor) ActionDescriptor {
+	if desc.Factory != nil {
+		if a := desc.Factory(); a != nil {
+			if desc.Name == "" {
+				desc.Name = a.Name()
+			}
+			if desc.Description == "" {
+				desc.Description = a.Description()
+			}
+			if !desc.IsSystem {
+				desc.IsSystem = a.IsSystem()
+			}
+		}
+	}
+	return desc
 }
 
 // --- Standard built-in actions ---
 
 // EchoAction just returns its configured output. Good for testing.
+// 嵌入 GenericAction 但有 config attr，泛型输入是 echoActionInput（目前只有 output 字段）。
+type echoActionInput struct {
+	Output interface{} `mapstructure:"output"`
+}
+
 type EchoAction struct {
 	Output interface{}
 	Delay  float64
+	GenericAction[echoActionInput]
 }
 
 func NewEchoAction() Action {
-	return &EchoAction{Output: "Hello, Workflow!"}
+	a := &EchoAction{Output: "Hello, Workflow!"}
+	a.GenericAction = GenericAction[echoActionInput]{NameStr: "std.echo", Sync: true, DescStr: "Returns configured output (testing helper)", System: true, DoFn: a.echoImpl}
+	return a
 }
 
-func (a *EchoAction) Run(input map[string]interface{}) (*db.Result, error) {
+// Do 实现具体逻辑；config attr Output 优先于 input。
+func (a *EchoAction) echoImpl(in *echoActionInput) (*db.Result, error) {
 	if a.Delay > 0 {
 		time.Sleep(time.Duration(a.Delay * float64(time.Second)))
 	}
-	return &db.Result{Data: a.Output}, nil
+	out := a.Output
+	if out == nil && in != nil {
+		out = in.Output
+	}
+	return &db.Result{Data: out}, nil
 }
-
-func (a *EchoAction) Name() string { return "std.echo" }
-func (a *EchoAction) IsSync() bool { return true }
 
 // --- HttpAction ---
 
@@ -98,19 +136,19 @@ type httpActionInput struct {
 }
 
 // HttpAction performs an HTTP request.
-type HttpAction struct{}
+// 嵌入 GenericAction[httpActionInput]，自动获得 decode + Action 接口实现。
+type HttpAction struct {
+	GenericAction[httpActionInput]
+}
 
-func NewHttpAction() Action { return &HttpAction{} }
+func NewHttpAction() Action {
+	a := &HttpAction{}
+	a.GenericAction = GenericAction[httpActionInput]{NameStr: "std.http", Sync: true, DescStr: "Performs an HTTP request (method/url/body/headers/timeout)", System: true, DoFn: a.httpImpl}
+	return a
+}
 
-func (a *HttpAction) Name() string { return "std.http" }
-func (a *HttpAction) IsSync() bool { return true }
-
-func (a *HttpAction) Run(input map[string]interface{}) (*db.Result, error) {
-	var in httpActionInput
-	if err := decodeActionInput(input, &in); err != nil {
-		return nil, fmt.Errorf("std.http: decode input: %w", err)
-	}
-
+// Do 是泛型基类要求实现的方法，直接拿 typed input。
+func (a *HttpAction) httpImpl(in *httpActionInput) (*db.Result, error) {
 	method := in.Method
 	if method == "" {
 		method = "GET"
@@ -211,19 +249,17 @@ type wfHTTPActionInput struct {
 }
 
 // WorkflowHTTPAction triggers a workflow in this engine via HTTP.
-type WorkflowHTTPAction struct{}
+type WorkflowHTTPAction struct {
+	GenericAction[wfHTTPActionInput]
+}
 
-func NewWorkflowHTTPAction() Action { return &WorkflowHTTPAction{} }
+func NewWorkflowHTTPAction() Action {
+	a := &WorkflowHTTPAction{}
+	a.GenericAction = GenericAction[wfHTTPActionInput]{NameStr: "std.workflow_http", Sync: true, DescStr: "Triggers a workflow via HTTP POST /v2/executions", System: true, DoFn: a.wfHttpImpl}
+	return a
+}
 
-func (a *WorkflowHTTPAction) Name() string { return "std.workflow_http" }
-func (a *WorkflowHTTPAction) IsSync() bool { return true }
-
-func (a *WorkflowHTTPAction) Run(input map[string]interface{}) (*db.Result, error) {
-	var in wfHTTPActionInput
-	if err := decodeActionInput(input, &in); err != nil {
-		return nil, fmt.Errorf("std.workflow_http: decode input: %w", err)
-	}
-
+func (a *WorkflowHTTPAction) wfHttpImpl(in *wfHTTPActionInput) (*db.Result, error) {
 	base := in.URL
 	if base == "" {
 		base = "http://localhost:8989"
@@ -302,19 +338,17 @@ type emailActionInput struct {
 }
 
 // EmailAction sends a simple plain-text email via SMTP (simulated).
-type EmailAction struct{}
+type EmailAction struct {
+	GenericAction[emailActionInput]
+}
 
-func NewEmailAction() Action { return &EmailAction{} }
+func NewEmailAction() Action {
+	a := &EmailAction{}
+	a.GenericAction = GenericAction[emailActionInput]{NameStr: "std.email", Sync: true, DescStr: "Sends an email via SMTP (simulated)", System: true, DoFn: a.emailImpl}
+	return a
+}
 
-func (a *EmailAction) Name() string { return "std.email" }
-func (a *EmailAction) IsSync() bool { return true }
-
-func (a *EmailAction) Run(input map[string]interface{}) (*db.Result, error) {
-	var in emailActionInput
-	if err := decodeActionInput(input, &in); err != nil {
-		return nil, fmt.Errorf("std.email: decode input: %w", err)
-	}
-
+func (a *EmailAction) emailImpl(in *emailActionInput) (*db.Result, error) {
 	if in.From == "" {
 		return &db.Result{Error: "std.email requires 'from'"}, nil
 	}
@@ -345,18 +379,17 @@ type sshActionInput struct {
 }
 
 // SSHAction simulates SSH — returns command as stdout.
-type SSHAction struct{}
+type SSHAction struct {
+	GenericAction[sshActionInput]
+}
 
-func NewSSHAction() Action { return &SSHAction{} }
+func NewSSHAction() Action {
+	a := &SSHAction{}
+	a.GenericAction = GenericAction[sshActionInput]{NameStr: "std.ssh", Sync: true, DescStr: "Runs a remote command via SSH (simulated)", System: true, DoFn: a.sshImpl}
+	return a
+}
 
-func (a *SSHAction) Name() string { return "std.ssh" }
-func (a *SSHAction) IsSync() bool { return true }
-
-func (a *SSHAction) Run(input map[string]interface{}) (*db.Result, error) {
-	var in sshActionInput
-	if err := decodeActionInput(input, &in); err != nil {
-		return nil, fmt.Errorf("std.ssh: decode input: %w", err)
-	}
+func (a *SSHAction) sshImpl(in *sshActionInput) (*db.Result, error) {
 	if in.Port == 0 {
 		in.Port = 22
 	}
@@ -388,19 +421,17 @@ type sshProxiedActionInput struct {
 }
 
 // SSHProxiedAction is SSHAction routed through a bastion host.
-type SSHProxiedAction struct{}
+type SSHProxiedAction struct {
+	GenericAction[sshProxiedActionInput]
+}
 
-func NewSSHProxiedAction() Action { return &SSHProxiedAction{} }
+func NewSSHProxiedAction() Action {
+	a := &SSHProxiedAction{}
+	a.GenericAction = GenericAction[sshProxiedActionInput]{NameStr: "std.ssh_proxied", Sync: true, DescStr: "SSH through bastion/gateway host (simulated)", System: true, DoFn: a.sshProxiedImpl}
+	return a
+}
 
-func (a *SSHProxiedAction) Name() string { return "std.ssh_proxied" }
-func (a *SSHProxiedAction) IsSync() bool { return true }
-
-func (a *SSHProxiedAction) Run(input map[string]interface{}) (*db.Result, error) {
-	var in sshProxiedActionInput
-	if err := decodeActionInput(input, &in); err != nil {
-		return nil, fmt.Errorf("std.ssh_proxied: decode input: %w", err)
-	}
-
+func (a *SSHProxiedAction) sshProxiedImpl(in *sshProxiedActionInput) (*db.Result, error) {
 	gatewayUser := in.GatewayUser
 	if gatewayUser == "" {
 		gatewayUser = in.Username
@@ -432,19 +463,17 @@ type jsActionInput struct {
 }
 
 // JavaScriptAction evaluates a JavaScript script with a context map.
-type JavaScriptAction struct{}
+type JavaScriptAction struct {
+	GenericAction[jsActionInput]
+}
 
-func NewJavaScriptAction() Action { return &JavaScriptAction{} }
+func NewJavaScriptAction() Action {
+	a := &JavaScriptAction{}
+	a.GenericAction = GenericAction[jsActionInput]{NameStr: "std.javascript", Sync: true, DescStr: "Evaluates JavaScript expression", System: true, DoFn: a.jsImpl}
+	return a
+}
 
-func (a *JavaScriptAction) Name() string { return "std.javascript" }
-func (a *JavaScriptAction) IsSync() bool { return true }
-
-func (a *JavaScriptAction) Run(input map[string]interface{}) (*db.Result, error) {
-	var in jsActionInput
-	if err := decodeActionInput(input, &in); err != nil {
-		return nil, fmt.Errorf("std.javascript: decode input: %w", err)
-	}
-
+func (a *JavaScriptAction) jsImpl(in *jsActionInput) (*db.Result, error) {
 	if in.Script == "" {
 		return &db.Result{Error: "std.javascript requires 'script'"}, nil
 	}
@@ -475,19 +504,17 @@ type testDictActionInput struct {
 }
 
 // TestDictAction returns a fixed dict useful for testing.
-type TestDictAction struct{}
+type TestDictAction struct {
+	GenericAction[testDictActionInput]
+}
 
-func NewTestDictAction() Action { return &TestDictAction{} }
+func NewTestDictAction() Action {
+	a := &TestDictAction{}
+	a.GenericAction = GenericAction[testDictActionInput]{NameStr: "std.test_dict", Sync: true, DescStr: "Returns a fixed test dict", System: true, DoFn: a.testDictImpl}
+	return a
+}
 
-func (a *TestDictAction) Name() string { return "std.test_dict" }
-func (a *TestDictAction) IsSync() bool { return true }
-
-func (a *TestDictAction) Run(input map[string]interface{}) (*db.Result, error) {
-	var in testDictActionInput
-	if err := decodeActionInput(input, &in); err != nil {
-		return nil, fmt.Errorf("std.test_dict: decode input: %w", err)
-	}
-
+func (a *TestDictAction) testDictImpl(in *testDictActionInput) (*db.Result, error) {
 	if len(in.Keys) > 0 {
 		out := map[string]interface{}{}
 		for _, k := range in.Keys {
@@ -505,75 +532,92 @@ func (a *TestDictAction) Run(input map[string]interface{}) (*db.Result, error) {
 }
 
 // NoopAction does nothing and returns nil.
-type NoopAction struct{}
+type noopInput struct{}
 
-func (a *NoopAction) Run(input map[string]interface{}) (*db.Result, error) {
+type NoopAction struct {
+	GenericAction[noopInput]
+}
+
+func NewNoopAction() Action {
+	a := &NoopAction{}
+	a.GenericAction = GenericAction[noopInput]{NameStr: "std.noop", Sync: true, DescStr: "Does nothing and returns nil", System: true, DoFn: a.noopImpl}
+	return a
+}
+
+func (a *NoopAction) noopImpl(*noopInput) (*db.Result, error) {
 	return &db.Result{}, nil
 }
-func (a *NoopAction) Name() string { return "std.noop" }
-func (a *NoopAction) IsSync() bool { return true }
 
 // AsyncNoopAction is an asynchronous noop (just returns immediately with success).
 type AsyncNoopAction struct {
-	NoopAction
+	GenericAction[noopInput]
 }
 
-func (a *AsyncNoopAction) Name() string { return "std.async_noop" }
-func (a *AsyncNoopAction) IsSync() bool { return false }
+func NewAsyncNoopAction() Action {
+	a := &AsyncNoopAction{}
+	a.GenericAction = GenericAction[noopInput]{NameStr: "std.async_noop", Sync: false, DescStr: "Async noop for testing", System: true, DoFn: a.asyncNoopImpl}
+	return a
+}
 
-// NewAsyncNoopAction creates an async noop action.
-func NewAsyncNoopAction() Action { return &AsyncNoopAction{} }
-
-// NewNoopAction creates a sync noop action.
-func NewNoopAction() Action { return &NoopAction{} }
+func (a *AsyncNoopAction) asyncNoopImpl(*noopInput) (*db.Result, error) {
+	return &db.Result{}, nil
+}
 
 // FailAction always fails — useful for testing error handling.
+type failInput struct{}
+
 type FailAction struct {
 	ErrorData interface{}
+	GenericAction[failInput]
 }
 
 func NewFailAction() Action {
-	return &FailAction{ErrorData: nil}
+	a := &FailAction{}
+	a.GenericAction = GenericAction[failInput]{NameStr: "std.fail", Sync: true, DescStr: "Always fails (testing helper)", System: true, DoFn: a.failImpl}
+	return a
 }
 
-func (a *FailAction) Run(input map[string]interface{}) (*db.Result, error) {
+func (a *FailAction) failImpl(*failInput) (*db.Result, error) {
 	if a.ErrorData != nil {
 		return &db.Result{Error: a.ErrorData}, nil
 	}
 	return &db.Result{Error: "Fail action expected error"}, fmt.Errorf("fail action expected error")
 }
-func (a *FailAction) Name() string { return "std.fail" }
-func (a *FailAction) IsSync() bool { return true }
 
 // --- SleepAction ---
 
-// sleepActionInput: struct attr SleepAction.Seconds takes priority;
-// input["seconds"] is the fallback (matching original behavior).
+// sleepActionInput mirrors Python std.sleep input keys.
 type sleepActionInput struct {
 	Seconds float64 `mapstructure:"seconds"`
 }
 
 // SleepAction waits for the given number of seconds.
+// 嵌入 GenericAction[sleepActionInput]；Seconds 是 config attr（优先级高于 input）。
 type SleepAction struct {
 	Seconds float64 // struct attribute (higher priority than input)
+	GenericAction[sleepActionInput]
 }
 
 func NewSleepAction() Action {
-	return &SleepAction{}
+	a := &SleepAction{}
+	a.GenericAction = GenericAction[sleepActionInput]{NameStr: "std.sleep", Sync: true, DescStr: "Sleeps for N seconds", System: true, DoFn: a.sleepImpl}
+	return a
 }
 
-func (a *SleepAction) Run(input map[string]interface{}) (*db.Result, error) {
+// Do 实现具体逻辑；struct attr Seconds 优先级高于 input。
+func (a *SleepAction) sleepImpl(in *sleepActionInput) (*db.Result, error) {
 	seconds := a.Seconds
 	if seconds <= 0 {
-		var in sleepActionInput
-		_ = decodeActionInput(input, &in)
-		seconds = in.Seconds
+		if in != nil {
+			seconds = in.Seconds
+		}
+	}
+	if seconds <= 0 {
+		seconds = 0
 	}
 	time.Sleep(time.Duration(seconds * float64(time.Second)))
 	return &db.Result{Data: fmt.Sprintf("slept for %v seconds", seconds)}, nil
 }
-func (a *SleepAction) Name() string { return "std.sleep" }
-func (a *SleepAction) IsSync() bool { return true }
 
 // --- WaitSSHAction ---
 
@@ -585,23 +629,27 @@ type waitSSHActionInput struct {
 }
 
 // WaitSSHAction simulates SSH wait — sleeps for a configurable amount.
+// config attrs 优先于 input。
 type WaitSSHAction struct {
 	Host    string
 	Port    int
 	Timeout float64
+	GenericAction[waitSSHActionInput]
 }
 
 func NewWaitSSHAction() Action {
-	return &WaitSSHAction{Port: 22, Timeout: 300}
+	a := &WaitSSHAction{Port: 22, Timeout: 300}
+	a.GenericAction = GenericAction[waitSSHActionInput]{NameStr: "std.wait_ssh", Sync: false, DescStr: "Simulates SSH readiness wait", System: true, DoFn: a.waitSSHImpl}
+	return a
 }
 
-func (a *WaitSSHAction) Run(input map[string]interface{}) (*db.Result, error) {
+func (a *WaitSSHAction) waitSSHImpl(in *waitSSHActionInput) (*db.Result, error) {
 	// struct attrs take priority, input overrides as fallback.
 	timeout := a.Timeout
 	if timeout <= 0 {
-		var in waitSSHActionInput
-		_ = decodeActionInput(input, &in)
-		timeout = in.Timeout
+		if in != nil {
+			timeout = in.Timeout
+		}
 	}
 	if timeout <= 0 {
 		timeout = 300
@@ -609,8 +657,6 @@ func (a *WaitSSHAction) Run(input map[string]interface{}) (*db.Result, error) {
 	time.Sleep(time.Duration(timeout * float64(time.Second)))
 	return &db.Result{Data: "SSH wait complete"}, nil
 }
-func (a *WaitSSHAction) Name() string { return "std.wait_ssh" }
-func (a *WaitSSHAction) IsSync() bool { return false }
 
 // --- ActionRegistry ---
 
@@ -630,156 +676,38 @@ func NewActionRegistry() *ActionRegistry {
 }
 
 // RegisterBuiltinActions registers all standard built-in actions.
+// Name/Description/IsSystem 全部从 action 自身提取，一行一个。
 func (r *ActionRegistry) RegisterBuiltinActions() {
-	r.Register(
-		&ActionDescriptor{
-			Name:        "std.echo",
-			Description: "Returns configured output (testing helper)",
-			IsSystem:    true,
-			Factory: func() Action {
-				return NewEchoAction()
-			},
-		},
-	)
-
-	r.Register(
-		&ActionDescriptor{
-			Name:        "std.noop",
-			Description: "Does nothing and returns nil",
-			IsSystem:    true,
-			Factory: func() Action {
-				return NewNoopAction()
-			},
-		},
-	)
-
-	r.Register(
-		&ActionDescriptor{
-			Name:        "std.async_noop",
-			Description: "Async noop for testing",
-			IsSystem:    true,
-			Factory: func() Action {
-				return NewAsyncNoopAction()
-			},
-		},
-	)
-
-	r.Register(
-		&ActionDescriptor{
-			Name:        "std.fail",
-			Description: "Always fails",
-			IsSystem:    true,
-			Factory: func() Action {
-				return NewFailAction()
-			},
-		},
-	)
-
-	r.Register(
-		&ActionDescriptor{
-			Name:        "std.sleep",
-			Description: "Sleeps for N seconds",
-			IsSystem:    true,
-			Factory: func() Action {
-				return NewSleepAction()
-			},
-		},
-	)
-
-	r.Register(
-		&ActionDescriptor{
-			Name:        "std.wait_ssh",
-			Description: "Simulates SSH readiness wait",
-			IsSystem:    true,
-			Factory: func() Action {
-				return NewWaitSSHAction()
-			},
-		},
-	)
-
-	r.Register(
-		&ActionDescriptor{
-			Name:        "std.http",
-			Description: "Performs an HTTP request (method/url/body/headers/timeout)",
-			IsSystem:    true,
-			Factory: func() Action {
-				return NewHttpAction()
-			},
-		},
-	)
-
-	r.Register(
-		&ActionDescriptor{
-			Name:        "std.workflow_http",
-			Description: "Triggers a workflow in this engine via HTTP POST /v2/executions",
-			IsSystem:    true,
-			Factory: func() Action {
-				return NewWorkflowHTTPAction()
-			},
-		},
-	)
-
-	r.Register(
-		&ActionDescriptor{
-			Name:        "std.email",
-			Description: "Sends an email via SMTP (simulated: logs params)",
-			IsSystem:    true,
-			Factory: func() Action {
-				return NewEmailAction()
-			},
-		},
-	)
-
-	r.Register(
-		&ActionDescriptor{
-			Name:        "std.ssh",
-			Description: "Runs a remote command via SSH (simulated: returns command as stdout)",
-			IsSystem:    true,
-			Factory: func() Action {
-				return NewSSHAction()
-			},
-		},
-	)
-
-	r.Register(
-		&ActionDescriptor{
-			Name:        "std.ssh_proxied",
-			Description: "Runs a remote SSH command through a bastion/gateway host (simulated)",
-			IsSystem:    true,
-			Factory: func() Action {
-				return NewSSHProxiedAction()
-			},
-		},
-	)
-
-	r.Register(
-		&ActionDescriptor{
-			Name:        "std.javascript",
-			Description: "Evaluates a JavaScript expression (falls back to Workflow expressions)",
-			IsSystem:    true,
-			Factory: func() Action {
-				return NewJavaScriptAction()
-			},
-		},
-	)
-
-	r.Register(
-		&ActionDescriptor{
-			Name:        "std.test_dict",
-			Description: "Returns a fixed test dict (standard Workflow testing helper)",
-			IsSystem:    true,
-			Factory: func() Action {
-				return NewTestDictAction()
-			},
-		},
-	)
+	r.RegisterAction(NewEchoAction)
+	r.RegisterAction(NewNoopAction)
+	r.RegisterAction(NewAsyncNoopAction)
+	r.RegisterAction(NewFailAction)
+	r.RegisterAction(NewSleepAction)
+	r.RegisterAction(NewWaitSSHAction)
+	r.RegisterAction(NewHttpAction)
+	r.RegisterAction(NewWorkflowHTTPAction)
+	r.RegisterAction(NewEmailAction)
+	r.RegisterAction(NewSSHAction)
+	r.RegisterAction(NewSSHProxiedAction)
+	r.RegisterAction(NewJavaScriptAction)
+	r.RegisterAction(NewTestDictAction)
 }
 
-// Register registers an action descriptor.
+// Register 注册一个 ActionDescriptor。Name/Description/IsSystem 为空时
+// 会自动从 Factory 返回的 Action 实例提取。
 func (r *ActionRegistry) Register(d *ActionDescriptor) {
+	filled := makeDescriptor(*d)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.actions[d.Name] = d
+	r.actions[filled.Name] = &filled
+}
+
+// RegisterAction 是最便捷的注册方式：直接传 Factory，
+// Name/Description/IsSystem 全部从 action 自身提取。
+//
+// 用法：r.RegisterAction(NewEchoAction)
+func (r *ActionRegistry) RegisterAction(factory func() Action) {
+	r.Register(&ActionDescriptor{Factory: factory})
 }
 
 // Get looks up an action descriptor by name.
@@ -881,163 +809,60 @@ func (p *registryProvider) Find(name, namespace string) (*ActionDescriptor, bool
 }
 func (p *registryProvider) List(namespace string) []*ActionDescriptor { return p.r.List() }
 
-// TestActionProvider allows tests to register ad-hoc action descriptors
-// at runtime. Mirrors Python's reference/actions/test.py TestActionProvider.
-type TestActionProvider struct {
-	mu    syncLock
-	descs map[string]*ActionDescriptor
+// ============================================================================
+// GenericAction[T] 泛型 helper —— 编译期类型安全 + 零 reflect 开销
+// ============================================================================
+//
+// Go 方法提升没有"虚函数"语义：GenericAction[T].Run 里 g.Do() 调的是
+// GenericAction[T].Do，不会分发到 *EchoAction.Do。所以改用函数注入模式，
+// DoFn 在 NewXxxAction 时就绑定了子类方法，不存在分发问题。
+//
+// 用法：
+//
+//	type MyAction struct { GenericAction[myInput] }
+//
+//	func NewMyAction() Action {
+//	    a := &MyAction{}
+//	    a.GenericAction = GenericAction[myInput]{
+//	        NameStr: "std.xxx", Sync: true,
+//	        DescStr: "描述", System: true,
+//	        DoFn:    a.doImpl,
+//	    }
+//	    return a
+//	}
+//
+//	func (a *MyAction) doImpl(in *myInput) (*db.Result, error) { ... }
+
+// GenericAction 泛型基类，通过 DoFn 注入子类实现（避免方法提升分发问题）。
+// T 是输入 struct 类型（字段带 mapstructure tag）。
+// 同时实现 Action 接口的 Name/IsSync/Description/IsSystem，
+// 子类嵌入后自动获得完整 Action 接口满足。
+type GenericAction[T any] struct {
+	NameStr string
+	Sync    bool
+	DescStr string
+	System  bool                         // 是否内置系统 action
+	DoFn    func(*T) (*db.Result, error) // 绑定子类实现；nil 会报 "DoFn not set"
 }
 
-func NewTestActionProvider() *TestActionProvider {
-	return &TestActionProvider{descs: make(map[string]*ActionDescriptor)}
-}
-
-func (p *TestActionProvider) Register(desc *ActionDescriptor) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if _, exists := p.descs[desc.Name]; exists {
-		panic("TestActionProvider: duplicate action name " + desc.Name)
+// Run 实现 Action 接口：decode input map → typed *T → 调 DoFn。
+func (g *GenericAction[T]) Run(input map[string]interface{}) (*db.Result, error) {
+	var typed T
+	if input == nil {
+		input = map[string]interface{}{}
 	}
-	p.descs[desc.Name] = desc
-}
-
-func (p *TestActionProvider) RegisterFunc(name string, factory func() Action) {
-	p.Register(&ActionDescriptor{Name: name, Factory: factory})
-}
-
-func (p *TestActionProvider) Cleanup() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.descs = make(map[string]*ActionDescriptor)
-}
-
-func (p *TestActionProvider) Find(name, namespace string) (*ActionDescriptor, bool) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if d, ok := p.descs[name]; ok {
-		return d, true
+	if err := decodeActionInput(input, &typed); err != nil {
+		return nil, fmt.Errorf("%s: decode input: %w", g.NameStr, err)
 	}
-	if namespace != "" {
-		if d, ok := p.descs[namespace+"."+name]; ok {
-			return d, true
-		}
+	if g.DoFn == nil {
+		return nil, fmt.Errorf("%s: DoFn not set", g.NameStr)
 	}
-	return nil, false
+	return g.DoFn(&typed)
 }
 
-func (p *TestActionProvider) List(namespace string) []*ActionDescriptor {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	out := make([]*ActionDescriptor, 0, len(p.descs))
-	for _, d := range p.descs {
-		out = append(out, d)
-	}
-	return out
-}
+func (g *GenericAction[T]) Name() string        { return g.NameStr }
+func (g *GenericAction[T]) IsSync() bool        { return g.Sync }
+func (g *GenericAction[T]) Description() string { return g.DescStr }
+func (g *GenericAction[T]) IsSystem() bool      { return g.System }
 
-// AdHocAction wraps a base action with resolved input from an ad-hoc
-// action definition. Delegates Run() to the underlying base action.
-type AdHocAction struct {
-	Base Action
-}
-
-func (a *AdHocAction) Run(input map[string]interface{}) (*db.Result, error) {
-	if a.Base == nil {
-		return &db.Result{Error: "AdHocAction has no base action"}, nil
-	}
-	return a.Base.Run(input)
-}
-
-func (a *AdHocAction) Name() string {
-	if a.Base != nil {
-		return a.Base.Name()
-	}
-	return "adhoc"
-}
-
-func (a *AdHocAction) IsSync() bool {
-	if a.Base != nil {
-		return a.Base.IsSync()
-	}
-	return true
-}
-
-// AdHocActionDescriptor represents a user-defined action that wraps a system
-// base action with input/output transformations. Currently handles the
-// input resolution inline in the task handler — this struct carries base
-// name + base-input attributes and delegates instantiation to the underlying
-// system descriptor.
-type AdHocActionDescriptor struct {
-	Name       string
-	BaseName   string
-	BaseInput  map[string]interface{}
-	OutputExpr interface{}
-	Namespace  string
-	ProjectID  string
-	SystemProv ActionProvider
-}
-
-func (d *AdHocActionDescriptor) Instantiate(input map[string]interface{}) (Action, error) {
-	if d.SystemProv == nil {
-		return nil, fmt.Errorf("AdHocActionDescriptor %q: SystemProv is not set", d.Name)
-	}
-	baseDesc, ok := d.SystemProv.Find(d.BaseName, d.Namespace)
-	if !ok {
-		return nil, fmt.Errorf("AdHocActionDescriptor: base action %q not found", d.BaseName)
-	}
-	base := baseDesc.Factory()
-	return &AdHocAction{Base: base}, nil
-}
-
-// AdHocActionProvider allows registering AdHocActionDescriptor instances.
-func NewAdHocActionProvider(systemProv ActionProvider) *AdHocActionProvider {
-	return &AdHocActionProvider{
-		systemProv: systemProv,
-		descs:      make(map[string]*AdHocActionDescriptor),
-	}
-}
-
-type AdHocActionProvider struct {
-	mu         syncLock
-	systemProv ActionProvider
-	descs      map[string]*AdHocActionDescriptor
-}
-
-func (p *AdHocActionProvider) Register(d *AdHocActionDescriptor) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.descs[d.Name] = d
-}
-
-func (p *AdHocActionProvider) Find(name, namespace string) (*ActionDescriptor, bool) {
-	p.mu.RLock()
-	d, ok := p.descs[name]
-	p.mu.RUnlock()
-	if !ok {
-		return nil, false
-	}
-	baseDesc, _ := p.systemProv.Find(d.BaseName, d.Namespace)
-	ahdCopy := *d
-	return &ActionDescriptor{
-		Name:        d.Name,
-		Description: "ad-hoc action wrapping " + d.BaseName,
-		Factory: func() Action {
-			if baseDesc == nil {
-				return &FailAction{ErrorData: fmt.Sprintf("adhoc base not found: %s", ahdCopy.BaseName)}
-			}
-			return &AdHocAction{Base: baseDesc.Factory()}
-		},
-	}, true
-}
-
-func (p *AdHocActionProvider) List(namespace string) []*ActionDescriptor {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	var out []*ActionDescriptor
-	for name := range p.descs {
-		if d, ok := p.Find(name, namespace); ok {
-			out = append(out, d)
-		}
-	}
-	return out
-}
+// ============================================================================
