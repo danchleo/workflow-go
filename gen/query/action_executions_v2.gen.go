@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,76 +16,123 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newActionExecutionsV2(db *gorm.DB, opts ...gen.DOOption) actionExecutionsV2 {
-	_actionExecutionsV2 := actionExecutionsV2{}
+func newGActExModel(db *gorm.DB, opts ...gen.DOOption) gActExModel {
+	_gActExModel := gActExModel{}
 
-	_actionExecutionsV2.actionExecutionsV2Do.UseDB(db, opts...)
-	_actionExecutionsV2.actionExecutionsV2Do.UseModel(&model.ActionExecutionsV2{})
+	_gActExModel.gActExModelDo.UseDB(db, opts...)
+	_gActExModel.gActExModelDo.UseModel(&sqlmodel.GActExModel{})
 
-	tableName := _actionExecutionsV2.actionExecutionsV2Do.TableName()
-	_actionExecutionsV2.ALL = field.NewAsterisk(tableName)
-	_actionExecutionsV2.ID = field.NewString(tableName, "id")
-	_actionExecutionsV2.TaskExecutionID = field.NewString(tableName, "task_execution_id")
-	_actionExecutionsV2.State = field.NewString(tableName, "state")
-	_actionExecutionsV2.Data = field.NewString(tableName, "data")
+	tableName := _gActExModel.gActExModelDo.TableName()
+	_gActExModel.ALL = field.NewAsterisk(tableName)
+	_gActExModel.ID = field.NewString(tableName, "id")
+	_gActExModel.Name = field.NewString(tableName, "name")
+	_gActExModel.Description = field.NewString(tableName, "description")
+	_gActExModel.WorkflowName = field.NewString(tableName, "workflow_name")
+	_gActExModel.WorkflowNamespace = field.NewString(tableName, "workflow_namespace")
+	_gActExModel.WorkflowID = field.NewString(tableName, "workflow_id")
+	_gActExModel.State = field.NewString(tableName, "state")
+	_gActExModel.StateInfo = field.NewString(tableName, "state_info")
+	_gActExModel.Tags = field.NewField(tableName, "tags")
+	_gActExModel.RuntimeContext = field.NewField(tableName, "runtime_context")
+	_gActExModel.Spec = field.NewField(tableName, "spec")
+	_gActExModel.Accepted = field.NewBool(tableName, "accepted")
+	_gActExModel.Input = field.NewField(tableName, "input")
+	_gActExModel.Output = field.NewField(tableName, "output")
+	_gActExModel.TaskExecutionID = field.NewString(tableName, "task_execution_id")
+	_gActExModel.LastHeartbeat = field.NewTime(tableName, "last_heartbeat")
+	_gActExModel.IsSync = field.NewBool(tableName, "is_sync")
+	_gActExModel.ProjectID = field.NewString(tableName, "project_id")
+	_gActExModel.Scope = field.NewString(tableName, "scope")
+	_gActExModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gActExModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_actionExecutionsV2.fillFieldMap()
+	_gActExModel.fillFieldMap()
 
-	return _actionExecutionsV2
+	return _gActExModel
 }
 
-type actionExecutionsV2 struct {
-	actionExecutionsV2Do actionExecutionsV2Do
+type gActExModel struct {
+	gActExModelDo gActExModelDo
 
-	ALL             field.Asterisk
-	ID              field.String
-	TaskExecutionID field.String
-	State           field.String
-	Data            field.String
+	ALL               field.Asterisk
+	ID                field.String
+	Name              field.String
+	Description       field.String
+	WorkflowName      field.String
+	WorkflowNamespace field.String
+	WorkflowID        field.String
+	State             field.String
+	StateInfo         field.String
+	Tags              field.Field
+	RuntimeContext    field.Field
+	Spec              field.Field
+	Accepted          field.Bool
+	Input             field.Field
+	Output            field.Field
+	TaskExecutionID   field.String
+	LastHeartbeat     field.Time
+	IsSync            field.Bool
+	ProjectID         field.String
+	Scope             field.String
+	CreatedAt         field.Time
+	UpdatedAt         field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (a actionExecutionsV2) Table(newTableName string) *actionExecutionsV2 {
-	a.actionExecutionsV2Do.UseTable(newTableName)
-	return a.updateTableName(newTableName)
+func (g gActExModel) Table(newTableName string) *gActExModel {
+	g.gActExModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (a actionExecutionsV2) As(alias string) *actionExecutionsV2 {
-	a.actionExecutionsV2Do.DO = *(a.actionExecutionsV2Do.As(alias).(*gen.DO))
-	return a.updateTableName(alias)
+func (g gActExModel) As(alias string) *gActExModel {
+	g.gActExModelDo.DO = *(g.gActExModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (a *actionExecutionsV2) updateTableName(table string) *actionExecutionsV2 {
-	a.ALL = field.NewAsterisk(table)
-	a.ID = field.NewString(table, "id")
-	a.TaskExecutionID = field.NewString(table, "task_execution_id")
-	a.State = field.NewString(table, "state")
-	a.Data = field.NewString(table, "data")
+func (g *gActExModel) updateTableName(table string) *gActExModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.Name = field.NewString(table, "name")
+	g.Description = field.NewString(table, "description")
+	g.WorkflowName = field.NewString(table, "workflow_name")
+	g.WorkflowNamespace = field.NewString(table, "workflow_namespace")
+	g.WorkflowID = field.NewString(table, "workflow_id")
+	g.State = field.NewString(table, "state")
+	g.StateInfo = field.NewString(table, "state_info")
+	g.Tags = field.NewField(table, "tags")
+	g.RuntimeContext = field.NewField(table, "runtime_context")
+	g.Spec = field.NewField(table, "spec")
+	g.Accepted = field.NewBool(table, "accepted")
+	g.Input = field.NewField(table, "input")
+	g.Output = field.NewField(table, "output")
+	g.TaskExecutionID = field.NewString(table, "task_execution_id")
+	g.LastHeartbeat = field.NewTime(table, "last_heartbeat")
+	g.IsSync = field.NewBool(table, "is_sync")
+	g.ProjectID = field.NewString(table, "project_id")
+	g.Scope = field.NewString(table, "scope")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	a.fillFieldMap()
+	g.fillFieldMap()
 
-	return a
+	return g
 }
 
-func (a *actionExecutionsV2) WithContext(ctx context.Context) *actionExecutionsV2Do {
-	return a.actionExecutionsV2Do.WithContext(ctx)
+func (g *gActExModel) WithContext(ctx context.Context) *gActExModelDo {
+	return g.gActExModelDo.WithContext(ctx)
 }
 
-func (a actionExecutionsV2) TableName() string { return a.actionExecutionsV2Do.TableName() }
+func (g gActExModel) TableName() string { return g.gActExModelDo.TableName() }
 
-func (a actionExecutionsV2) Alias() string { return a.actionExecutionsV2Do.Alias() }
+func (g gActExModel) Alias() string { return g.gActExModelDo.Alias() }
 
-func (a actionExecutionsV2) Columns(cols ...field.Expr) gen.Columns {
-	return a.actionExecutionsV2Do.Columns(cols...)
-}
+func (g gActExModel) Columns(cols ...field.Expr) gen.Columns { return g.gActExModelDo.Columns(cols...) }
 
-func (a *actionExecutionsV2) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := a.fieldMap[fieldName]
+func (g *gActExModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -92,220 +140,237 @@ func (a *actionExecutionsV2) GetFieldByName(fieldName string) (field.OrderExpr, 
 	return _oe, ok
 }
 
-func (a *actionExecutionsV2) fillFieldMap() {
-	a.fieldMap = make(map[string]field.Expr, 4)
-	a.fieldMap["id"] = a.ID
-	a.fieldMap["task_execution_id"] = a.TaskExecutionID
-	a.fieldMap["state"] = a.State
-	a.fieldMap["data"] = a.Data
+func (g *gActExModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 21)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["name"] = g.Name
+	g.fieldMap["description"] = g.Description
+	g.fieldMap["workflow_name"] = g.WorkflowName
+	g.fieldMap["workflow_namespace"] = g.WorkflowNamespace
+	g.fieldMap["workflow_id"] = g.WorkflowID
+	g.fieldMap["state"] = g.State
+	g.fieldMap["state_info"] = g.StateInfo
+	g.fieldMap["tags"] = g.Tags
+	g.fieldMap["runtime_context"] = g.RuntimeContext
+	g.fieldMap["spec"] = g.Spec
+	g.fieldMap["accepted"] = g.Accepted
+	g.fieldMap["input"] = g.Input
+	g.fieldMap["output"] = g.Output
+	g.fieldMap["task_execution_id"] = g.TaskExecutionID
+	g.fieldMap["last_heartbeat"] = g.LastHeartbeat
+	g.fieldMap["is_sync"] = g.IsSync
+	g.fieldMap["project_id"] = g.ProjectID
+	g.fieldMap["scope"] = g.Scope
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (a actionExecutionsV2) clone(db *gorm.DB) actionExecutionsV2 {
-	a.actionExecutionsV2Do.ReplaceConnPool(db.Statement.ConnPool)
-	return a
+func (g gActExModel) clone(db *gorm.DB) gActExModel {
+	g.gActExModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (a actionExecutionsV2) replaceDB(db *gorm.DB) actionExecutionsV2 {
-	a.actionExecutionsV2Do.ReplaceDB(db)
-	return a
+func (g gActExModel) replaceDB(db *gorm.DB) gActExModel {
+	g.gActExModelDo.ReplaceDB(db)
+	return g
 }
 
-type actionExecutionsV2Do struct{ gen.DO }
+type gActExModelDo struct{ gen.DO }
 
-func (a actionExecutionsV2Do) Debug() *actionExecutionsV2Do {
-	return a.withDO(a.DO.Debug())
+func (g gActExModelDo) Debug() *gActExModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (a actionExecutionsV2Do) WithContext(ctx context.Context) *actionExecutionsV2Do {
-	return a.withDO(a.DO.WithContext(ctx))
+func (g gActExModelDo) WithContext(ctx context.Context) *gActExModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (a actionExecutionsV2Do) ReadDB() *actionExecutionsV2Do {
-	return a.Clauses(dbresolver.Read)
+func (g gActExModelDo) ReadDB() *gActExModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (a actionExecutionsV2Do) WriteDB() *actionExecutionsV2Do {
-	return a.Clauses(dbresolver.Write)
+func (g gActExModelDo) WriteDB() *gActExModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (a actionExecutionsV2Do) Session(config *gorm.Session) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Session(config))
+func (g gActExModelDo) Session(config *gorm.Session) *gActExModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (a actionExecutionsV2Do) Clauses(conds ...clause.Expression) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Clauses(conds...))
+func (g gActExModelDo) Clauses(conds ...clause.Expression) *gActExModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (a actionExecutionsV2Do) Returning(value interface{}, columns ...string) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Returning(value, columns...))
+func (g gActExModelDo) Returning(value interface{}, columns ...string) *gActExModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (a actionExecutionsV2Do) Not(conds ...gen.Condition) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Not(conds...))
+func (g gActExModelDo) Not(conds ...gen.Condition) *gActExModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (a actionExecutionsV2Do) Or(conds ...gen.Condition) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Or(conds...))
+func (g gActExModelDo) Or(conds ...gen.Condition) *gActExModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (a actionExecutionsV2Do) Select(conds ...field.Expr) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Select(conds...))
+func (g gActExModelDo) Select(conds ...field.Expr) *gActExModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (a actionExecutionsV2Do) Where(conds ...gen.Condition) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Where(conds...))
+func (g gActExModelDo) Where(conds ...gen.Condition) *gActExModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (a actionExecutionsV2Do) Order(conds ...field.Expr) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Order(conds...))
+func (g gActExModelDo) Order(conds ...field.Expr) *gActExModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (a actionExecutionsV2Do) Distinct(cols ...field.Expr) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Distinct(cols...))
+func (g gActExModelDo) Distinct(cols ...field.Expr) *gActExModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (a actionExecutionsV2Do) Omit(cols ...field.Expr) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Omit(cols...))
+func (g gActExModelDo) Omit(cols ...field.Expr) *gActExModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (a actionExecutionsV2Do) Join(table schema.Tabler, on ...field.Expr) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Join(table, on...))
+func (g gActExModelDo) Join(table schema.Tabler, on ...field.Expr) *gActExModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (a actionExecutionsV2Do) LeftJoin(table schema.Tabler, on ...field.Expr) *actionExecutionsV2Do {
-	return a.withDO(a.DO.LeftJoin(table, on...))
+func (g gActExModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gActExModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (a actionExecutionsV2Do) RightJoin(table schema.Tabler, on ...field.Expr) *actionExecutionsV2Do {
-	return a.withDO(a.DO.RightJoin(table, on...))
+func (g gActExModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gActExModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (a actionExecutionsV2Do) Group(cols ...field.Expr) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Group(cols...))
+func (g gActExModelDo) Group(cols ...field.Expr) *gActExModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (a actionExecutionsV2Do) Having(conds ...gen.Condition) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Having(conds...))
+func (g gActExModelDo) Having(conds ...gen.Condition) *gActExModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (a actionExecutionsV2Do) Limit(limit int) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Limit(limit))
+func (g gActExModelDo) Limit(limit int) *gActExModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (a actionExecutionsV2Do) Offset(offset int) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Offset(offset))
+func (g gActExModelDo) Offset(offset int) *gActExModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (a actionExecutionsV2Do) Scopes(funcs ...func(gen.Dao) gen.Dao) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Scopes(funcs...))
+func (g gActExModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gActExModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (a actionExecutionsV2Do) Unscoped() *actionExecutionsV2Do {
-	return a.withDO(a.DO.Unscoped())
+func (g gActExModelDo) Unscoped() *gActExModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (a actionExecutionsV2Do) Create(values ...*model.ActionExecutionsV2) error {
+func (g gActExModelDo) Create(values ...*sqlmodel.GActExModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return a.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (a actionExecutionsV2Do) CreateInBatches(values []*model.ActionExecutionsV2, batchSize int) error {
-	return a.DO.CreateInBatches(values, batchSize)
+func (g gActExModelDo) CreateInBatches(values []*sqlmodel.GActExModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (a actionExecutionsV2Do) Save(values ...*model.ActionExecutionsV2) error {
+func (g gActExModelDo) Save(values ...*sqlmodel.GActExModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return a.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (a actionExecutionsV2Do) First() (*model.ActionExecutionsV2, error) {
-	if result, err := a.DO.First(); err != nil {
+func (g gActExModelDo) First() (*sqlmodel.GActExModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ActionExecutionsV2), nil
+		return result.(*sqlmodel.GActExModel), nil
 	}
 }
 
-func (a actionExecutionsV2Do) Take() (*model.ActionExecutionsV2, error) {
-	if result, err := a.DO.Take(); err != nil {
+func (g gActExModelDo) Take() (*sqlmodel.GActExModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ActionExecutionsV2), nil
+		return result.(*sqlmodel.GActExModel), nil
 	}
 }
 
-func (a actionExecutionsV2Do) Last() (*model.ActionExecutionsV2, error) {
-	if result, err := a.DO.Last(); err != nil {
+func (g gActExModelDo) Last() (*sqlmodel.GActExModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ActionExecutionsV2), nil
+		return result.(*sqlmodel.GActExModel), nil
 	}
 }
 
-func (a actionExecutionsV2Do) Find() ([]*model.ActionExecutionsV2, error) {
-	result, err := a.DO.Find()
-	return result.([]*model.ActionExecutionsV2), err
+func (g gActExModelDo) Find() ([]*sqlmodel.GActExModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GActExModel), err
 }
 
-func (a actionExecutionsV2Do) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.ActionExecutionsV2, err error) {
-	buf := make([]*model.ActionExecutionsV2, 0, batchSize)
-	err = a.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gActExModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GActExModel, err error) {
+	buf := make([]*sqlmodel.GActExModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (a actionExecutionsV2Do) FindInBatches(result *[]*model.ActionExecutionsV2, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return a.DO.FindInBatches(result, batchSize, fc)
+func (g gActExModelDo) FindInBatches(result *[]*sqlmodel.GActExModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (a actionExecutionsV2Do) Attrs(attrs ...field.AssignExpr) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Attrs(attrs...))
+func (g gActExModelDo) Attrs(attrs ...field.AssignExpr) *gActExModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (a actionExecutionsV2Do) Assign(attrs ...field.AssignExpr) *actionExecutionsV2Do {
-	return a.withDO(a.DO.Assign(attrs...))
+func (g gActExModelDo) Assign(attrs ...field.AssignExpr) *gActExModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (a actionExecutionsV2Do) Joins(fields ...field.RelationField) *actionExecutionsV2Do {
+func (g gActExModelDo) Joins(fields ...field.RelationField) *gActExModelDo {
 	for _, _f := range fields {
-		a = *a.withDO(a.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &a
+	return &g
 }
 
-func (a actionExecutionsV2Do) Preload(fields ...field.RelationField) *actionExecutionsV2Do {
+func (g gActExModelDo) Preload(fields ...field.RelationField) *gActExModelDo {
 	for _, _f := range fields {
-		a = *a.withDO(a.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &a
+	return &g
 }
 
-func (a actionExecutionsV2Do) FirstOrInit() (*model.ActionExecutionsV2, error) {
-	if result, err := a.DO.FirstOrInit(); err != nil {
+func (g gActExModelDo) FirstOrInit() (*sqlmodel.GActExModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ActionExecutionsV2), nil
+		return result.(*sqlmodel.GActExModel), nil
 	}
 }
 
-func (a actionExecutionsV2Do) FirstOrCreate() (*model.ActionExecutionsV2, error) {
-	if result, err := a.DO.FirstOrCreate(); err != nil {
+func (g gActExModelDo) FirstOrCreate() (*sqlmodel.GActExModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ActionExecutionsV2), nil
+		return result.(*sqlmodel.GActExModel), nil
 	}
 }
 
-func (a actionExecutionsV2Do) FindByPage(offset int, limit int) (result []*model.ActionExecutionsV2, count int64, err error) {
-	result, err = a.Offset(offset).Limit(limit).Find()
+func (g gActExModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GActExModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -315,29 +380,29 @@ func (a actionExecutionsV2Do) FindByPage(offset int, limit int) (result []*model
 		return
 	}
 
-	count, err = a.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (a actionExecutionsV2Do) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = a.Count()
+func (g gActExModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = a.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (a actionExecutionsV2Do) Scan(result interface{}) (err error) {
-	return a.DO.Scan(result)
+func (g gActExModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (a actionExecutionsV2Do) Delete(models ...*model.ActionExecutionsV2) (result gen.ResultInfo, err error) {
-	return a.DO.Delete(models)
+func (g gActExModelDo) Delete(models ...*sqlmodel.GActExModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (a *actionExecutionsV2Do) withDO(do gen.Dao) *actionExecutionsV2Do {
-	a.DO = *do.(*gen.DO)
-	return a
+func (g *gActExModelDo) withDO(do gen.Dao) *gActExModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

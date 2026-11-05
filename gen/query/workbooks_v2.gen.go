@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,71 +16,95 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newWorkbooksV2(db *gorm.DB, opts ...gen.DOOption) workbooksV2 {
-	_workbooksV2 := workbooksV2{}
+func newGWorkbookModel(db *gorm.DB, opts ...gen.DOOption) gWorkbookModel {
+	_gWorkbookModel := gWorkbookModel{}
 
-	_workbooksV2.workbooksV2Do.UseDB(db, opts...)
-	_workbooksV2.workbooksV2Do.UseModel(&model.WorkbooksV2{})
+	_gWorkbookModel.gWorkbookModelDo.UseDB(db, opts...)
+	_gWorkbookModel.gWorkbookModelDo.UseModel(&sqlmodel.GWorkbookModel{})
 
-	tableName := _workbooksV2.workbooksV2Do.TableName()
-	_workbooksV2.ALL = field.NewAsterisk(tableName)
-	_workbooksV2.ID = field.NewString(tableName, "id")
-	_workbooksV2.Name = field.NewString(tableName, "name")
-	_workbooksV2.Data = field.NewString(tableName, "data")
+	tableName := _gWorkbookModel.gWorkbookModelDo.TableName()
+	_gWorkbookModel.ALL = field.NewAsterisk(tableName)
+	_gWorkbookModel.ID = field.NewString(tableName, "id")
+	_gWorkbookModel.Name = field.NewString(tableName, "name")
+	_gWorkbookModel.Namespace = field.NewString(tableName, "namespace")
+	_gWorkbookModel.Definition = field.NewString(tableName, "definition")
+	_gWorkbookModel.Spec = field.NewField(tableName, "spec")
+	_gWorkbookModel.Tags = field.NewField(tableName, "tags")
+	_gWorkbookModel.IsSystem = field.NewBool(tableName, "is_system")
+	_gWorkbookModel.ProjectID = field.NewString(tableName, "project_id")
+	_gWorkbookModel.Scope = field.NewString(tableName, "scope")
+	_gWorkbookModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gWorkbookModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_workbooksV2.fillFieldMap()
+	_gWorkbookModel.fillFieldMap()
 
-	return _workbooksV2
+	return _gWorkbookModel
 }
 
-type workbooksV2 struct {
-	workbooksV2Do workbooksV2Do
+type gWorkbookModel struct {
+	gWorkbookModelDo gWorkbookModelDo
 
-	ALL  field.Asterisk
-	ID   field.String
-	Name field.String
-	Data field.String
+	ALL        field.Asterisk
+	ID         field.String
+	Name       field.String
+	Namespace  field.String
+	Definition field.String
+	Spec       field.Field
+	Tags       field.Field
+	IsSystem   field.Bool
+	ProjectID  field.String
+	Scope      field.String
+	CreatedAt  field.Time
+	UpdatedAt  field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (w workbooksV2) Table(newTableName string) *workbooksV2 {
-	w.workbooksV2Do.UseTable(newTableName)
-	return w.updateTableName(newTableName)
+func (g gWorkbookModel) Table(newTableName string) *gWorkbookModel {
+	g.gWorkbookModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (w workbooksV2) As(alias string) *workbooksV2 {
-	w.workbooksV2Do.DO = *(w.workbooksV2Do.As(alias).(*gen.DO))
-	return w.updateTableName(alias)
+func (g gWorkbookModel) As(alias string) *gWorkbookModel {
+	g.gWorkbookModelDo.DO = *(g.gWorkbookModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (w *workbooksV2) updateTableName(table string) *workbooksV2 {
-	w.ALL = field.NewAsterisk(table)
-	w.ID = field.NewString(table, "id")
-	w.Name = field.NewString(table, "name")
-	w.Data = field.NewString(table, "data")
+func (g *gWorkbookModel) updateTableName(table string) *gWorkbookModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.Name = field.NewString(table, "name")
+	g.Namespace = field.NewString(table, "namespace")
+	g.Definition = field.NewString(table, "definition")
+	g.Spec = field.NewField(table, "spec")
+	g.Tags = field.NewField(table, "tags")
+	g.IsSystem = field.NewBool(table, "is_system")
+	g.ProjectID = field.NewString(table, "project_id")
+	g.Scope = field.NewString(table, "scope")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	w.fillFieldMap()
+	g.fillFieldMap()
 
-	return w
+	return g
 }
 
-func (w *workbooksV2) WithContext(ctx context.Context) *workbooksV2Do {
-	return w.workbooksV2Do.WithContext(ctx)
+func (g *gWorkbookModel) WithContext(ctx context.Context) *gWorkbookModelDo {
+	return g.gWorkbookModelDo.WithContext(ctx)
 }
 
-func (w workbooksV2) TableName() string { return w.workbooksV2Do.TableName() }
+func (g gWorkbookModel) TableName() string { return g.gWorkbookModelDo.TableName() }
 
-func (w workbooksV2) Alias() string { return w.workbooksV2Do.Alias() }
+func (g gWorkbookModel) Alias() string { return g.gWorkbookModelDo.Alias() }
 
-func (w workbooksV2) Columns(cols ...field.Expr) gen.Columns { return w.workbooksV2Do.Columns(cols...) }
+func (g gWorkbookModel) Columns(cols ...field.Expr) gen.Columns {
+	return g.gWorkbookModelDo.Columns(cols...)
+}
 
-func (w *workbooksV2) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := w.fieldMap[fieldName]
+func (g *gWorkbookModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -87,219 +112,227 @@ func (w *workbooksV2) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
 	return _oe, ok
 }
 
-func (w *workbooksV2) fillFieldMap() {
-	w.fieldMap = make(map[string]field.Expr, 3)
-	w.fieldMap["id"] = w.ID
-	w.fieldMap["name"] = w.Name
-	w.fieldMap["data"] = w.Data
+func (g *gWorkbookModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 11)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["name"] = g.Name
+	g.fieldMap["namespace"] = g.Namespace
+	g.fieldMap["definition"] = g.Definition
+	g.fieldMap["spec"] = g.Spec
+	g.fieldMap["tags"] = g.Tags
+	g.fieldMap["is_system"] = g.IsSystem
+	g.fieldMap["project_id"] = g.ProjectID
+	g.fieldMap["scope"] = g.Scope
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (w workbooksV2) clone(db *gorm.DB) workbooksV2 {
-	w.workbooksV2Do.ReplaceConnPool(db.Statement.ConnPool)
-	return w
+func (g gWorkbookModel) clone(db *gorm.DB) gWorkbookModel {
+	g.gWorkbookModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (w workbooksV2) replaceDB(db *gorm.DB) workbooksV2 {
-	w.workbooksV2Do.ReplaceDB(db)
-	return w
+func (g gWorkbookModel) replaceDB(db *gorm.DB) gWorkbookModel {
+	g.gWorkbookModelDo.ReplaceDB(db)
+	return g
 }
 
-type workbooksV2Do struct{ gen.DO }
+type gWorkbookModelDo struct{ gen.DO }
 
-func (w workbooksV2Do) Debug() *workbooksV2Do {
-	return w.withDO(w.DO.Debug())
+func (g gWorkbookModelDo) Debug() *gWorkbookModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (w workbooksV2Do) WithContext(ctx context.Context) *workbooksV2Do {
-	return w.withDO(w.DO.WithContext(ctx))
+func (g gWorkbookModelDo) WithContext(ctx context.Context) *gWorkbookModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (w workbooksV2Do) ReadDB() *workbooksV2Do {
-	return w.Clauses(dbresolver.Read)
+func (g gWorkbookModelDo) ReadDB() *gWorkbookModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (w workbooksV2Do) WriteDB() *workbooksV2Do {
-	return w.Clauses(dbresolver.Write)
+func (g gWorkbookModelDo) WriteDB() *gWorkbookModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (w workbooksV2Do) Session(config *gorm.Session) *workbooksV2Do {
-	return w.withDO(w.DO.Session(config))
+func (g gWorkbookModelDo) Session(config *gorm.Session) *gWorkbookModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (w workbooksV2Do) Clauses(conds ...clause.Expression) *workbooksV2Do {
-	return w.withDO(w.DO.Clauses(conds...))
+func (g gWorkbookModelDo) Clauses(conds ...clause.Expression) *gWorkbookModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (w workbooksV2Do) Returning(value interface{}, columns ...string) *workbooksV2Do {
-	return w.withDO(w.DO.Returning(value, columns...))
+func (g gWorkbookModelDo) Returning(value interface{}, columns ...string) *gWorkbookModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (w workbooksV2Do) Not(conds ...gen.Condition) *workbooksV2Do {
-	return w.withDO(w.DO.Not(conds...))
+func (g gWorkbookModelDo) Not(conds ...gen.Condition) *gWorkbookModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (w workbooksV2Do) Or(conds ...gen.Condition) *workbooksV2Do {
-	return w.withDO(w.DO.Or(conds...))
+func (g gWorkbookModelDo) Or(conds ...gen.Condition) *gWorkbookModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (w workbooksV2Do) Select(conds ...field.Expr) *workbooksV2Do {
-	return w.withDO(w.DO.Select(conds...))
+func (g gWorkbookModelDo) Select(conds ...field.Expr) *gWorkbookModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (w workbooksV2Do) Where(conds ...gen.Condition) *workbooksV2Do {
-	return w.withDO(w.DO.Where(conds...))
+func (g gWorkbookModelDo) Where(conds ...gen.Condition) *gWorkbookModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (w workbooksV2Do) Order(conds ...field.Expr) *workbooksV2Do {
-	return w.withDO(w.DO.Order(conds...))
+func (g gWorkbookModelDo) Order(conds ...field.Expr) *gWorkbookModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (w workbooksV2Do) Distinct(cols ...field.Expr) *workbooksV2Do {
-	return w.withDO(w.DO.Distinct(cols...))
+func (g gWorkbookModelDo) Distinct(cols ...field.Expr) *gWorkbookModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (w workbooksV2Do) Omit(cols ...field.Expr) *workbooksV2Do {
-	return w.withDO(w.DO.Omit(cols...))
+func (g gWorkbookModelDo) Omit(cols ...field.Expr) *gWorkbookModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (w workbooksV2Do) Join(table schema.Tabler, on ...field.Expr) *workbooksV2Do {
-	return w.withDO(w.DO.Join(table, on...))
+func (g gWorkbookModelDo) Join(table schema.Tabler, on ...field.Expr) *gWorkbookModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (w workbooksV2Do) LeftJoin(table schema.Tabler, on ...field.Expr) *workbooksV2Do {
-	return w.withDO(w.DO.LeftJoin(table, on...))
+func (g gWorkbookModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gWorkbookModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (w workbooksV2Do) RightJoin(table schema.Tabler, on ...field.Expr) *workbooksV2Do {
-	return w.withDO(w.DO.RightJoin(table, on...))
+func (g gWorkbookModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gWorkbookModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (w workbooksV2Do) Group(cols ...field.Expr) *workbooksV2Do {
-	return w.withDO(w.DO.Group(cols...))
+func (g gWorkbookModelDo) Group(cols ...field.Expr) *gWorkbookModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (w workbooksV2Do) Having(conds ...gen.Condition) *workbooksV2Do {
-	return w.withDO(w.DO.Having(conds...))
+func (g gWorkbookModelDo) Having(conds ...gen.Condition) *gWorkbookModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (w workbooksV2Do) Limit(limit int) *workbooksV2Do {
-	return w.withDO(w.DO.Limit(limit))
+func (g gWorkbookModelDo) Limit(limit int) *gWorkbookModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (w workbooksV2Do) Offset(offset int) *workbooksV2Do {
-	return w.withDO(w.DO.Offset(offset))
+func (g gWorkbookModelDo) Offset(offset int) *gWorkbookModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (w workbooksV2Do) Scopes(funcs ...func(gen.Dao) gen.Dao) *workbooksV2Do {
-	return w.withDO(w.DO.Scopes(funcs...))
+func (g gWorkbookModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gWorkbookModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (w workbooksV2Do) Unscoped() *workbooksV2Do {
-	return w.withDO(w.DO.Unscoped())
+func (g gWorkbookModelDo) Unscoped() *gWorkbookModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (w workbooksV2Do) Create(values ...*model.WorkbooksV2) error {
+func (g gWorkbookModelDo) Create(values ...*sqlmodel.GWorkbookModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return w.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (w workbooksV2Do) CreateInBatches(values []*model.WorkbooksV2, batchSize int) error {
-	return w.DO.CreateInBatches(values, batchSize)
+func (g gWorkbookModelDo) CreateInBatches(values []*sqlmodel.GWorkbookModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (w workbooksV2Do) Save(values ...*model.WorkbooksV2) error {
+func (g gWorkbookModelDo) Save(values ...*sqlmodel.GWorkbookModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return w.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (w workbooksV2Do) First() (*model.WorkbooksV2, error) {
-	if result, err := w.DO.First(); err != nil {
+func (g gWorkbookModelDo) First() (*sqlmodel.GWorkbookModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkbooksV2), nil
+		return result.(*sqlmodel.GWorkbookModel), nil
 	}
 }
 
-func (w workbooksV2Do) Take() (*model.WorkbooksV2, error) {
-	if result, err := w.DO.Take(); err != nil {
+func (g gWorkbookModelDo) Take() (*sqlmodel.GWorkbookModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkbooksV2), nil
+		return result.(*sqlmodel.GWorkbookModel), nil
 	}
 }
 
-func (w workbooksV2Do) Last() (*model.WorkbooksV2, error) {
-	if result, err := w.DO.Last(); err != nil {
+func (g gWorkbookModelDo) Last() (*sqlmodel.GWorkbookModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkbooksV2), nil
+		return result.(*sqlmodel.GWorkbookModel), nil
 	}
 }
 
-func (w workbooksV2Do) Find() ([]*model.WorkbooksV2, error) {
-	result, err := w.DO.Find()
-	return result.([]*model.WorkbooksV2), err
+func (g gWorkbookModelDo) Find() ([]*sqlmodel.GWorkbookModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GWorkbookModel), err
 }
 
-func (w workbooksV2Do) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.WorkbooksV2, err error) {
-	buf := make([]*model.WorkbooksV2, 0, batchSize)
-	err = w.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gWorkbookModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GWorkbookModel, err error) {
+	buf := make([]*sqlmodel.GWorkbookModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (w workbooksV2Do) FindInBatches(result *[]*model.WorkbooksV2, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return w.DO.FindInBatches(result, batchSize, fc)
+func (g gWorkbookModelDo) FindInBatches(result *[]*sqlmodel.GWorkbookModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (w workbooksV2Do) Attrs(attrs ...field.AssignExpr) *workbooksV2Do {
-	return w.withDO(w.DO.Attrs(attrs...))
+func (g gWorkbookModelDo) Attrs(attrs ...field.AssignExpr) *gWorkbookModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (w workbooksV2Do) Assign(attrs ...field.AssignExpr) *workbooksV2Do {
-	return w.withDO(w.DO.Assign(attrs...))
+func (g gWorkbookModelDo) Assign(attrs ...field.AssignExpr) *gWorkbookModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (w workbooksV2Do) Joins(fields ...field.RelationField) *workbooksV2Do {
+func (g gWorkbookModelDo) Joins(fields ...field.RelationField) *gWorkbookModelDo {
 	for _, _f := range fields {
-		w = *w.withDO(w.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &w
+	return &g
 }
 
-func (w workbooksV2Do) Preload(fields ...field.RelationField) *workbooksV2Do {
+func (g gWorkbookModelDo) Preload(fields ...field.RelationField) *gWorkbookModelDo {
 	for _, _f := range fields {
-		w = *w.withDO(w.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &w
+	return &g
 }
 
-func (w workbooksV2Do) FirstOrInit() (*model.WorkbooksV2, error) {
-	if result, err := w.DO.FirstOrInit(); err != nil {
+func (g gWorkbookModelDo) FirstOrInit() (*sqlmodel.GWorkbookModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkbooksV2), nil
+		return result.(*sqlmodel.GWorkbookModel), nil
 	}
 }
 
-func (w workbooksV2Do) FirstOrCreate() (*model.WorkbooksV2, error) {
-	if result, err := w.DO.FirstOrCreate(); err != nil {
+func (g gWorkbookModelDo) FirstOrCreate() (*sqlmodel.GWorkbookModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkbooksV2), nil
+		return result.(*sqlmodel.GWorkbookModel), nil
 	}
 }
 
-func (w workbooksV2Do) FindByPage(offset int, limit int) (result []*model.WorkbooksV2, count int64, err error) {
-	result, err = w.Offset(offset).Limit(limit).Find()
+func (g gWorkbookModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GWorkbookModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -309,29 +342,29 @@ func (w workbooksV2Do) FindByPage(offset int, limit int) (result []*model.Workbo
 		return
 	}
 
-	count, err = w.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (w workbooksV2Do) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = w.Count()
+func (g gWorkbookModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = w.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (w workbooksV2Do) Scan(result interface{}) (err error) {
-	return w.DO.Scan(result)
+func (g gWorkbookModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (w workbooksV2Do) Delete(models ...*model.WorkbooksV2) (result gen.ResultInfo, err error) {
-	return w.DO.Delete(models)
+func (g gWorkbookModelDo) Delete(models ...*sqlmodel.GWorkbookModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (w *workbooksV2Do) withDO(do gen.Dao) *workbooksV2Do {
-	w.DO = *do.(*gen.DO)
-	return w
+func (g *gWorkbookModelDo) withDO(do gen.Dao) *gWorkbookModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

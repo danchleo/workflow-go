@@ -24,14 +24,13 @@
 package db
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/danchleo/workflow-go/gen/model"
 	"github.com/danchleo/workflow-go/gen/query"
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
@@ -99,11 +98,12 @@ func NewSQLStore(dsn string) (Store, error) {
 	}
 
 	if err := gormDB.AutoMigrate(
-		&model.WorkflowDefinitionsV2{}, &model.ActionDefinitionsV2{}, &model.WorkflowExecutionsV2{},
-		&model.TaskExecutionsV2{}, &model.ActionExecutionsV2{}, &model.EnvironmentsV2{},
-		&model.CronTriggersV2{}, &model.ScheduledJobsV2{}, &model.WorkbooksV2{},
-		&model.DynamicActionDefinition{}, &model.EventTriggersV2{}, &model.ResourceMembersV2{},
-		&model.NamedLock{}, &model.CodeSource{}, &model.MistralMetric{}, &model.DelayedCallsV2{},
+		&sqlmodel.GWorkbookModel{}, &sqlmodel.GWfDefModel{}, &sqlmodel.GActDefModel{},
+		&sqlmodel.GWfExModel{}, &sqlmodel.GTaskExModel{}, &sqlmodel.GActExModel{},
+		&sqlmodel.GEnvModel{}, &sqlmodel.GCronTriggerModel{}, &sqlmodel.GScheduledJobModel{},
+		&sqlmodel.GNamedLockModel{}, &sqlmodel.GDynamicActionDefModel{}, &sqlmodel.GCodeSourceModel{},
+		&sqlmodel.GEventTriggerModel{}, &sqlmodel.GResourceMemberModel{}, &sqlmodel.GMetricsModel{},
+		&sqlmodel.GDelayedCallModel{},
 	); err != nil {
 		return nil, fmt.Errorf("autmigrate: %w", err)
 	}
@@ -306,95 +306,6 @@ func (s *sqlStore) RunInTransaction(fn func(Store) error) error {
 	}
 }
 
-// --- JSON helpers: serialize interface{} to/from TEXT columns ---
-
-func jsonMarshal(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	b, _ := json.Marshal(v)
-	return string(b)
-}
-func jsonUnmarshal(s string, out interface{}) {
-	if s == "" {
-		return
-	}
-	_ = json.Unmarshal([]byte(s), out)
-}
-
-// --- Blob-pattern GORM models (defers detailed mapping to sql_stores.go) ---
-
-type gWorkbook struct {
-	ID   string `gorm:"primaryKey"`
-	Name string `gorm:"index"`
-	Data string
-}
-
-func (gWorkbook) TableName() string { return "workbooks_v2" }
-
-type gDynamicActionDef struct {
-	ID   string `gorm:"primaryKey"`
-	Name string `gorm:"index"`
-	Data string
-}
-
-func (gDynamicActionDef) TableName() string { return "dynamic_action_definitions" }
-
-type gEventTrigger struct {
-	ID   string `gorm:"primaryKey"`
-	Name string `gorm:"index"`
-	Data string
-}
-
-func (gEventTrigger) TableName() string { return "event_triggers_v2" }
-
-type gResourceMember struct {
-	ID   string `gorm:"primaryKey"`
-	Data string
-}
-
-func (gResourceMember) TableName() string { return "resource_members_v2" }
-
-type gNamedLock struct {
-	ID   string `gorm:"primaryKey"`
-	Name string `gorm:"uniqueIndex"`
-}
-
-func (gNamedLock) TableName() string { return "named_locks" }
-
-type gCodeSource struct {
-	ID   string `gorm:"primaryKey"`
-	Name string `gorm:"index"`
-	Data string
-}
-
-func (gCodeSource) TableName() string { return "code_sources" }
-
-type gMetrics struct {
-	ID    int    `gorm:"primaryKey;autoIncrement"`
-	Name  string `gorm:"uniqueIndex"`
-	Value string
-}
-
-func (gMetrics) TableName() string { return "mistral_metrics" }
-
-// gDelayedCall mirrors Python DelayedCall (mistral/db/v2/sqlalchemy/models.py).
-// Python uses this for scheduler-queued tasks; our scheduler uses scheduled_jobs_v2
-// instead, but we keep the table for full schema parity.
-type gDelayedCall struct {
-	ID              string    `gorm:"primaryKey;size:36"`
-	FactoryMethod   string    `gorm:"size:200"`
-	TargetMethod    string    `gorm:"size:80;not null"`
-	MethodArguments string    `gorm:"type:text"`
-	Serializers     string    `gorm:"type:text"`
-	Key             string    `gorm:"size:250"`
-	AuthContext     string    `gorm:"type:text"`
-	ExecutionTime   time.Time `gorm:"not null;index"`
-	Processing      bool      `gorm:"default:false;not null"`
-}
-
-func (gDelayedCall) TableName() string { return "delayed_calls_v2" }
-
 // --- sqlNamedLock: cross-process lock via named_locks table ---
 //
 // Mirrors Python reference/db/v2/sqlalchemy/api.py named_lock():
@@ -434,7 +345,7 @@ func (l *sqlNamedLock) Lock() {
 	// on INSERT conflict automatically — no retry needed there.
 	for {
 		id := GenerateID()
-		res := lockTx.Create(&gNamedLock{ID: id, Name: l.name})
+		res := lockTx.Create(&sqlmodel.GNamedLockModel{ID: id, Name: l.name})
 		if res.Error == nil {
 			l.lockID = id
 			l.held = true
@@ -452,6 +363,6 @@ func (l *sqlNamedLock) Unlock() {
 		return
 	}
 	lockTx := l.store.currentDB()
-	lockTx.Delete(&gNamedLock{}, "id = ?", l.lockID)
+	lockTx.Delete(&sqlmodel.GNamedLockModel{}, "id = ?", l.lockID)
 	l.held = false
 }

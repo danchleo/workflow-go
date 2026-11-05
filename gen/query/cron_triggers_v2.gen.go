@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,79 +16,110 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newCronTriggersV2(db *gorm.DB, opts ...gen.DOOption) cronTriggersV2 {
-	_cronTriggersV2 := cronTriggersV2{}
+func newGCronTriggerModel(db *gorm.DB, opts ...gen.DOOption) gCronTriggerModel {
+	_gCronTriggerModel := gCronTriggerModel{}
 
-	_cronTriggersV2.cronTriggersV2Do.UseDB(db, opts...)
-	_cronTriggersV2.cronTriggersV2Do.UseModel(&model.CronTriggersV2{})
+	_gCronTriggerModel.gCronTriggerModelDo.UseDB(db, opts...)
+	_gCronTriggerModel.gCronTriggerModelDo.UseModel(&sqlmodel.GCronTriggerModel{})
 
-	tableName := _cronTriggersV2.cronTriggersV2Do.TableName()
-	_cronTriggersV2.ALL = field.NewAsterisk(tableName)
-	_cronTriggersV2.ID = field.NewString(tableName, "id")
-	_cronTriggersV2.Name = field.NewString(tableName, "name")
-	_cronTriggersV2.NextExecutionTime = field.NewString(tableName, "next_execution_time")
-	_cronTriggersV2.RemainingExecutions = field.NewInt64(tableName, "remaining_executions")
-	_cronTriggersV2.Data = field.NewString(tableName, "data")
+	tableName := _gCronTriggerModel.gCronTriggerModelDo.TableName()
+	_gCronTriggerModel.ALL = field.NewAsterisk(tableName)
+	_gCronTriggerModel.ID = field.NewString(tableName, "id")
+	_gCronTriggerModel.Name = field.NewString(tableName, "name")
+	_gCronTriggerModel.Pattern = field.NewString(tableName, "pattern")
+	_gCronTriggerModel.IntervalSeconds = field.NewInt(tableName, "interval_seconds")
+	_gCronTriggerModel.FirstExecutionTime = field.NewTime(tableName, "first_execution_time")
+	_gCronTriggerModel.NextExecutionTime = field.NewTime(tableName, "next_execution_time")
+	_gCronTriggerModel.WorkflowName = field.NewString(tableName, "workflow_name")
+	_gCronTriggerModel.RemainingExecutions = field.NewInt(tableName, "remaining_executions")
+	_gCronTriggerModel.WorkflowID = field.NewString(tableName, "workflow_id")
+	_gCronTriggerModel.WorkflowParams = field.NewField(tableName, "workflow_params")
+	_gCronTriggerModel.WorkflowInput = field.NewField(tableName, "workflow_input")
+	_gCronTriggerModel.TrustID = field.NewString(tableName, "trust_id")
+	_gCronTriggerModel.ProjectID = field.NewString(tableName, "project_id")
+	_gCronTriggerModel.Scope = field.NewString(tableName, "scope")
+	_gCronTriggerModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gCronTriggerModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_cronTriggersV2.fillFieldMap()
+	_gCronTriggerModel.fillFieldMap()
 
-	return _cronTriggersV2
+	return _gCronTriggerModel
 }
 
-type cronTriggersV2 struct {
-	cronTriggersV2Do cronTriggersV2Do
+type gCronTriggerModel struct {
+	gCronTriggerModelDo gCronTriggerModelDo
 
 	ALL                 field.Asterisk
 	ID                  field.String
 	Name                field.String
-	NextExecutionTime   field.String
-	RemainingExecutions field.Int64
-	Data                field.String
+	Pattern             field.String
+	IntervalSeconds     field.Int
+	FirstExecutionTime  field.Time
+	NextExecutionTime   field.Time
+	WorkflowName        field.String
+	RemainingExecutions field.Int
+	WorkflowID          field.String
+	WorkflowParams      field.Field
+	WorkflowInput       field.Field
+	TrustID             field.String
+	ProjectID           field.String
+	Scope               field.String
+	CreatedAt           field.Time
+	UpdatedAt           field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (c cronTriggersV2) Table(newTableName string) *cronTriggersV2 {
-	c.cronTriggersV2Do.UseTable(newTableName)
-	return c.updateTableName(newTableName)
+func (g gCronTriggerModel) Table(newTableName string) *gCronTriggerModel {
+	g.gCronTriggerModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (c cronTriggersV2) As(alias string) *cronTriggersV2 {
-	c.cronTriggersV2Do.DO = *(c.cronTriggersV2Do.As(alias).(*gen.DO))
-	return c.updateTableName(alias)
+func (g gCronTriggerModel) As(alias string) *gCronTriggerModel {
+	g.gCronTriggerModelDo.DO = *(g.gCronTriggerModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (c *cronTriggersV2) updateTableName(table string) *cronTriggersV2 {
-	c.ALL = field.NewAsterisk(table)
-	c.ID = field.NewString(table, "id")
-	c.Name = field.NewString(table, "name")
-	c.NextExecutionTime = field.NewString(table, "next_execution_time")
-	c.RemainingExecutions = field.NewInt64(table, "remaining_executions")
-	c.Data = field.NewString(table, "data")
+func (g *gCronTriggerModel) updateTableName(table string) *gCronTriggerModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.Name = field.NewString(table, "name")
+	g.Pattern = field.NewString(table, "pattern")
+	g.IntervalSeconds = field.NewInt(table, "interval_seconds")
+	g.FirstExecutionTime = field.NewTime(table, "first_execution_time")
+	g.NextExecutionTime = field.NewTime(table, "next_execution_time")
+	g.WorkflowName = field.NewString(table, "workflow_name")
+	g.RemainingExecutions = field.NewInt(table, "remaining_executions")
+	g.WorkflowID = field.NewString(table, "workflow_id")
+	g.WorkflowParams = field.NewField(table, "workflow_params")
+	g.WorkflowInput = field.NewField(table, "workflow_input")
+	g.TrustID = field.NewString(table, "trust_id")
+	g.ProjectID = field.NewString(table, "project_id")
+	g.Scope = field.NewString(table, "scope")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	c.fillFieldMap()
+	g.fillFieldMap()
 
-	return c
+	return g
 }
 
-func (c *cronTriggersV2) WithContext(ctx context.Context) *cronTriggersV2Do {
-	return c.cronTriggersV2Do.WithContext(ctx)
+func (g *gCronTriggerModel) WithContext(ctx context.Context) *gCronTriggerModelDo {
+	return g.gCronTriggerModelDo.WithContext(ctx)
 }
 
-func (c cronTriggersV2) TableName() string { return c.cronTriggersV2Do.TableName() }
+func (g gCronTriggerModel) TableName() string { return g.gCronTriggerModelDo.TableName() }
 
-func (c cronTriggersV2) Alias() string { return c.cronTriggersV2Do.Alias() }
+func (g gCronTriggerModel) Alias() string { return g.gCronTriggerModelDo.Alias() }
 
-func (c cronTriggersV2) Columns(cols ...field.Expr) gen.Columns {
-	return c.cronTriggersV2Do.Columns(cols...)
+func (g gCronTriggerModel) Columns(cols ...field.Expr) gen.Columns {
+	return g.gCronTriggerModelDo.Columns(cols...)
 }
 
-func (c *cronTriggersV2) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := c.fieldMap[fieldName]
+func (g *gCronTriggerModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -95,221 +127,232 @@ func (c *cronTriggersV2) GetFieldByName(fieldName string) (field.OrderExpr, bool
 	return _oe, ok
 }
 
-func (c *cronTriggersV2) fillFieldMap() {
-	c.fieldMap = make(map[string]field.Expr, 5)
-	c.fieldMap["id"] = c.ID
-	c.fieldMap["name"] = c.Name
-	c.fieldMap["next_execution_time"] = c.NextExecutionTime
-	c.fieldMap["remaining_executions"] = c.RemainingExecutions
-	c.fieldMap["data"] = c.Data
+func (g *gCronTriggerModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 16)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["name"] = g.Name
+	g.fieldMap["pattern"] = g.Pattern
+	g.fieldMap["interval_seconds"] = g.IntervalSeconds
+	g.fieldMap["first_execution_time"] = g.FirstExecutionTime
+	g.fieldMap["next_execution_time"] = g.NextExecutionTime
+	g.fieldMap["workflow_name"] = g.WorkflowName
+	g.fieldMap["remaining_executions"] = g.RemainingExecutions
+	g.fieldMap["workflow_id"] = g.WorkflowID
+	g.fieldMap["workflow_params"] = g.WorkflowParams
+	g.fieldMap["workflow_input"] = g.WorkflowInput
+	g.fieldMap["trust_id"] = g.TrustID
+	g.fieldMap["project_id"] = g.ProjectID
+	g.fieldMap["scope"] = g.Scope
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (c cronTriggersV2) clone(db *gorm.DB) cronTriggersV2 {
-	c.cronTriggersV2Do.ReplaceConnPool(db.Statement.ConnPool)
-	return c
+func (g gCronTriggerModel) clone(db *gorm.DB) gCronTriggerModel {
+	g.gCronTriggerModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (c cronTriggersV2) replaceDB(db *gorm.DB) cronTriggersV2 {
-	c.cronTriggersV2Do.ReplaceDB(db)
-	return c
+func (g gCronTriggerModel) replaceDB(db *gorm.DB) gCronTriggerModel {
+	g.gCronTriggerModelDo.ReplaceDB(db)
+	return g
 }
 
-type cronTriggersV2Do struct{ gen.DO }
+type gCronTriggerModelDo struct{ gen.DO }
 
-func (c cronTriggersV2Do) Debug() *cronTriggersV2Do {
-	return c.withDO(c.DO.Debug())
+func (g gCronTriggerModelDo) Debug() *gCronTriggerModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (c cronTriggersV2Do) WithContext(ctx context.Context) *cronTriggersV2Do {
-	return c.withDO(c.DO.WithContext(ctx))
+func (g gCronTriggerModelDo) WithContext(ctx context.Context) *gCronTriggerModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (c cronTriggersV2Do) ReadDB() *cronTriggersV2Do {
-	return c.Clauses(dbresolver.Read)
+func (g gCronTriggerModelDo) ReadDB() *gCronTriggerModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (c cronTriggersV2Do) WriteDB() *cronTriggersV2Do {
-	return c.Clauses(dbresolver.Write)
+func (g gCronTriggerModelDo) WriteDB() *gCronTriggerModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (c cronTriggersV2Do) Session(config *gorm.Session) *cronTriggersV2Do {
-	return c.withDO(c.DO.Session(config))
+func (g gCronTriggerModelDo) Session(config *gorm.Session) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (c cronTriggersV2Do) Clauses(conds ...clause.Expression) *cronTriggersV2Do {
-	return c.withDO(c.DO.Clauses(conds...))
+func (g gCronTriggerModelDo) Clauses(conds ...clause.Expression) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (c cronTriggersV2Do) Returning(value interface{}, columns ...string) *cronTriggersV2Do {
-	return c.withDO(c.DO.Returning(value, columns...))
+func (g gCronTriggerModelDo) Returning(value interface{}, columns ...string) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (c cronTriggersV2Do) Not(conds ...gen.Condition) *cronTriggersV2Do {
-	return c.withDO(c.DO.Not(conds...))
+func (g gCronTriggerModelDo) Not(conds ...gen.Condition) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (c cronTriggersV2Do) Or(conds ...gen.Condition) *cronTriggersV2Do {
-	return c.withDO(c.DO.Or(conds...))
+func (g gCronTriggerModelDo) Or(conds ...gen.Condition) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (c cronTriggersV2Do) Select(conds ...field.Expr) *cronTriggersV2Do {
-	return c.withDO(c.DO.Select(conds...))
+func (g gCronTriggerModelDo) Select(conds ...field.Expr) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (c cronTriggersV2Do) Where(conds ...gen.Condition) *cronTriggersV2Do {
-	return c.withDO(c.DO.Where(conds...))
+func (g gCronTriggerModelDo) Where(conds ...gen.Condition) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (c cronTriggersV2Do) Order(conds ...field.Expr) *cronTriggersV2Do {
-	return c.withDO(c.DO.Order(conds...))
+func (g gCronTriggerModelDo) Order(conds ...field.Expr) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (c cronTriggersV2Do) Distinct(cols ...field.Expr) *cronTriggersV2Do {
-	return c.withDO(c.DO.Distinct(cols...))
+func (g gCronTriggerModelDo) Distinct(cols ...field.Expr) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (c cronTriggersV2Do) Omit(cols ...field.Expr) *cronTriggersV2Do {
-	return c.withDO(c.DO.Omit(cols...))
+func (g gCronTriggerModelDo) Omit(cols ...field.Expr) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (c cronTriggersV2Do) Join(table schema.Tabler, on ...field.Expr) *cronTriggersV2Do {
-	return c.withDO(c.DO.Join(table, on...))
+func (g gCronTriggerModelDo) Join(table schema.Tabler, on ...field.Expr) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (c cronTriggersV2Do) LeftJoin(table schema.Tabler, on ...field.Expr) *cronTriggersV2Do {
-	return c.withDO(c.DO.LeftJoin(table, on...))
+func (g gCronTriggerModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gCronTriggerModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (c cronTriggersV2Do) RightJoin(table schema.Tabler, on ...field.Expr) *cronTriggersV2Do {
-	return c.withDO(c.DO.RightJoin(table, on...))
+func (g gCronTriggerModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gCronTriggerModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (c cronTriggersV2Do) Group(cols ...field.Expr) *cronTriggersV2Do {
-	return c.withDO(c.DO.Group(cols...))
+func (g gCronTriggerModelDo) Group(cols ...field.Expr) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (c cronTriggersV2Do) Having(conds ...gen.Condition) *cronTriggersV2Do {
-	return c.withDO(c.DO.Having(conds...))
+func (g gCronTriggerModelDo) Having(conds ...gen.Condition) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (c cronTriggersV2Do) Limit(limit int) *cronTriggersV2Do {
-	return c.withDO(c.DO.Limit(limit))
+func (g gCronTriggerModelDo) Limit(limit int) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (c cronTriggersV2Do) Offset(offset int) *cronTriggersV2Do {
-	return c.withDO(c.DO.Offset(offset))
+func (g gCronTriggerModelDo) Offset(offset int) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (c cronTriggersV2Do) Scopes(funcs ...func(gen.Dao) gen.Dao) *cronTriggersV2Do {
-	return c.withDO(c.DO.Scopes(funcs...))
+func (g gCronTriggerModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (c cronTriggersV2Do) Unscoped() *cronTriggersV2Do {
-	return c.withDO(c.DO.Unscoped())
+func (g gCronTriggerModelDo) Unscoped() *gCronTriggerModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (c cronTriggersV2Do) Create(values ...*model.CronTriggersV2) error {
+func (g gCronTriggerModelDo) Create(values ...*sqlmodel.GCronTriggerModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return c.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (c cronTriggersV2Do) CreateInBatches(values []*model.CronTriggersV2, batchSize int) error {
-	return c.DO.CreateInBatches(values, batchSize)
+func (g gCronTriggerModelDo) CreateInBatches(values []*sqlmodel.GCronTriggerModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (c cronTriggersV2Do) Save(values ...*model.CronTriggersV2) error {
+func (g gCronTriggerModelDo) Save(values ...*sqlmodel.GCronTriggerModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return c.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (c cronTriggersV2Do) First() (*model.CronTriggersV2, error) {
-	if result, err := c.DO.First(); err != nil {
+func (g gCronTriggerModelDo) First() (*sqlmodel.GCronTriggerModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.CronTriggersV2), nil
+		return result.(*sqlmodel.GCronTriggerModel), nil
 	}
 }
 
-func (c cronTriggersV2Do) Take() (*model.CronTriggersV2, error) {
-	if result, err := c.DO.Take(); err != nil {
+func (g gCronTriggerModelDo) Take() (*sqlmodel.GCronTriggerModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.CronTriggersV2), nil
+		return result.(*sqlmodel.GCronTriggerModel), nil
 	}
 }
 
-func (c cronTriggersV2Do) Last() (*model.CronTriggersV2, error) {
-	if result, err := c.DO.Last(); err != nil {
+func (g gCronTriggerModelDo) Last() (*sqlmodel.GCronTriggerModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.CronTriggersV2), nil
+		return result.(*sqlmodel.GCronTriggerModel), nil
 	}
 }
 
-func (c cronTriggersV2Do) Find() ([]*model.CronTriggersV2, error) {
-	result, err := c.DO.Find()
-	return result.([]*model.CronTriggersV2), err
+func (g gCronTriggerModelDo) Find() ([]*sqlmodel.GCronTriggerModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GCronTriggerModel), err
 }
 
-func (c cronTriggersV2Do) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.CronTriggersV2, err error) {
-	buf := make([]*model.CronTriggersV2, 0, batchSize)
-	err = c.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gCronTriggerModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GCronTriggerModel, err error) {
+	buf := make([]*sqlmodel.GCronTriggerModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (c cronTriggersV2Do) FindInBatches(result *[]*model.CronTriggersV2, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return c.DO.FindInBatches(result, batchSize, fc)
+func (g gCronTriggerModelDo) FindInBatches(result *[]*sqlmodel.GCronTriggerModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (c cronTriggersV2Do) Attrs(attrs ...field.AssignExpr) *cronTriggersV2Do {
-	return c.withDO(c.DO.Attrs(attrs...))
+func (g gCronTriggerModelDo) Attrs(attrs ...field.AssignExpr) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (c cronTriggersV2Do) Assign(attrs ...field.AssignExpr) *cronTriggersV2Do {
-	return c.withDO(c.DO.Assign(attrs...))
+func (g gCronTriggerModelDo) Assign(attrs ...field.AssignExpr) *gCronTriggerModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (c cronTriggersV2Do) Joins(fields ...field.RelationField) *cronTriggersV2Do {
+func (g gCronTriggerModelDo) Joins(fields ...field.RelationField) *gCronTriggerModelDo {
 	for _, _f := range fields {
-		c = *c.withDO(c.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &c
+	return &g
 }
 
-func (c cronTriggersV2Do) Preload(fields ...field.RelationField) *cronTriggersV2Do {
+func (g gCronTriggerModelDo) Preload(fields ...field.RelationField) *gCronTriggerModelDo {
 	for _, _f := range fields {
-		c = *c.withDO(c.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &c
+	return &g
 }
 
-func (c cronTriggersV2Do) FirstOrInit() (*model.CronTriggersV2, error) {
-	if result, err := c.DO.FirstOrInit(); err != nil {
+func (g gCronTriggerModelDo) FirstOrInit() (*sqlmodel.GCronTriggerModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.CronTriggersV2), nil
+		return result.(*sqlmodel.GCronTriggerModel), nil
 	}
 }
 
-func (c cronTriggersV2Do) FirstOrCreate() (*model.CronTriggersV2, error) {
-	if result, err := c.DO.FirstOrCreate(); err != nil {
+func (g gCronTriggerModelDo) FirstOrCreate() (*sqlmodel.GCronTriggerModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.CronTriggersV2), nil
+		return result.(*sqlmodel.GCronTriggerModel), nil
 	}
 }
 
-func (c cronTriggersV2Do) FindByPage(offset int, limit int) (result []*model.CronTriggersV2, count int64, err error) {
-	result, err = c.Offset(offset).Limit(limit).Find()
+func (g gCronTriggerModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GCronTriggerModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -319,29 +362,29 @@ func (c cronTriggersV2Do) FindByPage(offset int, limit int) (result []*model.Cro
 		return
 	}
 
-	count, err = c.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (c cronTriggersV2Do) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = c.Count()
+func (g gCronTriggerModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = c.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (c cronTriggersV2Do) Scan(result interface{}) (err error) {
-	return c.DO.Scan(result)
+func (g gCronTriggerModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (c cronTriggersV2Do) Delete(models ...*model.CronTriggersV2) (result gen.ResultInfo, err error) {
-	return c.DO.Delete(models)
+func (g gCronTriggerModelDo) Delete(models ...*sqlmodel.GCronTriggerModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (c *cronTriggersV2Do) withDO(do gen.Dao) *cronTriggersV2Do {
-	c.DO = *do.(*gen.DO)
-	return c
+func (g *gCronTriggerModelDo) withDO(do gen.Dao) *gCronTriggerModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

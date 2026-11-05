@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,79 +16,146 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newTaskExecutionsV2(db *gorm.DB, opts ...gen.DOOption) taskExecutionsV2 {
-	_taskExecutionsV2 := taskExecutionsV2{}
+func newGTaskExModel(db *gorm.DB, opts ...gen.DOOption) gTaskExModel {
+	_gTaskExModel := gTaskExModel{}
 
-	_taskExecutionsV2.taskExecutionsV2Do.UseDB(db, opts...)
-	_taskExecutionsV2.taskExecutionsV2Do.UseModel(&model.TaskExecutionsV2{})
+	_gTaskExModel.gTaskExModelDo.UseDB(db, opts...)
+	_gTaskExModel.gTaskExModelDo.UseModel(&sqlmodel.GTaskExModel{})
 
-	tableName := _taskExecutionsV2.taskExecutionsV2Do.TableName()
-	_taskExecutionsV2.ALL = field.NewAsterisk(tableName)
-	_taskExecutionsV2.ID = field.NewString(tableName, "id")
-	_taskExecutionsV2.WorkflowExecutionID = field.NewString(tableName, "workflow_execution_id")
-	_taskExecutionsV2.UniqueKey = field.NewString(tableName, "unique_key")
-	_taskExecutionsV2.State = field.NewString(tableName, "state")
-	_taskExecutionsV2.Data = field.NewString(tableName, "data")
+	tableName := _gTaskExModel.gTaskExModelDo.TableName()
+	_gTaskExModel.ALL = field.NewAsterisk(tableName)
+	_gTaskExModel.ID = field.NewString(tableName, "id")
+	_gTaskExModel.Name = field.NewString(tableName, "name")
+	_gTaskExModel.Description = field.NewString(tableName, "description")
+	_gTaskExModel.WorkflowName = field.NewString(tableName, "workflow_name")
+	_gTaskExModel.WorkflowNamespace = field.NewString(tableName, "workflow_namespace")
+	_gTaskExModel.WorkflowID = field.NewString(tableName, "workflow_id")
+	_gTaskExModel.State = field.NewString(tableName, "state")
+	_gTaskExModel.StateInfo = field.NewString(tableName, "state_info")
+	_gTaskExModel.Tags = field.NewField(tableName, "tags")
+	_gTaskExModel.RuntimeContext = field.NewField(tableName, "runtime_context")
+	_gTaskExModel.Spec = field.NewField(tableName, "spec")
+	_gTaskExModel.ActionSpec = field.NewField(tableName, "action_spec")
+	_gTaskExModel.UniqueKey = field.NewString(tableName, "unique_key")
+	_gTaskExModel.Type = field.NewString(tableName, "type")
+	_gTaskExModel.StartedAt = field.NewTime(tableName, "started_at")
+	_gTaskExModel.FinishedAt = field.NewTime(tableName, "finished_at")
+	_gTaskExModel.Processed = field.NewBool(tableName, "processed")
+	_gTaskExModel.HasNextTasks = field.NewBool(tableName, "has_next_tasks")
+	_gTaskExModel.NextTasks = field.NewField(tableName, "next_tasks")
+	_gTaskExModel.ErrorHandled = field.NewBool(tableName, "error_handled")
+	_gTaskExModel.InContext = field.NewField(tableName, "in_context")
+	_gTaskExModel.Published = field.NewField(tableName, "published")
+	_gTaskExModel.Output = field.NewField(tableName, "output")
+	_gTaskExModel.WorkflowExecutionID = field.NewString(tableName, "workflow_execution_id")
+	_gTaskExModel.ProjectID = field.NewString(tableName, "project_id")
+	_gTaskExModel.Scope = field.NewString(tableName, "scope")
+	_gTaskExModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gTaskExModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_taskExecutionsV2.fillFieldMap()
+	_gTaskExModel.fillFieldMap()
 
-	return _taskExecutionsV2
+	return _gTaskExModel
 }
 
-type taskExecutionsV2 struct {
-	taskExecutionsV2Do taskExecutionsV2Do
+type gTaskExModel struct {
+	gTaskExModelDo gTaskExModelDo
 
 	ALL                 field.Asterisk
 	ID                  field.String
-	WorkflowExecutionID field.String
-	UniqueKey           field.String
+	Name                field.String
+	Description         field.String
+	WorkflowName        field.String
+	WorkflowNamespace   field.String
+	WorkflowID          field.String
 	State               field.String
-	Data                field.String
+	StateInfo           field.String
+	Tags                field.Field
+	RuntimeContext      field.Field
+	Spec                field.Field
+	ActionSpec          field.Field
+	UniqueKey           field.String
+	Type                field.String
+	StartedAt           field.Time
+	FinishedAt          field.Time
+	Processed           field.Bool
+	HasNextTasks        field.Bool
+	NextTasks           field.Field
+	ErrorHandled        field.Bool
+	InContext           field.Field
+	Published           field.Field
+	Output              field.Field
+	WorkflowExecutionID field.String
+	ProjectID           field.String
+	Scope               field.String
+	CreatedAt           field.Time
+	UpdatedAt           field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (t taskExecutionsV2) Table(newTableName string) *taskExecutionsV2 {
-	t.taskExecutionsV2Do.UseTable(newTableName)
-	return t.updateTableName(newTableName)
+func (g gTaskExModel) Table(newTableName string) *gTaskExModel {
+	g.gTaskExModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (t taskExecutionsV2) As(alias string) *taskExecutionsV2 {
-	t.taskExecutionsV2Do.DO = *(t.taskExecutionsV2Do.As(alias).(*gen.DO))
-	return t.updateTableName(alias)
+func (g gTaskExModel) As(alias string) *gTaskExModel {
+	g.gTaskExModelDo.DO = *(g.gTaskExModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (t *taskExecutionsV2) updateTableName(table string) *taskExecutionsV2 {
-	t.ALL = field.NewAsterisk(table)
-	t.ID = field.NewString(table, "id")
-	t.WorkflowExecutionID = field.NewString(table, "workflow_execution_id")
-	t.UniqueKey = field.NewString(table, "unique_key")
-	t.State = field.NewString(table, "state")
-	t.Data = field.NewString(table, "data")
+func (g *gTaskExModel) updateTableName(table string) *gTaskExModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.Name = field.NewString(table, "name")
+	g.Description = field.NewString(table, "description")
+	g.WorkflowName = field.NewString(table, "workflow_name")
+	g.WorkflowNamespace = field.NewString(table, "workflow_namespace")
+	g.WorkflowID = field.NewString(table, "workflow_id")
+	g.State = field.NewString(table, "state")
+	g.StateInfo = field.NewString(table, "state_info")
+	g.Tags = field.NewField(table, "tags")
+	g.RuntimeContext = field.NewField(table, "runtime_context")
+	g.Spec = field.NewField(table, "spec")
+	g.ActionSpec = field.NewField(table, "action_spec")
+	g.UniqueKey = field.NewString(table, "unique_key")
+	g.Type = field.NewString(table, "type")
+	g.StartedAt = field.NewTime(table, "started_at")
+	g.FinishedAt = field.NewTime(table, "finished_at")
+	g.Processed = field.NewBool(table, "processed")
+	g.HasNextTasks = field.NewBool(table, "has_next_tasks")
+	g.NextTasks = field.NewField(table, "next_tasks")
+	g.ErrorHandled = field.NewBool(table, "error_handled")
+	g.InContext = field.NewField(table, "in_context")
+	g.Published = field.NewField(table, "published")
+	g.Output = field.NewField(table, "output")
+	g.WorkflowExecutionID = field.NewString(table, "workflow_execution_id")
+	g.ProjectID = field.NewString(table, "project_id")
+	g.Scope = field.NewString(table, "scope")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	t.fillFieldMap()
+	g.fillFieldMap()
 
-	return t
+	return g
 }
 
-func (t *taskExecutionsV2) WithContext(ctx context.Context) *taskExecutionsV2Do {
-	return t.taskExecutionsV2Do.WithContext(ctx)
+func (g *gTaskExModel) WithContext(ctx context.Context) *gTaskExModelDo {
+	return g.gTaskExModelDo.WithContext(ctx)
 }
 
-func (t taskExecutionsV2) TableName() string { return t.taskExecutionsV2Do.TableName() }
+func (g gTaskExModel) TableName() string { return g.gTaskExModelDo.TableName() }
 
-func (t taskExecutionsV2) Alias() string { return t.taskExecutionsV2Do.Alias() }
+func (g gTaskExModel) Alias() string { return g.gTaskExModelDo.Alias() }
 
-func (t taskExecutionsV2) Columns(cols ...field.Expr) gen.Columns {
-	return t.taskExecutionsV2Do.Columns(cols...)
+func (g gTaskExModel) Columns(cols ...field.Expr) gen.Columns {
+	return g.gTaskExModelDo.Columns(cols...)
 }
 
-func (t *taskExecutionsV2) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := t.fieldMap[fieldName]
+func (g *gTaskExModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -95,221 +163,244 @@ func (t *taskExecutionsV2) GetFieldByName(fieldName string) (field.OrderExpr, bo
 	return _oe, ok
 }
 
-func (t *taskExecutionsV2) fillFieldMap() {
-	t.fieldMap = make(map[string]field.Expr, 5)
-	t.fieldMap["id"] = t.ID
-	t.fieldMap["workflow_execution_id"] = t.WorkflowExecutionID
-	t.fieldMap["unique_key"] = t.UniqueKey
-	t.fieldMap["state"] = t.State
-	t.fieldMap["data"] = t.Data
+func (g *gTaskExModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 28)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["name"] = g.Name
+	g.fieldMap["description"] = g.Description
+	g.fieldMap["workflow_name"] = g.WorkflowName
+	g.fieldMap["workflow_namespace"] = g.WorkflowNamespace
+	g.fieldMap["workflow_id"] = g.WorkflowID
+	g.fieldMap["state"] = g.State
+	g.fieldMap["state_info"] = g.StateInfo
+	g.fieldMap["tags"] = g.Tags
+	g.fieldMap["runtime_context"] = g.RuntimeContext
+	g.fieldMap["spec"] = g.Spec
+	g.fieldMap["action_spec"] = g.ActionSpec
+	g.fieldMap["unique_key"] = g.UniqueKey
+	g.fieldMap["type"] = g.Type
+	g.fieldMap["started_at"] = g.StartedAt
+	g.fieldMap["finished_at"] = g.FinishedAt
+	g.fieldMap["processed"] = g.Processed
+	g.fieldMap["has_next_tasks"] = g.HasNextTasks
+	g.fieldMap["next_tasks"] = g.NextTasks
+	g.fieldMap["error_handled"] = g.ErrorHandled
+	g.fieldMap["in_context"] = g.InContext
+	g.fieldMap["published"] = g.Published
+	g.fieldMap["output"] = g.Output
+	g.fieldMap["workflow_execution_id"] = g.WorkflowExecutionID
+	g.fieldMap["project_id"] = g.ProjectID
+	g.fieldMap["scope"] = g.Scope
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (t taskExecutionsV2) clone(db *gorm.DB) taskExecutionsV2 {
-	t.taskExecutionsV2Do.ReplaceConnPool(db.Statement.ConnPool)
-	return t
+func (g gTaskExModel) clone(db *gorm.DB) gTaskExModel {
+	g.gTaskExModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (t taskExecutionsV2) replaceDB(db *gorm.DB) taskExecutionsV2 {
-	t.taskExecutionsV2Do.ReplaceDB(db)
-	return t
+func (g gTaskExModel) replaceDB(db *gorm.DB) gTaskExModel {
+	g.gTaskExModelDo.ReplaceDB(db)
+	return g
 }
 
-type taskExecutionsV2Do struct{ gen.DO }
+type gTaskExModelDo struct{ gen.DO }
 
-func (t taskExecutionsV2Do) Debug() *taskExecutionsV2Do {
-	return t.withDO(t.DO.Debug())
+func (g gTaskExModelDo) Debug() *gTaskExModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (t taskExecutionsV2Do) WithContext(ctx context.Context) *taskExecutionsV2Do {
-	return t.withDO(t.DO.WithContext(ctx))
+func (g gTaskExModelDo) WithContext(ctx context.Context) *gTaskExModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (t taskExecutionsV2Do) ReadDB() *taskExecutionsV2Do {
-	return t.Clauses(dbresolver.Read)
+func (g gTaskExModelDo) ReadDB() *gTaskExModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (t taskExecutionsV2Do) WriteDB() *taskExecutionsV2Do {
-	return t.Clauses(dbresolver.Write)
+func (g gTaskExModelDo) WriteDB() *gTaskExModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (t taskExecutionsV2Do) Session(config *gorm.Session) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Session(config))
+func (g gTaskExModelDo) Session(config *gorm.Session) *gTaskExModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (t taskExecutionsV2Do) Clauses(conds ...clause.Expression) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Clauses(conds...))
+func (g gTaskExModelDo) Clauses(conds ...clause.Expression) *gTaskExModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (t taskExecutionsV2Do) Returning(value interface{}, columns ...string) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Returning(value, columns...))
+func (g gTaskExModelDo) Returning(value interface{}, columns ...string) *gTaskExModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (t taskExecutionsV2Do) Not(conds ...gen.Condition) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Not(conds...))
+func (g gTaskExModelDo) Not(conds ...gen.Condition) *gTaskExModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (t taskExecutionsV2Do) Or(conds ...gen.Condition) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Or(conds...))
+func (g gTaskExModelDo) Or(conds ...gen.Condition) *gTaskExModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (t taskExecutionsV2Do) Select(conds ...field.Expr) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Select(conds...))
+func (g gTaskExModelDo) Select(conds ...field.Expr) *gTaskExModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (t taskExecutionsV2Do) Where(conds ...gen.Condition) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Where(conds...))
+func (g gTaskExModelDo) Where(conds ...gen.Condition) *gTaskExModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (t taskExecutionsV2Do) Order(conds ...field.Expr) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Order(conds...))
+func (g gTaskExModelDo) Order(conds ...field.Expr) *gTaskExModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (t taskExecutionsV2Do) Distinct(cols ...field.Expr) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Distinct(cols...))
+func (g gTaskExModelDo) Distinct(cols ...field.Expr) *gTaskExModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (t taskExecutionsV2Do) Omit(cols ...field.Expr) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Omit(cols...))
+func (g gTaskExModelDo) Omit(cols ...field.Expr) *gTaskExModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (t taskExecutionsV2Do) Join(table schema.Tabler, on ...field.Expr) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Join(table, on...))
+func (g gTaskExModelDo) Join(table schema.Tabler, on ...field.Expr) *gTaskExModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (t taskExecutionsV2Do) LeftJoin(table schema.Tabler, on ...field.Expr) *taskExecutionsV2Do {
-	return t.withDO(t.DO.LeftJoin(table, on...))
+func (g gTaskExModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gTaskExModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (t taskExecutionsV2Do) RightJoin(table schema.Tabler, on ...field.Expr) *taskExecutionsV2Do {
-	return t.withDO(t.DO.RightJoin(table, on...))
+func (g gTaskExModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gTaskExModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (t taskExecutionsV2Do) Group(cols ...field.Expr) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Group(cols...))
+func (g gTaskExModelDo) Group(cols ...field.Expr) *gTaskExModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (t taskExecutionsV2Do) Having(conds ...gen.Condition) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Having(conds...))
+func (g gTaskExModelDo) Having(conds ...gen.Condition) *gTaskExModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (t taskExecutionsV2Do) Limit(limit int) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Limit(limit))
+func (g gTaskExModelDo) Limit(limit int) *gTaskExModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (t taskExecutionsV2Do) Offset(offset int) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Offset(offset))
+func (g gTaskExModelDo) Offset(offset int) *gTaskExModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (t taskExecutionsV2Do) Scopes(funcs ...func(gen.Dao) gen.Dao) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Scopes(funcs...))
+func (g gTaskExModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gTaskExModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (t taskExecutionsV2Do) Unscoped() *taskExecutionsV2Do {
-	return t.withDO(t.DO.Unscoped())
+func (g gTaskExModelDo) Unscoped() *gTaskExModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (t taskExecutionsV2Do) Create(values ...*model.TaskExecutionsV2) error {
+func (g gTaskExModelDo) Create(values ...*sqlmodel.GTaskExModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return t.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (t taskExecutionsV2Do) CreateInBatches(values []*model.TaskExecutionsV2, batchSize int) error {
-	return t.DO.CreateInBatches(values, batchSize)
+func (g gTaskExModelDo) CreateInBatches(values []*sqlmodel.GTaskExModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (t taskExecutionsV2Do) Save(values ...*model.TaskExecutionsV2) error {
+func (g gTaskExModelDo) Save(values ...*sqlmodel.GTaskExModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return t.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (t taskExecutionsV2Do) First() (*model.TaskExecutionsV2, error) {
-	if result, err := t.DO.First(); err != nil {
+func (g gTaskExModelDo) First() (*sqlmodel.GTaskExModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.TaskExecutionsV2), nil
+		return result.(*sqlmodel.GTaskExModel), nil
 	}
 }
 
-func (t taskExecutionsV2Do) Take() (*model.TaskExecutionsV2, error) {
-	if result, err := t.DO.Take(); err != nil {
+func (g gTaskExModelDo) Take() (*sqlmodel.GTaskExModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.TaskExecutionsV2), nil
+		return result.(*sqlmodel.GTaskExModel), nil
 	}
 }
 
-func (t taskExecutionsV2Do) Last() (*model.TaskExecutionsV2, error) {
-	if result, err := t.DO.Last(); err != nil {
+func (g gTaskExModelDo) Last() (*sqlmodel.GTaskExModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.TaskExecutionsV2), nil
+		return result.(*sqlmodel.GTaskExModel), nil
 	}
 }
 
-func (t taskExecutionsV2Do) Find() ([]*model.TaskExecutionsV2, error) {
-	result, err := t.DO.Find()
-	return result.([]*model.TaskExecutionsV2), err
+func (g gTaskExModelDo) Find() ([]*sqlmodel.GTaskExModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GTaskExModel), err
 }
 
-func (t taskExecutionsV2Do) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.TaskExecutionsV2, err error) {
-	buf := make([]*model.TaskExecutionsV2, 0, batchSize)
-	err = t.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gTaskExModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GTaskExModel, err error) {
+	buf := make([]*sqlmodel.GTaskExModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (t taskExecutionsV2Do) FindInBatches(result *[]*model.TaskExecutionsV2, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return t.DO.FindInBatches(result, batchSize, fc)
+func (g gTaskExModelDo) FindInBatches(result *[]*sqlmodel.GTaskExModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (t taskExecutionsV2Do) Attrs(attrs ...field.AssignExpr) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Attrs(attrs...))
+func (g gTaskExModelDo) Attrs(attrs ...field.AssignExpr) *gTaskExModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (t taskExecutionsV2Do) Assign(attrs ...field.AssignExpr) *taskExecutionsV2Do {
-	return t.withDO(t.DO.Assign(attrs...))
+func (g gTaskExModelDo) Assign(attrs ...field.AssignExpr) *gTaskExModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (t taskExecutionsV2Do) Joins(fields ...field.RelationField) *taskExecutionsV2Do {
+func (g gTaskExModelDo) Joins(fields ...field.RelationField) *gTaskExModelDo {
 	for _, _f := range fields {
-		t = *t.withDO(t.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &t
+	return &g
 }
 
-func (t taskExecutionsV2Do) Preload(fields ...field.RelationField) *taskExecutionsV2Do {
+func (g gTaskExModelDo) Preload(fields ...field.RelationField) *gTaskExModelDo {
 	for _, _f := range fields {
-		t = *t.withDO(t.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &t
+	return &g
 }
 
-func (t taskExecutionsV2Do) FirstOrInit() (*model.TaskExecutionsV2, error) {
-	if result, err := t.DO.FirstOrInit(); err != nil {
+func (g gTaskExModelDo) FirstOrInit() (*sqlmodel.GTaskExModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.TaskExecutionsV2), nil
+		return result.(*sqlmodel.GTaskExModel), nil
 	}
 }
 
-func (t taskExecutionsV2Do) FirstOrCreate() (*model.TaskExecutionsV2, error) {
-	if result, err := t.DO.FirstOrCreate(); err != nil {
+func (g gTaskExModelDo) FirstOrCreate() (*sqlmodel.GTaskExModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.TaskExecutionsV2), nil
+		return result.(*sqlmodel.GTaskExModel), nil
 	}
 }
 
-func (t taskExecutionsV2Do) FindByPage(offset int, limit int) (result []*model.TaskExecutionsV2, count int64, err error) {
-	result, err = t.Offset(offset).Limit(limit).Find()
+func (g gTaskExModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GTaskExModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -319,29 +410,29 @@ func (t taskExecutionsV2Do) FindByPage(offset int, limit int) (result []*model.T
 		return
 	}
 
-	count, err = t.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (t taskExecutionsV2Do) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = t.Count()
+func (g gTaskExModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = t.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (t taskExecutionsV2Do) Scan(result interface{}) (err error) {
-	return t.DO.Scan(result)
+func (g gTaskExModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (t taskExecutionsV2Do) Delete(models ...*model.TaskExecutionsV2) (result gen.ResultInfo, err error) {
-	return t.DO.Delete(models)
+func (g gTaskExModelDo) Delete(models ...*sqlmodel.GTaskExModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (t *taskExecutionsV2Do) withDO(do gen.Dao) *taskExecutionsV2Do {
-	t.DO = *do.(*gen.DO)
-	return t
+func (g *gTaskExModelDo) withDO(do gen.Dao) *gTaskExModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

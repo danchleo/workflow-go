@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,73 +16,92 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newDynamicActionDefinition(db *gorm.DB, opts ...gen.DOOption) dynamicActionDefinition {
-	_dynamicActionDefinition := dynamicActionDefinition{}
+func newGDynamicActionDefModel(db *gorm.DB, opts ...gen.DOOption) gDynamicActionDefModel {
+	_gDynamicActionDefModel := gDynamicActionDefModel{}
 
-	_dynamicActionDefinition.dynamicActionDefinitionDo.UseDB(db, opts...)
-	_dynamicActionDefinition.dynamicActionDefinitionDo.UseModel(&model.DynamicActionDefinition{})
+	_gDynamicActionDefModel.gDynamicActionDefModelDo.UseDB(db, opts...)
+	_gDynamicActionDefModel.gDynamicActionDefModelDo.UseModel(&sqlmodel.GDynamicActionDefModel{})
 
-	tableName := _dynamicActionDefinition.dynamicActionDefinitionDo.TableName()
-	_dynamicActionDefinition.ALL = field.NewAsterisk(tableName)
-	_dynamicActionDefinition.ID = field.NewString(tableName, "id")
-	_dynamicActionDefinition.Name = field.NewString(tableName, "name")
-	_dynamicActionDefinition.Data = field.NewString(tableName, "data")
+	tableName := _gDynamicActionDefModel.gDynamicActionDefModelDo.TableName()
+	_gDynamicActionDefModel.ALL = field.NewAsterisk(tableName)
+	_gDynamicActionDefModel.ID = field.NewString(tableName, "id")
+	_gDynamicActionDefModel.Name = field.NewString(tableName, "name")
+	_gDynamicActionDefModel.Namespace = field.NewString(tableName, "namespace")
+	_gDynamicActionDefModel.ClassName = field.NewString(tableName, "class_name")
+	_gDynamicActionDefModel.CodeSourceName = field.NewString(tableName, "code_source_name")
+	_gDynamicActionDefModel.CodeSourceID = field.NewString(tableName, "code_source_id")
+	_gDynamicActionDefModel.ProjectID = field.NewString(tableName, "project_id")
+	_gDynamicActionDefModel.Scope = field.NewString(tableName, "scope")
+	_gDynamicActionDefModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gDynamicActionDefModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_dynamicActionDefinition.fillFieldMap()
+	_gDynamicActionDefModel.fillFieldMap()
 
-	return _dynamicActionDefinition
+	return _gDynamicActionDefModel
 }
 
-type dynamicActionDefinition struct {
-	dynamicActionDefinitionDo dynamicActionDefinitionDo
+type gDynamicActionDefModel struct {
+	gDynamicActionDefModelDo gDynamicActionDefModelDo
 
-	ALL  field.Asterisk
-	ID   field.String
-	Name field.String
-	Data field.String
+	ALL            field.Asterisk
+	ID             field.String
+	Name           field.String
+	Namespace      field.String
+	ClassName      field.String
+	CodeSourceName field.String
+	CodeSourceID   field.String
+	ProjectID      field.String
+	Scope          field.String
+	CreatedAt      field.Time
+	UpdatedAt      field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (d dynamicActionDefinition) Table(newTableName string) *dynamicActionDefinition {
-	d.dynamicActionDefinitionDo.UseTable(newTableName)
-	return d.updateTableName(newTableName)
+func (g gDynamicActionDefModel) Table(newTableName string) *gDynamicActionDefModel {
+	g.gDynamicActionDefModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (d dynamicActionDefinition) As(alias string) *dynamicActionDefinition {
-	d.dynamicActionDefinitionDo.DO = *(d.dynamicActionDefinitionDo.As(alias).(*gen.DO))
-	return d.updateTableName(alias)
+func (g gDynamicActionDefModel) As(alias string) *gDynamicActionDefModel {
+	g.gDynamicActionDefModelDo.DO = *(g.gDynamicActionDefModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (d *dynamicActionDefinition) updateTableName(table string) *dynamicActionDefinition {
-	d.ALL = field.NewAsterisk(table)
-	d.ID = field.NewString(table, "id")
-	d.Name = field.NewString(table, "name")
-	d.Data = field.NewString(table, "data")
+func (g *gDynamicActionDefModel) updateTableName(table string) *gDynamicActionDefModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.Name = field.NewString(table, "name")
+	g.Namespace = field.NewString(table, "namespace")
+	g.ClassName = field.NewString(table, "class_name")
+	g.CodeSourceName = field.NewString(table, "code_source_name")
+	g.CodeSourceID = field.NewString(table, "code_source_id")
+	g.ProjectID = field.NewString(table, "project_id")
+	g.Scope = field.NewString(table, "scope")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	d.fillFieldMap()
+	g.fillFieldMap()
 
-	return d
+	return g
 }
 
-func (d *dynamicActionDefinition) WithContext(ctx context.Context) *dynamicActionDefinitionDo {
-	return d.dynamicActionDefinitionDo.WithContext(ctx)
+func (g *gDynamicActionDefModel) WithContext(ctx context.Context) *gDynamicActionDefModelDo {
+	return g.gDynamicActionDefModelDo.WithContext(ctx)
 }
 
-func (d dynamicActionDefinition) TableName() string { return d.dynamicActionDefinitionDo.TableName() }
+func (g gDynamicActionDefModel) TableName() string { return g.gDynamicActionDefModelDo.TableName() }
 
-func (d dynamicActionDefinition) Alias() string { return d.dynamicActionDefinitionDo.Alias() }
+func (g gDynamicActionDefModel) Alias() string { return g.gDynamicActionDefModelDo.Alias() }
 
-func (d dynamicActionDefinition) Columns(cols ...field.Expr) gen.Columns {
-	return d.dynamicActionDefinitionDo.Columns(cols...)
+func (g gDynamicActionDefModel) Columns(cols ...field.Expr) gen.Columns {
+	return g.gDynamicActionDefModelDo.Columns(cols...)
 }
 
-func (d *dynamicActionDefinition) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := d.fieldMap[fieldName]
+func (g *gDynamicActionDefModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -89,219 +109,226 @@ func (d *dynamicActionDefinition) GetFieldByName(fieldName string) (field.OrderE
 	return _oe, ok
 }
 
-func (d *dynamicActionDefinition) fillFieldMap() {
-	d.fieldMap = make(map[string]field.Expr, 3)
-	d.fieldMap["id"] = d.ID
-	d.fieldMap["name"] = d.Name
-	d.fieldMap["data"] = d.Data
+func (g *gDynamicActionDefModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 10)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["name"] = g.Name
+	g.fieldMap["namespace"] = g.Namespace
+	g.fieldMap["class_name"] = g.ClassName
+	g.fieldMap["code_source_name"] = g.CodeSourceName
+	g.fieldMap["code_source_id"] = g.CodeSourceID
+	g.fieldMap["project_id"] = g.ProjectID
+	g.fieldMap["scope"] = g.Scope
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (d dynamicActionDefinition) clone(db *gorm.DB) dynamicActionDefinition {
-	d.dynamicActionDefinitionDo.ReplaceConnPool(db.Statement.ConnPool)
-	return d
+func (g gDynamicActionDefModel) clone(db *gorm.DB) gDynamicActionDefModel {
+	g.gDynamicActionDefModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (d dynamicActionDefinition) replaceDB(db *gorm.DB) dynamicActionDefinition {
-	d.dynamicActionDefinitionDo.ReplaceDB(db)
-	return d
+func (g gDynamicActionDefModel) replaceDB(db *gorm.DB) gDynamicActionDefModel {
+	g.gDynamicActionDefModelDo.ReplaceDB(db)
+	return g
 }
 
-type dynamicActionDefinitionDo struct{ gen.DO }
+type gDynamicActionDefModelDo struct{ gen.DO }
 
-func (d dynamicActionDefinitionDo) Debug() *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Debug())
+func (g gDynamicActionDefModelDo) Debug() *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (d dynamicActionDefinitionDo) WithContext(ctx context.Context) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.WithContext(ctx))
+func (g gDynamicActionDefModelDo) WithContext(ctx context.Context) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (d dynamicActionDefinitionDo) ReadDB() *dynamicActionDefinitionDo {
-	return d.Clauses(dbresolver.Read)
+func (g gDynamicActionDefModelDo) ReadDB() *gDynamicActionDefModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (d dynamicActionDefinitionDo) WriteDB() *dynamicActionDefinitionDo {
-	return d.Clauses(dbresolver.Write)
+func (g gDynamicActionDefModelDo) WriteDB() *gDynamicActionDefModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (d dynamicActionDefinitionDo) Session(config *gorm.Session) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Session(config))
+func (g gDynamicActionDefModelDo) Session(config *gorm.Session) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (d dynamicActionDefinitionDo) Clauses(conds ...clause.Expression) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Clauses(conds...))
+func (g gDynamicActionDefModelDo) Clauses(conds ...clause.Expression) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (d dynamicActionDefinitionDo) Returning(value interface{}, columns ...string) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Returning(value, columns...))
+func (g gDynamicActionDefModelDo) Returning(value interface{}, columns ...string) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (d dynamicActionDefinitionDo) Not(conds ...gen.Condition) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Not(conds...))
+func (g gDynamicActionDefModelDo) Not(conds ...gen.Condition) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (d dynamicActionDefinitionDo) Or(conds ...gen.Condition) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Or(conds...))
+func (g gDynamicActionDefModelDo) Or(conds ...gen.Condition) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (d dynamicActionDefinitionDo) Select(conds ...field.Expr) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Select(conds...))
+func (g gDynamicActionDefModelDo) Select(conds ...field.Expr) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (d dynamicActionDefinitionDo) Where(conds ...gen.Condition) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Where(conds...))
+func (g gDynamicActionDefModelDo) Where(conds ...gen.Condition) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (d dynamicActionDefinitionDo) Order(conds ...field.Expr) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Order(conds...))
+func (g gDynamicActionDefModelDo) Order(conds ...field.Expr) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (d dynamicActionDefinitionDo) Distinct(cols ...field.Expr) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Distinct(cols...))
+func (g gDynamicActionDefModelDo) Distinct(cols ...field.Expr) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (d dynamicActionDefinitionDo) Omit(cols ...field.Expr) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Omit(cols...))
+func (g gDynamicActionDefModelDo) Omit(cols ...field.Expr) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (d dynamicActionDefinitionDo) Join(table schema.Tabler, on ...field.Expr) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Join(table, on...))
+func (g gDynamicActionDefModelDo) Join(table schema.Tabler, on ...field.Expr) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (d dynamicActionDefinitionDo) LeftJoin(table schema.Tabler, on ...field.Expr) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.LeftJoin(table, on...))
+func (g gDynamicActionDefModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (d dynamicActionDefinitionDo) RightJoin(table schema.Tabler, on ...field.Expr) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.RightJoin(table, on...))
+func (g gDynamicActionDefModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (d dynamicActionDefinitionDo) Group(cols ...field.Expr) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Group(cols...))
+func (g gDynamicActionDefModelDo) Group(cols ...field.Expr) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (d dynamicActionDefinitionDo) Having(conds ...gen.Condition) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Having(conds...))
+func (g gDynamicActionDefModelDo) Having(conds ...gen.Condition) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (d dynamicActionDefinitionDo) Limit(limit int) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Limit(limit))
+func (g gDynamicActionDefModelDo) Limit(limit int) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (d dynamicActionDefinitionDo) Offset(offset int) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Offset(offset))
+func (g gDynamicActionDefModelDo) Offset(offset int) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (d dynamicActionDefinitionDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Scopes(funcs...))
+func (g gDynamicActionDefModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (d dynamicActionDefinitionDo) Unscoped() *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Unscoped())
+func (g gDynamicActionDefModelDo) Unscoped() *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (d dynamicActionDefinitionDo) Create(values ...*model.DynamicActionDefinition) error {
+func (g gDynamicActionDefModelDo) Create(values ...*sqlmodel.GDynamicActionDefModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return d.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (d dynamicActionDefinitionDo) CreateInBatches(values []*model.DynamicActionDefinition, batchSize int) error {
-	return d.DO.CreateInBatches(values, batchSize)
+func (g gDynamicActionDefModelDo) CreateInBatches(values []*sqlmodel.GDynamicActionDefModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (d dynamicActionDefinitionDo) Save(values ...*model.DynamicActionDefinition) error {
+func (g gDynamicActionDefModelDo) Save(values ...*sqlmodel.GDynamicActionDefModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return d.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (d dynamicActionDefinitionDo) First() (*model.DynamicActionDefinition, error) {
-	if result, err := d.DO.First(); err != nil {
+func (g gDynamicActionDefModelDo) First() (*sqlmodel.GDynamicActionDefModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.DynamicActionDefinition), nil
+		return result.(*sqlmodel.GDynamicActionDefModel), nil
 	}
 }
 
-func (d dynamicActionDefinitionDo) Take() (*model.DynamicActionDefinition, error) {
-	if result, err := d.DO.Take(); err != nil {
+func (g gDynamicActionDefModelDo) Take() (*sqlmodel.GDynamicActionDefModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.DynamicActionDefinition), nil
+		return result.(*sqlmodel.GDynamicActionDefModel), nil
 	}
 }
 
-func (d dynamicActionDefinitionDo) Last() (*model.DynamicActionDefinition, error) {
-	if result, err := d.DO.Last(); err != nil {
+func (g gDynamicActionDefModelDo) Last() (*sqlmodel.GDynamicActionDefModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.DynamicActionDefinition), nil
+		return result.(*sqlmodel.GDynamicActionDefModel), nil
 	}
 }
 
-func (d dynamicActionDefinitionDo) Find() ([]*model.DynamicActionDefinition, error) {
-	result, err := d.DO.Find()
-	return result.([]*model.DynamicActionDefinition), err
+func (g gDynamicActionDefModelDo) Find() ([]*sqlmodel.GDynamicActionDefModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GDynamicActionDefModel), err
 }
 
-func (d dynamicActionDefinitionDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.DynamicActionDefinition, err error) {
-	buf := make([]*model.DynamicActionDefinition, 0, batchSize)
-	err = d.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gDynamicActionDefModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GDynamicActionDefModel, err error) {
+	buf := make([]*sqlmodel.GDynamicActionDefModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (d dynamicActionDefinitionDo) FindInBatches(result *[]*model.DynamicActionDefinition, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return d.DO.FindInBatches(result, batchSize, fc)
+func (g gDynamicActionDefModelDo) FindInBatches(result *[]*sqlmodel.GDynamicActionDefModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (d dynamicActionDefinitionDo) Attrs(attrs ...field.AssignExpr) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Attrs(attrs...))
+func (g gDynamicActionDefModelDo) Attrs(attrs ...field.AssignExpr) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (d dynamicActionDefinitionDo) Assign(attrs ...field.AssignExpr) *dynamicActionDefinitionDo {
-	return d.withDO(d.DO.Assign(attrs...))
+func (g gDynamicActionDefModelDo) Assign(attrs ...field.AssignExpr) *gDynamicActionDefModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (d dynamicActionDefinitionDo) Joins(fields ...field.RelationField) *dynamicActionDefinitionDo {
+func (g gDynamicActionDefModelDo) Joins(fields ...field.RelationField) *gDynamicActionDefModelDo {
 	for _, _f := range fields {
-		d = *d.withDO(d.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &d
+	return &g
 }
 
-func (d dynamicActionDefinitionDo) Preload(fields ...field.RelationField) *dynamicActionDefinitionDo {
+func (g gDynamicActionDefModelDo) Preload(fields ...field.RelationField) *gDynamicActionDefModelDo {
 	for _, _f := range fields {
-		d = *d.withDO(d.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &d
+	return &g
 }
 
-func (d dynamicActionDefinitionDo) FirstOrInit() (*model.DynamicActionDefinition, error) {
-	if result, err := d.DO.FirstOrInit(); err != nil {
+func (g gDynamicActionDefModelDo) FirstOrInit() (*sqlmodel.GDynamicActionDefModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.DynamicActionDefinition), nil
+		return result.(*sqlmodel.GDynamicActionDefModel), nil
 	}
 }
 
-func (d dynamicActionDefinitionDo) FirstOrCreate() (*model.DynamicActionDefinition, error) {
-	if result, err := d.DO.FirstOrCreate(); err != nil {
+func (g gDynamicActionDefModelDo) FirstOrCreate() (*sqlmodel.GDynamicActionDefModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.DynamicActionDefinition), nil
+		return result.(*sqlmodel.GDynamicActionDefModel), nil
 	}
 }
 
-func (d dynamicActionDefinitionDo) FindByPage(offset int, limit int) (result []*model.DynamicActionDefinition, count int64, err error) {
-	result, err = d.Offset(offset).Limit(limit).Find()
+func (g gDynamicActionDefModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GDynamicActionDefModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -311,29 +338,29 @@ func (d dynamicActionDefinitionDo) FindByPage(offset int, limit int) (result []*
 		return
 	}
 
-	count, err = d.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (d dynamicActionDefinitionDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = d.Count()
+func (g gDynamicActionDefModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = d.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (d dynamicActionDefinitionDo) Scan(result interface{}) (err error) {
-	return d.DO.Scan(result)
+func (g gDynamicActionDefModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (d dynamicActionDefinitionDo) Delete(models ...*model.DynamicActionDefinition) (result gen.ResultInfo, err error) {
-	return d.DO.Delete(models)
+func (g gDynamicActionDefModelDo) Delete(models ...*sqlmodel.GDynamicActionDefModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (d *dynamicActionDefinitionDo) withDO(do gen.Dao) *dynamicActionDefinitionDo {
-	d.DO = *do.(*gen.DO)
-	return d
+func (g *gDynamicActionDefModelDo) withDO(do gen.Dao) *gDynamicActionDefModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

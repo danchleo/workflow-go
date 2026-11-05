@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,76 +16,126 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newWorkflowExecutionsV2(db *gorm.DB, opts ...gen.DOOption) workflowExecutionsV2 {
-	_workflowExecutionsV2 := workflowExecutionsV2{}
+func newGWfExModel(db *gorm.DB, opts ...gen.DOOption) gWfExModel {
+	_gWfExModel := gWfExModel{}
 
-	_workflowExecutionsV2.workflowExecutionsV2Do.UseDB(db, opts...)
-	_workflowExecutionsV2.workflowExecutionsV2Do.UseModel(&model.WorkflowExecutionsV2{})
+	_gWfExModel.gWfExModelDo.UseDB(db, opts...)
+	_gWfExModel.gWfExModelDo.UseModel(&sqlmodel.GWfExModel{})
 
-	tableName := _workflowExecutionsV2.workflowExecutionsV2Do.TableName()
-	_workflowExecutionsV2.ALL = field.NewAsterisk(tableName)
-	_workflowExecutionsV2.ID = field.NewString(tableName, "id")
-	_workflowExecutionsV2.WorkflowID = field.NewString(tableName, "workflow_id")
-	_workflowExecutionsV2.State = field.NewString(tableName, "state")
-	_workflowExecutionsV2.Data = field.NewString(tableName, "data")
+	tableName := _gWfExModel.gWfExModelDo.TableName()
+	_gWfExModel.ALL = field.NewAsterisk(tableName)
+	_gWfExModel.ID = field.NewString(tableName, "id")
+	_gWfExModel.Name = field.NewString(tableName, "name")
+	_gWfExModel.Description = field.NewString(tableName, "description")
+	_gWfExModel.WorkflowName = field.NewString(tableName, "workflow_name")
+	_gWfExModel.WorkflowNamespace = field.NewString(tableName, "workflow_namespace")
+	_gWfExModel.WorkflowID = field.NewString(tableName, "workflow_id")
+	_gWfExModel.State = field.NewString(tableName, "state")
+	_gWfExModel.StateInfo = field.NewString(tableName, "state_info")
+	_gWfExModel.Tags = field.NewField(tableName, "tags")
+	_gWfExModel.RuntimeContext = field.NewField(tableName, "runtime_context")
+	_gWfExModel.Spec = field.NewField(tableName, "spec")
+	_gWfExModel.Accepted = field.NewBool(tableName, "accepted")
+	_gWfExModel.Input = field.NewField(tableName, "input")
+	_gWfExModel.Output = field.NewField(tableName, "output")
+	_gWfExModel.Params = field.NewField(tableName, "params")
+	_gWfExModel.Context = field.NewField(tableName, "context")
+	_gWfExModel.TaskExecutionID = field.NewString(tableName, "task_execution_id")
+	_gWfExModel.RootExecutionID = field.NewString(tableName, "root_execution_id")
+	_gWfExModel.ProjectID = field.NewString(tableName, "project_id")
+	_gWfExModel.Scope = field.NewString(tableName, "scope")
+	_gWfExModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gWfExModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_workflowExecutionsV2.fillFieldMap()
+	_gWfExModel.fillFieldMap()
 
-	return _workflowExecutionsV2
+	return _gWfExModel
 }
 
-type workflowExecutionsV2 struct {
-	workflowExecutionsV2Do workflowExecutionsV2Do
+type gWfExModel struct {
+	gWfExModelDo gWfExModelDo
 
-	ALL        field.Asterisk
-	ID         field.String
-	WorkflowID field.String
-	State      field.String
-	Data       field.String
+	ALL               field.Asterisk
+	ID                field.String
+	Name              field.String
+	Description       field.String
+	WorkflowName      field.String
+	WorkflowNamespace field.String
+	WorkflowID        field.String
+	State             field.String
+	StateInfo         field.String
+	Tags              field.Field
+	RuntimeContext    field.Field
+	Spec              field.Field
+	Accepted          field.Bool
+	Input             field.Field
+	Output            field.Field
+	Params            field.Field
+	Context           field.Field
+	TaskExecutionID   field.String
+	RootExecutionID   field.String
+	ProjectID         field.String
+	Scope             field.String
+	CreatedAt         field.Time
+	UpdatedAt         field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (w workflowExecutionsV2) Table(newTableName string) *workflowExecutionsV2 {
-	w.workflowExecutionsV2Do.UseTable(newTableName)
-	return w.updateTableName(newTableName)
+func (g gWfExModel) Table(newTableName string) *gWfExModel {
+	g.gWfExModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (w workflowExecutionsV2) As(alias string) *workflowExecutionsV2 {
-	w.workflowExecutionsV2Do.DO = *(w.workflowExecutionsV2Do.As(alias).(*gen.DO))
-	return w.updateTableName(alias)
+func (g gWfExModel) As(alias string) *gWfExModel {
+	g.gWfExModelDo.DO = *(g.gWfExModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (w *workflowExecutionsV2) updateTableName(table string) *workflowExecutionsV2 {
-	w.ALL = field.NewAsterisk(table)
-	w.ID = field.NewString(table, "id")
-	w.WorkflowID = field.NewString(table, "workflow_id")
-	w.State = field.NewString(table, "state")
-	w.Data = field.NewString(table, "data")
+func (g *gWfExModel) updateTableName(table string) *gWfExModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.Name = field.NewString(table, "name")
+	g.Description = field.NewString(table, "description")
+	g.WorkflowName = field.NewString(table, "workflow_name")
+	g.WorkflowNamespace = field.NewString(table, "workflow_namespace")
+	g.WorkflowID = field.NewString(table, "workflow_id")
+	g.State = field.NewString(table, "state")
+	g.StateInfo = field.NewString(table, "state_info")
+	g.Tags = field.NewField(table, "tags")
+	g.RuntimeContext = field.NewField(table, "runtime_context")
+	g.Spec = field.NewField(table, "spec")
+	g.Accepted = field.NewBool(table, "accepted")
+	g.Input = field.NewField(table, "input")
+	g.Output = field.NewField(table, "output")
+	g.Params = field.NewField(table, "params")
+	g.Context = field.NewField(table, "context")
+	g.TaskExecutionID = field.NewString(table, "task_execution_id")
+	g.RootExecutionID = field.NewString(table, "root_execution_id")
+	g.ProjectID = field.NewString(table, "project_id")
+	g.Scope = field.NewString(table, "scope")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	w.fillFieldMap()
+	g.fillFieldMap()
 
-	return w
+	return g
 }
 
-func (w *workflowExecutionsV2) WithContext(ctx context.Context) *workflowExecutionsV2Do {
-	return w.workflowExecutionsV2Do.WithContext(ctx)
+func (g *gWfExModel) WithContext(ctx context.Context) *gWfExModelDo {
+	return g.gWfExModelDo.WithContext(ctx)
 }
 
-func (w workflowExecutionsV2) TableName() string { return w.workflowExecutionsV2Do.TableName() }
+func (g gWfExModel) TableName() string { return g.gWfExModelDo.TableName() }
 
-func (w workflowExecutionsV2) Alias() string { return w.workflowExecutionsV2Do.Alias() }
+func (g gWfExModel) Alias() string { return g.gWfExModelDo.Alias() }
 
-func (w workflowExecutionsV2) Columns(cols ...field.Expr) gen.Columns {
-	return w.workflowExecutionsV2Do.Columns(cols...)
-}
+func (g gWfExModel) Columns(cols ...field.Expr) gen.Columns { return g.gWfExModelDo.Columns(cols...) }
 
-func (w *workflowExecutionsV2) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := w.fieldMap[fieldName]
+func (g *gWfExModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -92,220 +143,238 @@ func (w *workflowExecutionsV2) GetFieldByName(fieldName string) (field.OrderExpr
 	return _oe, ok
 }
 
-func (w *workflowExecutionsV2) fillFieldMap() {
-	w.fieldMap = make(map[string]field.Expr, 4)
-	w.fieldMap["id"] = w.ID
-	w.fieldMap["workflow_id"] = w.WorkflowID
-	w.fieldMap["state"] = w.State
-	w.fieldMap["data"] = w.Data
+func (g *gWfExModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 22)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["name"] = g.Name
+	g.fieldMap["description"] = g.Description
+	g.fieldMap["workflow_name"] = g.WorkflowName
+	g.fieldMap["workflow_namespace"] = g.WorkflowNamespace
+	g.fieldMap["workflow_id"] = g.WorkflowID
+	g.fieldMap["state"] = g.State
+	g.fieldMap["state_info"] = g.StateInfo
+	g.fieldMap["tags"] = g.Tags
+	g.fieldMap["runtime_context"] = g.RuntimeContext
+	g.fieldMap["spec"] = g.Spec
+	g.fieldMap["accepted"] = g.Accepted
+	g.fieldMap["input"] = g.Input
+	g.fieldMap["output"] = g.Output
+	g.fieldMap["params"] = g.Params
+	g.fieldMap["context"] = g.Context
+	g.fieldMap["task_execution_id"] = g.TaskExecutionID
+	g.fieldMap["root_execution_id"] = g.RootExecutionID
+	g.fieldMap["project_id"] = g.ProjectID
+	g.fieldMap["scope"] = g.Scope
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (w workflowExecutionsV2) clone(db *gorm.DB) workflowExecutionsV2 {
-	w.workflowExecutionsV2Do.ReplaceConnPool(db.Statement.ConnPool)
-	return w
+func (g gWfExModel) clone(db *gorm.DB) gWfExModel {
+	g.gWfExModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (w workflowExecutionsV2) replaceDB(db *gorm.DB) workflowExecutionsV2 {
-	w.workflowExecutionsV2Do.ReplaceDB(db)
-	return w
+func (g gWfExModel) replaceDB(db *gorm.DB) gWfExModel {
+	g.gWfExModelDo.ReplaceDB(db)
+	return g
 }
 
-type workflowExecutionsV2Do struct{ gen.DO }
+type gWfExModelDo struct{ gen.DO }
 
-func (w workflowExecutionsV2Do) Debug() *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Debug())
+func (g gWfExModelDo) Debug() *gWfExModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (w workflowExecutionsV2Do) WithContext(ctx context.Context) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.WithContext(ctx))
+func (g gWfExModelDo) WithContext(ctx context.Context) *gWfExModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (w workflowExecutionsV2Do) ReadDB() *workflowExecutionsV2Do {
-	return w.Clauses(dbresolver.Read)
+func (g gWfExModelDo) ReadDB() *gWfExModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (w workflowExecutionsV2Do) WriteDB() *workflowExecutionsV2Do {
-	return w.Clauses(dbresolver.Write)
+func (g gWfExModelDo) WriteDB() *gWfExModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (w workflowExecutionsV2Do) Session(config *gorm.Session) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Session(config))
+func (g gWfExModelDo) Session(config *gorm.Session) *gWfExModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (w workflowExecutionsV2Do) Clauses(conds ...clause.Expression) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Clauses(conds...))
+func (g gWfExModelDo) Clauses(conds ...clause.Expression) *gWfExModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (w workflowExecutionsV2Do) Returning(value interface{}, columns ...string) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Returning(value, columns...))
+func (g gWfExModelDo) Returning(value interface{}, columns ...string) *gWfExModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (w workflowExecutionsV2Do) Not(conds ...gen.Condition) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Not(conds...))
+func (g gWfExModelDo) Not(conds ...gen.Condition) *gWfExModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (w workflowExecutionsV2Do) Or(conds ...gen.Condition) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Or(conds...))
+func (g gWfExModelDo) Or(conds ...gen.Condition) *gWfExModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (w workflowExecutionsV2Do) Select(conds ...field.Expr) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Select(conds...))
+func (g gWfExModelDo) Select(conds ...field.Expr) *gWfExModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (w workflowExecutionsV2Do) Where(conds ...gen.Condition) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Where(conds...))
+func (g gWfExModelDo) Where(conds ...gen.Condition) *gWfExModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (w workflowExecutionsV2Do) Order(conds ...field.Expr) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Order(conds...))
+func (g gWfExModelDo) Order(conds ...field.Expr) *gWfExModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (w workflowExecutionsV2Do) Distinct(cols ...field.Expr) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Distinct(cols...))
+func (g gWfExModelDo) Distinct(cols ...field.Expr) *gWfExModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (w workflowExecutionsV2Do) Omit(cols ...field.Expr) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Omit(cols...))
+func (g gWfExModelDo) Omit(cols ...field.Expr) *gWfExModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (w workflowExecutionsV2Do) Join(table schema.Tabler, on ...field.Expr) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Join(table, on...))
+func (g gWfExModelDo) Join(table schema.Tabler, on ...field.Expr) *gWfExModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (w workflowExecutionsV2Do) LeftJoin(table schema.Tabler, on ...field.Expr) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.LeftJoin(table, on...))
+func (g gWfExModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gWfExModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (w workflowExecutionsV2Do) RightJoin(table schema.Tabler, on ...field.Expr) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.RightJoin(table, on...))
+func (g gWfExModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gWfExModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (w workflowExecutionsV2Do) Group(cols ...field.Expr) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Group(cols...))
+func (g gWfExModelDo) Group(cols ...field.Expr) *gWfExModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (w workflowExecutionsV2Do) Having(conds ...gen.Condition) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Having(conds...))
+func (g gWfExModelDo) Having(conds ...gen.Condition) *gWfExModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (w workflowExecutionsV2Do) Limit(limit int) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Limit(limit))
+func (g gWfExModelDo) Limit(limit int) *gWfExModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (w workflowExecutionsV2Do) Offset(offset int) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Offset(offset))
+func (g gWfExModelDo) Offset(offset int) *gWfExModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (w workflowExecutionsV2Do) Scopes(funcs ...func(gen.Dao) gen.Dao) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Scopes(funcs...))
+func (g gWfExModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gWfExModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (w workflowExecutionsV2Do) Unscoped() *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Unscoped())
+func (g gWfExModelDo) Unscoped() *gWfExModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (w workflowExecutionsV2Do) Create(values ...*model.WorkflowExecutionsV2) error {
+func (g gWfExModelDo) Create(values ...*sqlmodel.GWfExModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return w.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (w workflowExecutionsV2Do) CreateInBatches(values []*model.WorkflowExecutionsV2, batchSize int) error {
-	return w.DO.CreateInBatches(values, batchSize)
+func (g gWfExModelDo) CreateInBatches(values []*sqlmodel.GWfExModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (w workflowExecutionsV2Do) Save(values ...*model.WorkflowExecutionsV2) error {
+func (g gWfExModelDo) Save(values ...*sqlmodel.GWfExModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return w.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (w workflowExecutionsV2Do) First() (*model.WorkflowExecutionsV2, error) {
-	if result, err := w.DO.First(); err != nil {
+func (g gWfExModelDo) First() (*sqlmodel.GWfExModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkflowExecutionsV2), nil
+		return result.(*sqlmodel.GWfExModel), nil
 	}
 }
 
-func (w workflowExecutionsV2Do) Take() (*model.WorkflowExecutionsV2, error) {
-	if result, err := w.DO.Take(); err != nil {
+func (g gWfExModelDo) Take() (*sqlmodel.GWfExModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkflowExecutionsV2), nil
+		return result.(*sqlmodel.GWfExModel), nil
 	}
 }
 
-func (w workflowExecutionsV2Do) Last() (*model.WorkflowExecutionsV2, error) {
-	if result, err := w.DO.Last(); err != nil {
+func (g gWfExModelDo) Last() (*sqlmodel.GWfExModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkflowExecutionsV2), nil
+		return result.(*sqlmodel.GWfExModel), nil
 	}
 }
 
-func (w workflowExecutionsV2Do) Find() ([]*model.WorkflowExecutionsV2, error) {
-	result, err := w.DO.Find()
-	return result.([]*model.WorkflowExecutionsV2), err
+func (g gWfExModelDo) Find() ([]*sqlmodel.GWfExModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GWfExModel), err
 }
 
-func (w workflowExecutionsV2Do) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.WorkflowExecutionsV2, err error) {
-	buf := make([]*model.WorkflowExecutionsV2, 0, batchSize)
-	err = w.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gWfExModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GWfExModel, err error) {
+	buf := make([]*sqlmodel.GWfExModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (w workflowExecutionsV2Do) FindInBatches(result *[]*model.WorkflowExecutionsV2, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return w.DO.FindInBatches(result, batchSize, fc)
+func (g gWfExModelDo) FindInBatches(result *[]*sqlmodel.GWfExModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (w workflowExecutionsV2Do) Attrs(attrs ...field.AssignExpr) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Attrs(attrs...))
+func (g gWfExModelDo) Attrs(attrs ...field.AssignExpr) *gWfExModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (w workflowExecutionsV2Do) Assign(attrs ...field.AssignExpr) *workflowExecutionsV2Do {
-	return w.withDO(w.DO.Assign(attrs...))
+func (g gWfExModelDo) Assign(attrs ...field.AssignExpr) *gWfExModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (w workflowExecutionsV2Do) Joins(fields ...field.RelationField) *workflowExecutionsV2Do {
+func (g gWfExModelDo) Joins(fields ...field.RelationField) *gWfExModelDo {
 	for _, _f := range fields {
-		w = *w.withDO(w.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &w
+	return &g
 }
 
-func (w workflowExecutionsV2Do) Preload(fields ...field.RelationField) *workflowExecutionsV2Do {
+func (g gWfExModelDo) Preload(fields ...field.RelationField) *gWfExModelDo {
 	for _, _f := range fields {
-		w = *w.withDO(w.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &w
+	return &g
 }
 
-func (w workflowExecutionsV2Do) FirstOrInit() (*model.WorkflowExecutionsV2, error) {
-	if result, err := w.DO.FirstOrInit(); err != nil {
+func (g gWfExModelDo) FirstOrInit() (*sqlmodel.GWfExModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkflowExecutionsV2), nil
+		return result.(*sqlmodel.GWfExModel), nil
 	}
 }
 
-func (w workflowExecutionsV2Do) FirstOrCreate() (*model.WorkflowExecutionsV2, error) {
-	if result, err := w.DO.FirstOrCreate(); err != nil {
+func (g gWfExModelDo) FirstOrCreate() (*sqlmodel.GWfExModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkflowExecutionsV2), nil
+		return result.(*sqlmodel.GWfExModel), nil
 	}
 }
 
-func (w workflowExecutionsV2Do) FindByPage(offset int, limit int) (result []*model.WorkflowExecutionsV2, count int64, err error) {
-	result, err = w.Offset(offset).Limit(limit).Find()
+func (g gWfExModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GWfExModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -315,29 +384,29 @@ func (w workflowExecutionsV2Do) FindByPage(offset int, limit int) (result []*mod
 		return
 	}
 
-	count, err = w.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (w workflowExecutionsV2Do) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = w.Count()
+func (g gWfExModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = w.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (w workflowExecutionsV2Do) Scan(result interface{}) (err error) {
-	return w.DO.Scan(result)
+func (g gWfExModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (w workflowExecutionsV2Do) Delete(models ...*model.WorkflowExecutionsV2) (result gen.ResultInfo, err error) {
-	return w.DO.Delete(models)
+func (g gWfExModelDo) Delete(models ...*sqlmodel.GWfExModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (w *workflowExecutionsV2Do) withDO(do gen.Dao) *workflowExecutionsV2Do {
-	w.DO = *do.(*gen.DO)
-	return w
+func (g *gWfExModelDo) withDO(do gen.Dao) *gWfExModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

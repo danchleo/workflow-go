@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,91 +16,95 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newDelayedCallsV2(db *gorm.DB, opts ...gen.DOOption) delayedCallsV2 {
-	_delayedCallsV2 := delayedCallsV2{}
+func newGDelayedCallModel(db *gorm.DB, opts ...gen.DOOption) gDelayedCallModel {
+	_gDelayedCallModel := gDelayedCallModel{}
 
-	_delayedCallsV2.delayedCallsV2Do.UseDB(db, opts...)
-	_delayedCallsV2.delayedCallsV2Do.UseModel(&model.DelayedCallsV2{})
+	_gDelayedCallModel.gDelayedCallModelDo.UseDB(db, opts...)
+	_gDelayedCallModel.gDelayedCallModelDo.UseModel(&sqlmodel.GDelayedCallModel{})
 
-	tableName := _delayedCallsV2.delayedCallsV2Do.TableName()
-	_delayedCallsV2.ALL = field.NewAsterisk(tableName)
-	_delayedCallsV2.ID = field.NewString(tableName, "id")
-	_delayedCallsV2.FactoryMethod = field.NewString(tableName, "factory_method")
-	_delayedCallsV2.TargetMethod = field.NewString(tableName, "target_method")
-	_delayedCallsV2.MethodArguments = field.NewString(tableName, "method_arguments")
-	_delayedCallsV2.Serializers = field.NewString(tableName, "serializers")
-	_delayedCallsV2.Key = field.NewString(tableName, "key")
-	_delayedCallsV2.AuthContext = field.NewString(tableName, "auth_context")
-	_delayedCallsV2.ExecutionTime = field.NewTime(tableName, "execution_time")
-	_delayedCallsV2.Processing = field.NewBool(tableName, "processing")
+	tableName := _gDelayedCallModel.gDelayedCallModelDo.TableName()
+	_gDelayedCallModel.ALL = field.NewAsterisk(tableName)
+	_gDelayedCallModel.ID = field.NewString(tableName, "id")
+	_gDelayedCallModel.FactoryMethod = field.NewString(tableName, "factory_method_path")
+	_gDelayedCallModel.TargetMethod = field.NewString(tableName, "target_method_name")
+	_gDelayedCallModel.MethodArguments = field.NewField(tableName, "method_arguments")
+	_gDelayedCallModel.Serializers = field.NewField(tableName, "serializers")
+	_gDelayedCallModel.Key = field.NewString(tableName, "key")
+	_gDelayedCallModel.AuthContext = field.NewField(tableName, "auth_context")
+	_gDelayedCallModel.ExecutionTime = field.NewTime(tableName, "execution_time")
+	_gDelayedCallModel.Processing = field.NewBool(tableName, "processing")
+	_gDelayedCallModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gDelayedCallModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_delayedCallsV2.fillFieldMap()
+	_gDelayedCallModel.fillFieldMap()
 
-	return _delayedCallsV2
+	return _gDelayedCallModel
 }
 
-type delayedCallsV2 struct {
-	delayedCallsV2Do delayedCallsV2Do
+type gDelayedCallModel struct {
+	gDelayedCallModelDo gDelayedCallModelDo
 
 	ALL             field.Asterisk
 	ID              field.String
 	FactoryMethod   field.String
 	TargetMethod    field.String
-	MethodArguments field.String
-	Serializers     field.String
+	MethodArguments field.Field
+	Serializers     field.Field
 	Key             field.String
-	AuthContext     field.String
+	AuthContext     field.Field
 	ExecutionTime   field.Time
 	Processing      field.Bool
+	CreatedAt       field.Time
+	UpdatedAt       field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (d delayedCallsV2) Table(newTableName string) *delayedCallsV2 {
-	d.delayedCallsV2Do.UseTable(newTableName)
-	return d.updateTableName(newTableName)
+func (g gDelayedCallModel) Table(newTableName string) *gDelayedCallModel {
+	g.gDelayedCallModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (d delayedCallsV2) As(alias string) *delayedCallsV2 {
-	d.delayedCallsV2Do.DO = *(d.delayedCallsV2Do.As(alias).(*gen.DO))
-	return d.updateTableName(alias)
+func (g gDelayedCallModel) As(alias string) *gDelayedCallModel {
+	g.gDelayedCallModelDo.DO = *(g.gDelayedCallModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (d *delayedCallsV2) updateTableName(table string) *delayedCallsV2 {
-	d.ALL = field.NewAsterisk(table)
-	d.ID = field.NewString(table, "id")
-	d.FactoryMethod = field.NewString(table, "factory_method")
-	d.TargetMethod = field.NewString(table, "target_method")
-	d.MethodArguments = field.NewString(table, "method_arguments")
-	d.Serializers = field.NewString(table, "serializers")
-	d.Key = field.NewString(table, "key")
-	d.AuthContext = field.NewString(table, "auth_context")
-	d.ExecutionTime = field.NewTime(table, "execution_time")
-	d.Processing = field.NewBool(table, "processing")
+func (g *gDelayedCallModel) updateTableName(table string) *gDelayedCallModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.FactoryMethod = field.NewString(table, "factory_method_path")
+	g.TargetMethod = field.NewString(table, "target_method_name")
+	g.MethodArguments = field.NewField(table, "method_arguments")
+	g.Serializers = field.NewField(table, "serializers")
+	g.Key = field.NewString(table, "key")
+	g.AuthContext = field.NewField(table, "auth_context")
+	g.ExecutionTime = field.NewTime(table, "execution_time")
+	g.Processing = field.NewBool(table, "processing")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	d.fillFieldMap()
+	g.fillFieldMap()
 
-	return d
+	return g
 }
 
-func (d *delayedCallsV2) WithContext(ctx context.Context) *delayedCallsV2Do {
-	return d.delayedCallsV2Do.WithContext(ctx)
+func (g *gDelayedCallModel) WithContext(ctx context.Context) *gDelayedCallModelDo {
+	return g.gDelayedCallModelDo.WithContext(ctx)
 }
 
-func (d delayedCallsV2) TableName() string { return d.delayedCallsV2Do.TableName() }
+func (g gDelayedCallModel) TableName() string { return g.gDelayedCallModelDo.TableName() }
 
-func (d delayedCallsV2) Alias() string { return d.delayedCallsV2Do.Alias() }
+func (g gDelayedCallModel) Alias() string { return g.gDelayedCallModelDo.Alias() }
 
-func (d delayedCallsV2) Columns(cols ...field.Expr) gen.Columns {
-	return d.delayedCallsV2Do.Columns(cols...)
+func (g gDelayedCallModel) Columns(cols ...field.Expr) gen.Columns {
+	return g.gDelayedCallModelDo.Columns(cols...)
 }
 
-func (d *delayedCallsV2) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := d.fieldMap[fieldName]
+func (g *gDelayedCallModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -107,225 +112,227 @@ func (d *delayedCallsV2) GetFieldByName(fieldName string) (field.OrderExpr, bool
 	return _oe, ok
 }
 
-func (d *delayedCallsV2) fillFieldMap() {
-	d.fieldMap = make(map[string]field.Expr, 9)
-	d.fieldMap["id"] = d.ID
-	d.fieldMap["factory_method"] = d.FactoryMethod
-	d.fieldMap["target_method"] = d.TargetMethod
-	d.fieldMap["method_arguments"] = d.MethodArguments
-	d.fieldMap["serializers"] = d.Serializers
-	d.fieldMap["key"] = d.Key
-	d.fieldMap["auth_context"] = d.AuthContext
-	d.fieldMap["execution_time"] = d.ExecutionTime
-	d.fieldMap["processing"] = d.Processing
+func (g *gDelayedCallModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 11)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["factory_method_path"] = g.FactoryMethod
+	g.fieldMap["target_method_name"] = g.TargetMethod
+	g.fieldMap["method_arguments"] = g.MethodArguments
+	g.fieldMap["serializers"] = g.Serializers
+	g.fieldMap["key"] = g.Key
+	g.fieldMap["auth_context"] = g.AuthContext
+	g.fieldMap["execution_time"] = g.ExecutionTime
+	g.fieldMap["processing"] = g.Processing
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (d delayedCallsV2) clone(db *gorm.DB) delayedCallsV2 {
-	d.delayedCallsV2Do.ReplaceConnPool(db.Statement.ConnPool)
-	return d
+func (g gDelayedCallModel) clone(db *gorm.DB) gDelayedCallModel {
+	g.gDelayedCallModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (d delayedCallsV2) replaceDB(db *gorm.DB) delayedCallsV2 {
-	d.delayedCallsV2Do.ReplaceDB(db)
-	return d
+func (g gDelayedCallModel) replaceDB(db *gorm.DB) gDelayedCallModel {
+	g.gDelayedCallModelDo.ReplaceDB(db)
+	return g
 }
 
-type delayedCallsV2Do struct{ gen.DO }
+type gDelayedCallModelDo struct{ gen.DO }
 
-func (d delayedCallsV2Do) Debug() *delayedCallsV2Do {
-	return d.withDO(d.DO.Debug())
+func (g gDelayedCallModelDo) Debug() *gDelayedCallModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (d delayedCallsV2Do) WithContext(ctx context.Context) *delayedCallsV2Do {
-	return d.withDO(d.DO.WithContext(ctx))
+func (g gDelayedCallModelDo) WithContext(ctx context.Context) *gDelayedCallModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (d delayedCallsV2Do) ReadDB() *delayedCallsV2Do {
-	return d.Clauses(dbresolver.Read)
+func (g gDelayedCallModelDo) ReadDB() *gDelayedCallModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (d delayedCallsV2Do) WriteDB() *delayedCallsV2Do {
-	return d.Clauses(dbresolver.Write)
+func (g gDelayedCallModelDo) WriteDB() *gDelayedCallModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (d delayedCallsV2Do) Session(config *gorm.Session) *delayedCallsV2Do {
-	return d.withDO(d.DO.Session(config))
+func (g gDelayedCallModelDo) Session(config *gorm.Session) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (d delayedCallsV2Do) Clauses(conds ...clause.Expression) *delayedCallsV2Do {
-	return d.withDO(d.DO.Clauses(conds...))
+func (g gDelayedCallModelDo) Clauses(conds ...clause.Expression) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (d delayedCallsV2Do) Returning(value interface{}, columns ...string) *delayedCallsV2Do {
-	return d.withDO(d.DO.Returning(value, columns...))
+func (g gDelayedCallModelDo) Returning(value interface{}, columns ...string) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (d delayedCallsV2Do) Not(conds ...gen.Condition) *delayedCallsV2Do {
-	return d.withDO(d.DO.Not(conds...))
+func (g gDelayedCallModelDo) Not(conds ...gen.Condition) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (d delayedCallsV2Do) Or(conds ...gen.Condition) *delayedCallsV2Do {
-	return d.withDO(d.DO.Or(conds...))
+func (g gDelayedCallModelDo) Or(conds ...gen.Condition) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (d delayedCallsV2Do) Select(conds ...field.Expr) *delayedCallsV2Do {
-	return d.withDO(d.DO.Select(conds...))
+func (g gDelayedCallModelDo) Select(conds ...field.Expr) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (d delayedCallsV2Do) Where(conds ...gen.Condition) *delayedCallsV2Do {
-	return d.withDO(d.DO.Where(conds...))
+func (g gDelayedCallModelDo) Where(conds ...gen.Condition) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (d delayedCallsV2Do) Order(conds ...field.Expr) *delayedCallsV2Do {
-	return d.withDO(d.DO.Order(conds...))
+func (g gDelayedCallModelDo) Order(conds ...field.Expr) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (d delayedCallsV2Do) Distinct(cols ...field.Expr) *delayedCallsV2Do {
-	return d.withDO(d.DO.Distinct(cols...))
+func (g gDelayedCallModelDo) Distinct(cols ...field.Expr) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (d delayedCallsV2Do) Omit(cols ...field.Expr) *delayedCallsV2Do {
-	return d.withDO(d.DO.Omit(cols...))
+func (g gDelayedCallModelDo) Omit(cols ...field.Expr) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (d delayedCallsV2Do) Join(table schema.Tabler, on ...field.Expr) *delayedCallsV2Do {
-	return d.withDO(d.DO.Join(table, on...))
+func (g gDelayedCallModelDo) Join(table schema.Tabler, on ...field.Expr) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (d delayedCallsV2Do) LeftJoin(table schema.Tabler, on ...field.Expr) *delayedCallsV2Do {
-	return d.withDO(d.DO.LeftJoin(table, on...))
+func (g gDelayedCallModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gDelayedCallModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (d delayedCallsV2Do) RightJoin(table schema.Tabler, on ...field.Expr) *delayedCallsV2Do {
-	return d.withDO(d.DO.RightJoin(table, on...))
+func (g gDelayedCallModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gDelayedCallModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (d delayedCallsV2Do) Group(cols ...field.Expr) *delayedCallsV2Do {
-	return d.withDO(d.DO.Group(cols...))
+func (g gDelayedCallModelDo) Group(cols ...field.Expr) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (d delayedCallsV2Do) Having(conds ...gen.Condition) *delayedCallsV2Do {
-	return d.withDO(d.DO.Having(conds...))
+func (g gDelayedCallModelDo) Having(conds ...gen.Condition) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (d delayedCallsV2Do) Limit(limit int) *delayedCallsV2Do {
-	return d.withDO(d.DO.Limit(limit))
+func (g gDelayedCallModelDo) Limit(limit int) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (d delayedCallsV2Do) Offset(offset int) *delayedCallsV2Do {
-	return d.withDO(d.DO.Offset(offset))
+func (g gDelayedCallModelDo) Offset(offset int) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (d delayedCallsV2Do) Scopes(funcs ...func(gen.Dao) gen.Dao) *delayedCallsV2Do {
-	return d.withDO(d.DO.Scopes(funcs...))
+func (g gDelayedCallModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (d delayedCallsV2Do) Unscoped() *delayedCallsV2Do {
-	return d.withDO(d.DO.Unscoped())
+func (g gDelayedCallModelDo) Unscoped() *gDelayedCallModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (d delayedCallsV2Do) Create(values ...*model.DelayedCallsV2) error {
+func (g gDelayedCallModelDo) Create(values ...*sqlmodel.GDelayedCallModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return d.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (d delayedCallsV2Do) CreateInBatches(values []*model.DelayedCallsV2, batchSize int) error {
-	return d.DO.CreateInBatches(values, batchSize)
+func (g gDelayedCallModelDo) CreateInBatches(values []*sqlmodel.GDelayedCallModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (d delayedCallsV2Do) Save(values ...*model.DelayedCallsV2) error {
+func (g gDelayedCallModelDo) Save(values ...*sqlmodel.GDelayedCallModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return d.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (d delayedCallsV2Do) First() (*model.DelayedCallsV2, error) {
-	if result, err := d.DO.First(); err != nil {
+func (g gDelayedCallModelDo) First() (*sqlmodel.GDelayedCallModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.DelayedCallsV2), nil
+		return result.(*sqlmodel.GDelayedCallModel), nil
 	}
 }
 
-func (d delayedCallsV2Do) Take() (*model.DelayedCallsV2, error) {
-	if result, err := d.DO.Take(); err != nil {
+func (g gDelayedCallModelDo) Take() (*sqlmodel.GDelayedCallModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.DelayedCallsV2), nil
+		return result.(*sqlmodel.GDelayedCallModel), nil
 	}
 }
 
-func (d delayedCallsV2Do) Last() (*model.DelayedCallsV2, error) {
-	if result, err := d.DO.Last(); err != nil {
+func (g gDelayedCallModelDo) Last() (*sqlmodel.GDelayedCallModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.DelayedCallsV2), nil
+		return result.(*sqlmodel.GDelayedCallModel), nil
 	}
 }
 
-func (d delayedCallsV2Do) Find() ([]*model.DelayedCallsV2, error) {
-	result, err := d.DO.Find()
-	return result.([]*model.DelayedCallsV2), err
+func (g gDelayedCallModelDo) Find() ([]*sqlmodel.GDelayedCallModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GDelayedCallModel), err
 }
 
-func (d delayedCallsV2Do) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.DelayedCallsV2, err error) {
-	buf := make([]*model.DelayedCallsV2, 0, batchSize)
-	err = d.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gDelayedCallModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GDelayedCallModel, err error) {
+	buf := make([]*sqlmodel.GDelayedCallModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (d delayedCallsV2Do) FindInBatches(result *[]*model.DelayedCallsV2, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return d.DO.FindInBatches(result, batchSize, fc)
+func (g gDelayedCallModelDo) FindInBatches(result *[]*sqlmodel.GDelayedCallModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (d delayedCallsV2Do) Attrs(attrs ...field.AssignExpr) *delayedCallsV2Do {
-	return d.withDO(d.DO.Attrs(attrs...))
+func (g gDelayedCallModelDo) Attrs(attrs ...field.AssignExpr) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (d delayedCallsV2Do) Assign(attrs ...field.AssignExpr) *delayedCallsV2Do {
-	return d.withDO(d.DO.Assign(attrs...))
+func (g gDelayedCallModelDo) Assign(attrs ...field.AssignExpr) *gDelayedCallModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (d delayedCallsV2Do) Joins(fields ...field.RelationField) *delayedCallsV2Do {
+func (g gDelayedCallModelDo) Joins(fields ...field.RelationField) *gDelayedCallModelDo {
 	for _, _f := range fields {
-		d = *d.withDO(d.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &d
+	return &g
 }
 
-func (d delayedCallsV2Do) Preload(fields ...field.RelationField) *delayedCallsV2Do {
+func (g gDelayedCallModelDo) Preload(fields ...field.RelationField) *gDelayedCallModelDo {
 	for _, _f := range fields {
-		d = *d.withDO(d.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &d
+	return &g
 }
 
-func (d delayedCallsV2Do) FirstOrInit() (*model.DelayedCallsV2, error) {
-	if result, err := d.DO.FirstOrInit(); err != nil {
+func (g gDelayedCallModelDo) FirstOrInit() (*sqlmodel.GDelayedCallModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.DelayedCallsV2), nil
+		return result.(*sqlmodel.GDelayedCallModel), nil
 	}
 }
 
-func (d delayedCallsV2Do) FirstOrCreate() (*model.DelayedCallsV2, error) {
-	if result, err := d.DO.FirstOrCreate(); err != nil {
+func (g gDelayedCallModelDo) FirstOrCreate() (*sqlmodel.GDelayedCallModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.DelayedCallsV2), nil
+		return result.(*sqlmodel.GDelayedCallModel), nil
 	}
 }
 
-func (d delayedCallsV2Do) FindByPage(offset int, limit int) (result []*model.DelayedCallsV2, count int64, err error) {
-	result, err = d.Offset(offset).Limit(limit).Find()
+func (g gDelayedCallModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GDelayedCallModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -335,29 +342,29 @@ func (d delayedCallsV2Do) FindByPage(offset int, limit int) (result []*model.Del
 		return
 	}
 
-	count, err = d.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (d delayedCallsV2Do) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = d.Count()
+func (g gDelayedCallModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = d.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (d delayedCallsV2Do) Scan(result interface{}) (err error) {
-	return d.DO.Scan(result)
+func (g gDelayedCallModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (d delayedCallsV2Do) Delete(models ...*model.DelayedCallsV2) (result gen.ResultInfo, err error) {
-	return d.DO.Delete(models)
+func (g gDelayedCallModelDo) Delete(models ...*sqlmodel.GDelayedCallModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (d *delayedCallsV2Do) withDO(do gen.Dao) *delayedCallsV2Do {
-	d.DO = *do.(*gen.DO)
-	return d
+func (g *gDelayedCallModelDo) withDO(do gen.Dao) *gDelayedCallModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

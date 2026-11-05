@@ -17,68 +17,68 @@ import (
 
 func Use(db *gorm.DB, opts ...gen.DOOption) *Query {
 	return &Query{
-		db:                      db,
-		ActionDefinitionsV2:     newActionDefinitionsV2(db, opts...),
-		ActionExecutionsV2:      newActionExecutionsV2(db, opts...),
-		CodeSource:              newCodeSource(db, opts...),
-		CronTriggersV2:          newCronTriggersV2(db, opts...),
-		DelayedCallsV2:          newDelayedCallsV2(db, opts...),
-		DynamicActionDefinition: newDynamicActionDefinition(db, opts...),
-		EnvironmentsV2:          newEnvironmentsV2(db, opts...),
-		EventTriggersV2:         newEventTriggersV2(db, opts...),
-		MistralMetric:           newMistralMetric(db, opts...),
-		NamedLock:               newNamedLock(db, opts...),
-		ResourceMembersV2:       newResourceMembersV2(db, opts...),
-		ScheduledJobsV2:         newScheduledJobsV2(db, opts...),
-		TaskExecutionsV2:        newTaskExecutionsV2(db, opts...),
-		WorkbooksV2:             newWorkbooksV2(db, opts...),
-		WorkflowDefinitionsV2:   newWorkflowDefinitionsV2(db, opts...),
-		WorkflowExecutionsV2:    newWorkflowExecutionsV2(db, opts...),
+		db:                     db,
+		GActDefModel:           newGActDefModel(db, opts...),
+		GActExModel:            newGActExModel(db, opts...),
+		GCodeSourceModel:       newGCodeSourceModel(db, opts...),
+		GCronTriggerModel:      newGCronTriggerModel(db, opts...),
+		GDelayedCallModel:      newGDelayedCallModel(db, opts...),
+		GDynamicActionDefModel: newGDynamicActionDefModel(db, opts...),
+		GEnvModel:              newGEnvModel(db, opts...),
+		GEventTriggerModel:     newGEventTriggerModel(db, opts...),
+		GMetricsModel:          newGMetricsModel(db, opts...),
+		GNamedLockModel:        newGNamedLockModel(db, opts...),
+		GResourceMemberModel:   newGResourceMemberModel(db, opts...),
+		GScheduledJobModel:     newGScheduledJobModel(db, opts...),
+		GTaskExModel:           newGTaskExModel(db, opts...),
+		GWfDefModel:            newGWfDefModel(db, opts...),
+		GWfExModel:             newGWfExModel(db, opts...),
+		GWorkbookModel:         newGWorkbookModel(db, opts...),
 	}
 }
 
 type Query struct {
 	db *gorm.DB
 
-	ActionDefinitionsV2     actionDefinitionsV2
-	ActionExecutionsV2      actionExecutionsV2
-	CodeSource              codeSource
-	CronTriggersV2          cronTriggersV2
-	DelayedCallsV2          delayedCallsV2
-	DynamicActionDefinition dynamicActionDefinition
-	EnvironmentsV2          environmentsV2
-	EventTriggersV2         eventTriggersV2
-	MistralMetric           mistralMetric
-	NamedLock               namedLock
-	ResourceMembersV2       resourceMembersV2
-	ScheduledJobsV2         scheduledJobsV2
-	TaskExecutionsV2        taskExecutionsV2
-	WorkbooksV2             workbooksV2
-	WorkflowDefinitionsV2   workflowDefinitionsV2
-	WorkflowExecutionsV2    workflowExecutionsV2
+	GActDefModel           gActDefModel
+	GActExModel            gActExModel
+	GCodeSourceModel       gCodeSourceModel
+	GCronTriggerModel      gCronTriggerModel
+	GDelayedCallModel      gDelayedCallModel
+	GDynamicActionDefModel gDynamicActionDefModel
+	GEnvModel              gEnvModel
+	GEventTriggerModel     gEventTriggerModel
+	GMetricsModel          gMetricsModel
+	GNamedLockModel        gNamedLockModel
+	GResourceMemberModel   gResourceMemberModel
+	GScheduledJobModel     gScheduledJobModel
+	GTaskExModel           gTaskExModel
+	GWfDefModel            gWfDefModel
+	GWfExModel             gWfExModel
+	GWorkbookModel         gWorkbookModel
 }
 
 func (q *Query) Available() bool { return q.db != nil }
 
 func (q *Query) clone(db *gorm.DB) *Query {
 	return &Query{
-		db:                      db,
-		ActionDefinitionsV2:     q.ActionDefinitionsV2.clone(db),
-		ActionExecutionsV2:      q.ActionExecutionsV2.clone(db),
-		CodeSource:              q.CodeSource.clone(db),
-		CronTriggersV2:          q.CronTriggersV2.clone(db),
-		DelayedCallsV2:          q.DelayedCallsV2.clone(db),
-		DynamicActionDefinition: q.DynamicActionDefinition.clone(db),
-		EnvironmentsV2:          q.EnvironmentsV2.clone(db),
-		EventTriggersV2:         q.EventTriggersV2.clone(db),
-		MistralMetric:           q.MistralMetric.clone(db),
-		NamedLock:               q.NamedLock.clone(db),
-		ResourceMembersV2:       q.ResourceMembersV2.clone(db),
-		ScheduledJobsV2:         q.ScheduledJobsV2.clone(db),
-		TaskExecutionsV2:        q.TaskExecutionsV2.clone(db),
-		WorkbooksV2:             q.WorkbooksV2.clone(db),
-		WorkflowDefinitionsV2:   q.WorkflowDefinitionsV2.clone(db),
-		WorkflowExecutionsV2:    q.WorkflowExecutionsV2.clone(db),
+		db:                     db,
+		GActDefModel:           q.GActDefModel.clone(db),
+		GActExModel:            q.GActExModel.clone(db),
+		GCodeSourceModel:       q.GCodeSourceModel.clone(db),
+		GCronTriggerModel:      q.GCronTriggerModel.clone(db),
+		GDelayedCallModel:      q.GDelayedCallModel.clone(db),
+		GDynamicActionDefModel: q.GDynamicActionDefModel.clone(db),
+		GEnvModel:              q.GEnvModel.clone(db),
+		GEventTriggerModel:     q.GEventTriggerModel.clone(db),
+		GMetricsModel:          q.GMetricsModel.clone(db),
+		GNamedLockModel:        q.GNamedLockModel.clone(db),
+		GResourceMemberModel:   q.GResourceMemberModel.clone(db),
+		GScheduledJobModel:     q.GScheduledJobModel.clone(db),
+		GTaskExModel:           q.GTaskExModel.clone(db),
+		GWfDefModel:            q.GWfDefModel.clone(db),
+		GWfExModel:             q.GWfExModel.clone(db),
+		GWorkbookModel:         q.GWorkbookModel.clone(db),
 	}
 }
 
@@ -92,63 +92,63 @@ func (q *Query) WriteDB() *Query {
 
 func (q *Query) ReplaceDB(db *gorm.DB) *Query {
 	return &Query{
-		db:                      db,
-		ActionDefinitionsV2:     q.ActionDefinitionsV2.replaceDB(db),
-		ActionExecutionsV2:      q.ActionExecutionsV2.replaceDB(db),
-		CodeSource:              q.CodeSource.replaceDB(db),
-		CronTriggersV2:          q.CronTriggersV2.replaceDB(db),
-		DelayedCallsV2:          q.DelayedCallsV2.replaceDB(db),
-		DynamicActionDefinition: q.DynamicActionDefinition.replaceDB(db),
-		EnvironmentsV2:          q.EnvironmentsV2.replaceDB(db),
-		EventTriggersV2:         q.EventTriggersV2.replaceDB(db),
-		MistralMetric:           q.MistralMetric.replaceDB(db),
-		NamedLock:               q.NamedLock.replaceDB(db),
-		ResourceMembersV2:       q.ResourceMembersV2.replaceDB(db),
-		ScheduledJobsV2:         q.ScheduledJobsV2.replaceDB(db),
-		TaskExecutionsV2:        q.TaskExecutionsV2.replaceDB(db),
-		WorkbooksV2:             q.WorkbooksV2.replaceDB(db),
-		WorkflowDefinitionsV2:   q.WorkflowDefinitionsV2.replaceDB(db),
-		WorkflowExecutionsV2:    q.WorkflowExecutionsV2.replaceDB(db),
+		db:                     db,
+		GActDefModel:           q.GActDefModel.replaceDB(db),
+		GActExModel:            q.GActExModel.replaceDB(db),
+		GCodeSourceModel:       q.GCodeSourceModel.replaceDB(db),
+		GCronTriggerModel:      q.GCronTriggerModel.replaceDB(db),
+		GDelayedCallModel:      q.GDelayedCallModel.replaceDB(db),
+		GDynamicActionDefModel: q.GDynamicActionDefModel.replaceDB(db),
+		GEnvModel:              q.GEnvModel.replaceDB(db),
+		GEventTriggerModel:     q.GEventTriggerModel.replaceDB(db),
+		GMetricsModel:          q.GMetricsModel.replaceDB(db),
+		GNamedLockModel:        q.GNamedLockModel.replaceDB(db),
+		GResourceMemberModel:   q.GResourceMemberModel.replaceDB(db),
+		GScheduledJobModel:     q.GScheduledJobModel.replaceDB(db),
+		GTaskExModel:           q.GTaskExModel.replaceDB(db),
+		GWfDefModel:            q.GWfDefModel.replaceDB(db),
+		GWfExModel:             q.GWfExModel.replaceDB(db),
+		GWorkbookModel:         q.GWorkbookModel.replaceDB(db),
 	}
 }
 
 type queryCtx struct {
-	ActionDefinitionsV2     *actionDefinitionsV2Do
-	ActionExecutionsV2      *actionExecutionsV2Do
-	CodeSource              *codeSourceDo
-	CronTriggersV2          *cronTriggersV2Do
-	DelayedCallsV2          *delayedCallsV2Do
-	DynamicActionDefinition *dynamicActionDefinitionDo
-	EnvironmentsV2          *environmentsV2Do
-	EventTriggersV2         *eventTriggersV2Do
-	MistralMetric           *mistralMetricDo
-	NamedLock               *namedLockDo
-	ResourceMembersV2       *resourceMembersV2Do
-	ScheduledJobsV2         *scheduledJobsV2Do
-	TaskExecutionsV2        *taskExecutionsV2Do
-	WorkbooksV2             *workbooksV2Do
-	WorkflowDefinitionsV2   *workflowDefinitionsV2Do
-	WorkflowExecutionsV2    *workflowExecutionsV2Do
+	GActDefModel           *gActDefModelDo
+	GActExModel            *gActExModelDo
+	GCodeSourceModel       *gCodeSourceModelDo
+	GCronTriggerModel      *gCronTriggerModelDo
+	GDelayedCallModel      *gDelayedCallModelDo
+	GDynamicActionDefModel *gDynamicActionDefModelDo
+	GEnvModel              *gEnvModelDo
+	GEventTriggerModel     *gEventTriggerModelDo
+	GMetricsModel          *gMetricsModelDo
+	GNamedLockModel        *gNamedLockModelDo
+	GResourceMemberModel   *gResourceMemberModelDo
+	GScheduledJobModel     *gScheduledJobModelDo
+	GTaskExModel           *gTaskExModelDo
+	GWfDefModel            *gWfDefModelDo
+	GWfExModel             *gWfExModelDo
+	GWorkbookModel         *gWorkbookModelDo
 }
 
 func (q *Query) WithContext(ctx context.Context) *queryCtx {
 	return &queryCtx{
-		ActionDefinitionsV2:     q.ActionDefinitionsV2.WithContext(ctx),
-		ActionExecutionsV2:      q.ActionExecutionsV2.WithContext(ctx),
-		CodeSource:              q.CodeSource.WithContext(ctx),
-		CronTriggersV2:          q.CronTriggersV2.WithContext(ctx),
-		DelayedCallsV2:          q.DelayedCallsV2.WithContext(ctx),
-		DynamicActionDefinition: q.DynamicActionDefinition.WithContext(ctx),
-		EnvironmentsV2:          q.EnvironmentsV2.WithContext(ctx),
-		EventTriggersV2:         q.EventTriggersV2.WithContext(ctx),
-		MistralMetric:           q.MistralMetric.WithContext(ctx),
-		NamedLock:               q.NamedLock.WithContext(ctx),
-		ResourceMembersV2:       q.ResourceMembersV2.WithContext(ctx),
-		ScheduledJobsV2:         q.ScheduledJobsV2.WithContext(ctx),
-		TaskExecutionsV2:        q.TaskExecutionsV2.WithContext(ctx),
-		WorkbooksV2:             q.WorkbooksV2.WithContext(ctx),
-		WorkflowDefinitionsV2:   q.WorkflowDefinitionsV2.WithContext(ctx),
-		WorkflowExecutionsV2:    q.WorkflowExecutionsV2.WithContext(ctx),
+		GActDefModel:           q.GActDefModel.WithContext(ctx),
+		GActExModel:            q.GActExModel.WithContext(ctx),
+		GCodeSourceModel:       q.GCodeSourceModel.WithContext(ctx),
+		GCronTriggerModel:      q.GCronTriggerModel.WithContext(ctx),
+		GDelayedCallModel:      q.GDelayedCallModel.WithContext(ctx),
+		GDynamicActionDefModel: q.GDynamicActionDefModel.WithContext(ctx),
+		GEnvModel:              q.GEnvModel.WithContext(ctx),
+		GEventTriggerModel:     q.GEventTriggerModel.WithContext(ctx),
+		GMetricsModel:          q.GMetricsModel.WithContext(ctx),
+		GNamedLockModel:        q.GNamedLockModel.WithContext(ctx),
+		GResourceMemberModel:   q.GResourceMemberModel.WithContext(ctx),
+		GScheduledJobModel:     q.GScheduledJobModel.WithContext(ctx),
+		GTaskExModel:           q.GTaskExModel.WithContext(ctx),
+		GWfDefModel:            q.GWfDefModel.WithContext(ctx),
+		GWfExModel:             q.GWfExModel.WithContext(ctx),
+		GWorkbookModel:         q.GWorkbookModel.WithContext(ctx),
 	}
 }
 

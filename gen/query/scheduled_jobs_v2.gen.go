@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,85 +16,95 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newScheduledJobsV2(db *gorm.DB, opts ...gen.DOOption) scheduledJobsV2 {
-	_scheduledJobsV2 := scheduledJobsV2{}
+func newGScheduledJobModel(db *gorm.DB, opts ...gen.DOOption) gScheduledJobModel {
+	_gScheduledJobModel := gScheduledJobModel{}
 
-	_scheduledJobsV2.scheduledJobsV2Do.UseDB(db, opts...)
-	_scheduledJobsV2.scheduledJobsV2Do.UseModel(&model.ScheduledJobsV2{})
+	_gScheduledJobModel.gScheduledJobModelDo.UseDB(db, opts...)
+	_gScheduledJobModel.gScheduledJobModelDo.UseModel(&sqlmodel.GScheduledJobModel{})
 
-	tableName := _scheduledJobsV2.scheduledJobsV2Do.TableName()
-	_scheduledJobsV2.ALL = field.NewAsterisk(tableName)
-	_scheduledJobsV2.ID = field.NewString(tableName, "id")
-	_scheduledJobsV2.JobType = field.NewString(tableName, "job_type")
-	_scheduledJobsV2.JobArgs = field.NewString(tableName, "job_args")
-	_scheduledJobsV2.ExecuteAt = field.NewString(tableName, "execute_at")
-	_scheduledJobsV2.CapturedAt = field.NewString(tableName, "captured_at")
-	_scheduledJobsV2.Key = field.NewString(tableName, "key")
-	_scheduledJobsV2.CreatedAt = field.NewString(tableName, "created_at")
+	tableName := _gScheduledJobModel.gScheduledJobModelDo.TableName()
+	_gScheduledJobModel.ALL = field.NewAsterisk(tableName)
+	_gScheduledJobModel.ID = field.NewString(tableName, "id")
+	_gScheduledJobModel.RunAfter = field.NewInt(tableName, "run_after")
+	_gScheduledJobModel.TargetFactoryFuncName = field.NewString(tableName, "target_factory_func_name")
+	_gScheduledJobModel.FuncName = field.NewString(tableName, "func_name")
+	_gScheduledJobModel.FuncArgs = field.NewField(tableName, "func_args")
+	_gScheduledJobModel.FuncArgSerializers = field.NewField(tableName, "func_arg_serializers")
+	_gScheduledJobModel.AuthCtx = field.NewField(tableName, "auth_ctx")
+	_gScheduledJobModel.ExecuteAt = field.NewTime(tableName, "execute_at")
+	_gScheduledJobModel.CapturedAt = field.NewTime(tableName, "captured_at")
+	_gScheduledJobModel.Key = field.NewString(tableName, "key")
+	_gScheduledJobModel.CreatedAt = field.NewTime(tableName, "created_at")
 
-	_scheduledJobsV2.fillFieldMap()
+	_gScheduledJobModel.fillFieldMap()
 
-	return _scheduledJobsV2
+	return _gScheduledJobModel
 }
 
-type scheduledJobsV2 struct {
-	scheduledJobsV2Do scheduledJobsV2Do
+type gScheduledJobModel struct {
+	gScheduledJobModelDo gScheduledJobModelDo
 
-	ALL        field.Asterisk
-	ID         field.String
-	JobType    field.String
-	JobArgs    field.String
-	ExecuteAt  field.String
-	CapturedAt field.String
-	Key        field.String
-	CreatedAt  field.String
+	ALL                   field.Asterisk
+	ID                    field.String
+	RunAfter              field.Int
+	TargetFactoryFuncName field.String
+	FuncName              field.String
+	FuncArgs              field.Field
+	FuncArgSerializers    field.Field
+	AuthCtx               field.Field
+	ExecuteAt             field.Time
+	CapturedAt            field.Time
+	Key                   field.String
+	CreatedAt             field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (s scheduledJobsV2) Table(newTableName string) *scheduledJobsV2 {
-	s.scheduledJobsV2Do.UseTable(newTableName)
-	return s.updateTableName(newTableName)
+func (g gScheduledJobModel) Table(newTableName string) *gScheduledJobModel {
+	g.gScheduledJobModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (s scheduledJobsV2) As(alias string) *scheduledJobsV2 {
-	s.scheduledJobsV2Do.DO = *(s.scheduledJobsV2Do.As(alias).(*gen.DO))
-	return s.updateTableName(alias)
+func (g gScheduledJobModel) As(alias string) *gScheduledJobModel {
+	g.gScheduledJobModelDo.DO = *(g.gScheduledJobModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (s *scheduledJobsV2) updateTableName(table string) *scheduledJobsV2 {
-	s.ALL = field.NewAsterisk(table)
-	s.ID = field.NewString(table, "id")
-	s.JobType = field.NewString(table, "job_type")
-	s.JobArgs = field.NewString(table, "job_args")
-	s.ExecuteAt = field.NewString(table, "execute_at")
-	s.CapturedAt = field.NewString(table, "captured_at")
-	s.Key = field.NewString(table, "key")
-	s.CreatedAt = field.NewString(table, "created_at")
+func (g *gScheduledJobModel) updateTableName(table string) *gScheduledJobModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.RunAfter = field.NewInt(table, "run_after")
+	g.TargetFactoryFuncName = field.NewString(table, "target_factory_func_name")
+	g.FuncName = field.NewString(table, "func_name")
+	g.FuncArgs = field.NewField(table, "func_args")
+	g.FuncArgSerializers = field.NewField(table, "func_arg_serializers")
+	g.AuthCtx = field.NewField(table, "auth_ctx")
+	g.ExecuteAt = field.NewTime(table, "execute_at")
+	g.CapturedAt = field.NewTime(table, "captured_at")
+	g.Key = field.NewString(table, "key")
+	g.CreatedAt = field.NewTime(table, "created_at")
 
-	s.fillFieldMap()
+	g.fillFieldMap()
 
-	return s
+	return g
 }
 
-func (s *scheduledJobsV2) WithContext(ctx context.Context) *scheduledJobsV2Do {
-	return s.scheduledJobsV2Do.WithContext(ctx)
+func (g *gScheduledJobModel) WithContext(ctx context.Context) *gScheduledJobModelDo {
+	return g.gScheduledJobModelDo.WithContext(ctx)
 }
 
-func (s scheduledJobsV2) TableName() string { return s.scheduledJobsV2Do.TableName() }
+func (g gScheduledJobModel) TableName() string { return g.gScheduledJobModelDo.TableName() }
 
-func (s scheduledJobsV2) Alias() string { return s.scheduledJobsV2Do.Alias() }
+func (g gScheduledJobModel) Alias() string { return g.gScheduledJobModelDo.Alias() }
 
-func (s scheduledJobsV2) Columns(cols ...field.Expr) gen.Columns {
-	return s.scheduledJobsV2Do.Columns(cols...)
+func (g gScheduledJobModel) Columns(cols ...field.Expr) gen.Columns {
+	return g.gScheduledJobModelDo.Columns(cols...)
 }
 
-func (s *scheduledJobsV2) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := s.fieldMap[fieldName]
+func (g *gScheduledJobModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -101,223 +112,227 @@ func (s *scheduledJobsV2) GetFieldByName(fieldName string) (field.OrderExpr, boo
 	return _oe, ok
 }
 
-func (s *scheduledJobsV2) fillFieldMap() {
-	s.fieldMap = make(map[string]field.Expr, 7)
-	s.fieldMap["id"] = s.ID
-	s.fieldMap["job_type"] = s.JobType
-	s.fieldMap["job_args"] = s.JobArgs
-	s.fieldMap["execute_at"] = s.ExecuteAt
-	s.fieldMap["captured_at"] = s.CapturedAt
-	s.fieldMap["key"] = s.Key
-	s.fieldMap["created_at"] = s.CreatedAt
+func (g *gScheduledJobModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 11)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["run_after"] = g.RunAfter
+	g.fieldMap["target_factory_func_name"] = g.TargetFactoryFuncName
+	g.fieldMap["func_name"] = g.FuncName
+	g.fieldMap["func_args"] = g.FuncArgs
+	g.fieldMap["func_arg_serializers"] = g.FuncArgSerializers
+	g.fieldMap["auth_ctx"] = g.AuthCtx
+	g.fieldMap["execute_at"] = g.ExecuteAt
+	g.fieldMap["captured_at"] = g.CapturedAt
+	g.fieldMap["key"] = g.Key
+	g.fieldMap["created_at"] = g.CreatedAt
 }
 
-func (s scheduledJobsV2) clone(db *gorm.DB) scheduledJobsV2 {
-	s.scheduledJobsV2Do.ReplaceConnPool(db.Statement.ConnPool)
-	return s
+func (g gScheduledJobModel) clone(db *gorm.DB) gScheduledJobModel {
+	g.gScheduledJobModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (s scheduledJobsV2) replaceDB(db *gorm.DB) scheduledJobsV2 {
-	s.scheduledJobsV2Do.ReplaceDB(db)
-	return s
+func (g gScheduledJobModel) replaceDB(db *gorm.DB) gScheduledJobModel {
+	g.gScheduledJobModelDo.ReplaceDB(db)
+	return g
 }
 
-type scheduledJobsV2Do struct{ gen.DO }
+type gScheduledJobModelDo struct{ gen.DO }
 
-func (s scheduledJobsV2Do) Debug() *scheduledJobsV2Do {
-	return s.withDO(s.DO.Debug())
+func (g gScheduledJobModelDo) Debug() *gScheduledJobModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (s scheduledJobsV2Do) WithContext(ctx context.Context) *scheduledJobsV2Do {
-	return s.withDO(s.DO.WithContext(ctx))
+func (g gScheduledJobModelDo) WithContext(ctx context.Context) *gScheduledJobModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (s scheduledJobsV2Do) ReadDB() *scheduledJobsV2Do {
-	return s.Clauses(dbresolver.Read)
+func (g gScheduledJobModelDo) ReadDB() *gScheduledJobModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (s scheduledJobsV2Do) WriteDB() *scheduledJobsV2Do {
-	return s.Clauses(dbresolver.Write)
+func (g gScheduledJobModelDo) WriteDB() *gScheduledJobModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (s scheduledJobsV2Do) Session(config *gorm.Session) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Session(config))
+func (g gScheduledJobModelDo) Session(config *gorm.Session) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (s scheduledJobsV2Do) Clauses(conds ...clause.Expression) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Clauses(conds...))
+func (g gScheduledJobModelDo) Clauses(conds ...clause.Expression) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (s scheduledJobsV2Do) Returning(value interface{}, columns ...string) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Returning(value, columns...))
+func (g gScheduledJobModelDo) Returning(value interface{}, columns ...string) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (s scheduledJobsV2Do) Not(conds ...gen.Condition) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Not(conds...))
+func (g gScheduledJobModelDo) Not(conds ...gen.Condition) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (s scheduledJobsV2Do) Or(conds ...gen.Condition) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Or(conds...))
+func (g gScheduledJobModelDo) Or(conds ...gen.Condition) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (s scheduledJobsV2Do) Select(conds ...field.Expr) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Select(conds...))
+func (g gScheduledJobModelDo) Select(conds ...field.Expr) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (s scheduledJobsV2Do) Where(conds ...gen.Condition) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Where(conds...))
+func (g gScheduledJobModelDo) Where(conds ...gen.Condition) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (s scheduledJobsV2Do) Order(conds ...field.Expr) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Order(conds...))
+func (g gScheduledJobModelDo) Order(conds ...field.Expr) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (s scheduledJobsV2Do) Distinct(cols ...field.Expr) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Distinct(cols...))
+func (g gScheduledJobModelDo) Distinct(cols ...field.Expr) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (s scheduledJobsV2Do) Omit(cols ...field.Expr) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Omit(cols...))
+func (g gScheduledJobModelDo) Omit(cols ...field.Expr) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (s scheduledJobsV2Do) Join(table schema.Tabler, on ...field.Expr) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Join(table, on...))
+func (g gScheduledJobModelDo) Join(table schema.Tabler, on ...field.Expr) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (s scheduledJobsV2Do) LeftJoin(table schema.Tabler, on ...field.Expr) *scheduledJobsV2Do {
-	return s.withDO(s.DO.LeftJoin(table, on...))
+func (g gScheduledJobModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gScheduledJobModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (s scheduledJobsV2Do) RightJoin(table schema.Tabler, on ...field.Expr) *scheduledJobsV2Do {
-	return s.withDO(s.DO.RightJoin(table, on...))
+func (g gScheduledJobModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gScheduledJobModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (s scheduledJobsV2Do) Group(cols ...field.Expr) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Group(cols...))
+func (g gScheduledJobModelDo) Group(cols ...field.Expr) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (s scheduledJobsV2Do) Having(conds ...gen.Condition) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Having(conds...))
+func (g gScheduledJobModelDo) Having(conds ...gen.Condition) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (s scheduledJobsV2Do) Limit(limit int) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Limit(limit))
+func (g gScheduledJobModelDo) Limit(limit int) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (s scheduledJobsV2Do) Offset(offset int) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Offset(offset))
+func (g gScheduledJobModelDo) Offset(offset int) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (s scheduledJobsV2Do) Scopes(funcs ...func(gen.Dao) gen.Dao) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Scopes(funcs...))
+func (g gScheduledJobModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (s scheduledJobsV2Do) Unscoped() *scheduledJobsV2Do {
-	return s.withDO(s.DO.Unscoped())
+func (g gScheduledJobModelDo) Unscoped() *gScheduledJobModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (s scheduledJobsV2Do) Create(values ...*model.ScheduledJobsV2) error {
+func (g gScheduledJobModelDo) Create(values ...*sqlmodel.GScheduledJobModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return s.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (s scheduledJobsV2Do) CreateInBatches(values []*model.ScheduledJobsV2, batchSize int) error {
-	return s.DO.CreateInBatches(values, batchSize)
+func (g gScheduledJobModelDo) CreateInBatches(values []*sqlmodel.GScheduledJobModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (s scheduledJobsV2Do) Save(values ...*model.ScheduledJobsV2) error {
+func (g gScheduledJobModelDo) Save(values ...*sqlmodel.GScheduledJobModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return s.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (s scheduledJobsV2Do) First() (*model.ScheduledJobsV2, error) {
-	if result, err := s.DO.First(); err != nil {
+func (g gScheduledJobModelDo) First() (*sqlmodel.GScheduledJobModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ScheduledJobsV2), nil
+		return result.(*sqlmodel.GScheduledJobModel), nil
 	}
 }
 
-func (s scheduledJobsV2Do) Take() (*model.ScheduledJobsV2, error) {
-	if result, err := s.DO.Take(); err != nil {
+func (g gScheduledJobModelDo) Take() (*sqlmodel.GScheduledJobModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ScheduledJobsV2), nil
+		return result.(*sqlmodel.GScheduledJobModel), nil
 	}
 }
 
-func (s scheduledJobsV2Do) Last() (*model.ScheduledJobsV2, error) {
-	if result, err := s.DO.Last(); err != nil {
+func (g gScheduledJobModelDo) Last() (*sqlmodel.GScheduledJobModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ScheduledJobsV2), nil
+		return result.(*sqlmodel.GScheduledJobModel), nil
 	}
 }
 
-func (s scheduledJobsV2Do) Find() ([]*model.ScheduledJobsV2, error) {
-	result, err := s.DO.Find()
-	return result.([]*model.ScheduledJobsV2), err
+func (g gScheduledJobModelDo) Find() ([]*sqlmodel.GScheduledJobModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GScheduledJobModel), err
 }
 
-func (s scheduledJobsV2Do) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.ScheduledJobsV2, err error) {
-	buf := make([]*model.ScheduledJobsV2, 0, batchSize)
-	err = s.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gScheduledJobModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GScheduledJobModel, err error) {
+	buf := make([]*sqlmodel.GScheduledJobModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (s scheduledJobsV2Do) FindInBatches(result *[]*model.ScheduledJobsV2, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return s.DO.FindInBatches(result, batchSize, fc)
+func (g gScheduledJobModelDo) FindInBatches(result *[]*sqlmodel.GScheduledJobModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (s scheduledJobsV2Do) Attrs(attrs ...field.AssignExpr) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Attrs(attrs...))
+func (g gScheduledJobModelDo) Attrs(attrs ...field.AssignExpr) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (s scheduledJobsV2Do) Assign(attrs ...field.AssignExpr) *scheduledJobsV2Do {
-	return s.withDO(s.DO.Assign(attrs...))
+func (g gScheduledJobModelDo) Assign(attrs ...field.AssignExpr) *gScheduledJobModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (s scheduledJobsV2Do) Joins(fields ...field.RelationField) *scheduledJobsV2Do {
+func (g gScheduledJobModelDo) Joins(fields ...field.RelationField) *gScheduledJobModelDo {
 	for _, _f := range fields {
-		s = *s.withDO(s.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &s
+	return &g
 }
 
-func (s scheduledJobsV2Do) Preload(fields ...field.RelationField) *scheduledJobsV2Do {
+func (g gScheduledJobModelDo) Preload(fields ...field.RelationField) *gScheduledJobModelDo {
 	for _, _f := range fields {
-		s = *s.withDO(s.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &s
+	return &g
 }
 
-func (s scheduledJobsV2Do) FirstOrInit() (*model.ScheduledJobsV2, error) {
-	if result, err := s.DO.FirstOrInit(); err != nil {
+func (g gScheduledJobModelDo) FirstOrInit() (*sqlmodel.GScheduledJobModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ScheduledJobsV2), nil
+		return result.(*sqlmodel.GScheduledJobModel), nil
 	}
 }
 
-func (s scheduledJobsV2Do) FirstOrCreate() (*model.ScheduledJobsV2, error) {
-	if result, err := s.DO.FirstOrCreate(); err != nil {
+func (g gScheduledJobModelDo) FirstOrCreate() (*sqlmodel.GScheduledJobModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ScheduledJobsV2), nil
+		return result.(*sqlmodel.GScheduledJobModel), nil
 	}
 }
 
-func (s scheduledJobsV2Do) FindByPage(offset int, limit int) (result []*model.ScheduledJobsV2, count int64, err error) {
-	result, err = s.Offset(offset).Limit(limit).Find()
+func (g gScheduledJobModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GScheduledJobModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -327,29 +342,29 @@ func (s scheduledJobsV2Do) FindByPage(offset int, limit int) (result []*model.Sc
 		return
 	}
 
-	count, err = s.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (s scheduledJobsV2Do) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = s.Count()
+func (g gScheduledJobModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = s.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (s scheduledJobsV2Do) Scan(result interface{}) (err error) {
-	return s.DO.Scan(result)
+func (g gScheduledJobModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (s scheduledJobsV2Do) Delete(models ...*model.ScheduledJobsV2) (result gen.ResultInfo, err error) {
-	return s.DO.Delete(models)
+func (g gScheduledJobModelDo) Delete(models ...*sqlmodel.GScheduledJobModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (s *scheduledJobsV2Do) withDO(do gen.Dao) *scheduledJobsV2Do {
-	s.DO = *do.(*gen.DO)
-	return s
+func (g *gScheduledJobModelDo) withDO(do gen.Dao) *gScheduledJobModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

@@ -1,23 +1,25 @@
 //go:build ignore
 // +build ignore
 
-// gen.go regenerates gorm/gen query DAO for all Python-parity tables.
+// gen.go regenerates gorm/gen query DAO from hand-written GORM models in
+// gen/sqlmodel/ — not from database introspection.
+//
 // Run with: go run gen/gen.go
 //
-// Uses the actual gorm models from internal/db/sql.go (gWorkbook, gNamedLock, etc.)
-// because those are the actual DB-schema models AutoMigrate uses.
-// gen introspects them and produces type-safe DAO in gen/query/.
+// gen/sqlmodel/models.go is the single source of truth for table columns,
+// sizes, and indexes. gorm/gen emits type-safe DAO into gen/model/ and
+// gen/query/. AutoMigrate in internal/db/sql.go consumes the same models
+// to create matching tables.
 package main
 
 import (
 	"fmt"
 
-	"gorm.io/driver/mysql"
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gen"
 	"gorm.io/gorm"
 )
-
-const dsn = "root:Mypass_802@tcp(localhost:3306)/workflow_go?charset=utf8mb4&parseTime=True&loc=Local"
 
 func main() {
 	g := gen.NewGenerator(gen.Config{
@@ -25,15 +27,32 @@ func main() {
 		ModelPkgPath: "gen/model",
 	})
 
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	// Throwaway SQLite :memory: DB — gen only needs a valid gorm.DB handle
+	// for Statement.Parse; ApplyBasic reads Go structs via reflection.
+	d, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
-		panic(fmt.Sprintf("connect mysql: %v", err))
+		panic(fmt.Sprintf("open sqlite :memory: %v", err))
 	}
-	g.UseDB(db)
+	g.UseDB(d)
 
-	// Generate ALL tables — gen introspects actual MySQL schema,
-	// so the generated model matches AutoMigrate exactly.
-	g.ApplyBasic(g.GenerateAllTable()...)
+	g.ApplyBasic(
+		&sqlmodel.GWorkbookModel{},
+		&sqlmodel.GWfDefModel{},
+		&sqlmodel.GActDefModel{},
+		&sqlmodel.GWfExModel{},
+		&sqlmodel.GTaskExModel{},
+		&sqlmodel.GActExModel{},
+		&sqlmodel.GEnvModel{},
+		&sqlmodel.GCronTriggerModel{},
+		&sqlmodel.GScheduledJobModel{},
+		&sqlmodel.GNamedLockModel{},
+		&sqlmodel.GDynamicActionDefModel{},
+		&sqlmodel.GCodeSourceModel{},
+		&sqlmodel.GEventTriggerModel{},
+		&sqlmodel.GResourceMemberModel{},
+		&sqlmodel.GMetricsModel{},
+		&sqlmodel.GDelayedCallModel{},
+	)
 
 	g.Execute()
 	fmt.Println("gen done")

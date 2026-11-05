@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,73 +16,99 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newWorkflowDefinitionsV2(db *gorm.DB, opts ...gen.DOOption) workflowDefinitionsV2 {
-	_workflowDefinitionsV2 := workflowDefinitionsV2{}
+func newGWfDefModel(db *gorm.DB, opts ...gen.DOOption) gWfDefModel {
+	_gWfDefModel := gWfDefModel{}
 
-	_workflowDefinitionsV2.workflowDefinitionsV2Do.UseDB(db, opts...)
-	_workflowDefinitionsV2.workflowDefinitionsV2Do.UseModel(&model.WorkflowDefinitionsV2{})
+	_gWfDefModel.gWfDefModelDo.UseDB(db, opts...)
+	_gWfDefModel.gWfDefModelDo.UseModel(&sqlmodel.GWfDefModel{})
 
-	tableName := _workflowDefinitionsV2.workflowDefinitionsV2Do.TableName()
-	_workflowDefinitionsV2.ALL = field.NewAsterisk(tableName)
-	_workflowDefinitionsV2.ID = field.NewString(tableName, "id")
-	_workflowDefinitionsV2.Name = field.NewString(tableName, "name")
-	_workflowDefinitionsV2.Data = field.NewString(tableName, "data")
+	tableName := _gWfDefModel.gWfDefModelDo.TableName()
+	_gWfDefModel.ALL = field.NewAsterisk(tableName)
+	_gWfDefModel.ID = field.NewString(tableName, "id")
+	_gWfDefModel.Name = field.NewString(tableName, "name")
+	_gWfDefModel.Namespace = field.NewString(tableName, "namespace")
+	_gWfDefModel.Definition = field.NewString(tableName, "definition")
+	_gWfDefModel.Spec = field.NewField(tableName, "spec")
+	_gWfDefModel.Tags = field.NewField(tableName, "tags")
+	_gWfDefModel.IsSystem = field.NewBool(tableName, "is_system")
+	_gWfDefModel.Checksum = field.NewString(tableName, "checksum")
+	_gWfDefModel.WorkbookName = field.NewString(tableName, "workbook_name")
+	_gWfDefModel.ProjectID = field.NewString(tableName, "project_id")
+	_gWfDefModel.Scope = field.NewString(tableName, "scope")
+	_gWfDefModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gWfDefModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_workflowDefinitionsV2.fillFieldMap()
+	_gWfDefModel.fillFieldMap()
 
-	return _workflowDefinitionsV2
+	return _gWfDefModel
 }
 
-type workflowDefinitionsV2 struct {
-	workflowDefinitionsV2Do workflowDefinitionsV2Do
+type gWfDefModel struct {
+	gWfDefModelDo gWfDefModelDo
 
-	ALL  field.Asterisk
-	ID   field.String
-	Name field.String
-	Data field.String
+	ALL          field.Asterisk
+	ID           field.String
+	Name         field.String
+	Namespace    field.String
+	Definition   field.String
+	Spec         field.Field
+	Tags         field.Field
+	IsSystem     field.Bool
+	Checksum     field.String
+	WorkbookName field.String
+	ProjectID    field.String
+	Scope        field.String
+	CreatedAt    field.Time
+	UpdatedAt    field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (w workflowDefinitionsV2) Table(newTableName string) *workflowDefinitionsV2 {
-	w.workflowDefinitionsV2Do.UseTable(newTableName)
-	return w.updateTableName(newTableName)
+func (g gWfDefModel) Table(newTableName string) *gWfDefModel {
+	g.gWfDefModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (w workflowDefinitionsV2) As(alias string) *workflowDefinitionsV2 {
-	w.workflowDefinitionsV2Do.DO = *(w.workflowDefinitionsV2Do.As(alias).(*gen.DO))
-	return w.updateTableName(alias)
+func (g gWfDefModel) As(alias string) *gWfDefModel {
+	g.gWfDefModelDo.DO = *(g.gWfDefModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (w *workflowDefinitionsV2) updateTableName(table string) *workflowDefinitionsV2 {
-	w.ALL = field.NewAsterisk(table)
-	w.ID = field.NewString(table, "id")
-	w.Name = field.NewString(table, "name")
-	w.Data = field.NewString(table, "data")
+func (g *gWfDefModel) updateTableName(table string) *gWfDefModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.Name = field.NewString(table, "name")
+	g.Namespace = field.NewString(table, "namespace")
+	g.Definition = field.NewString(table, "definition")
+	g.Spec = field.NewField(table, "spec")
+	g.Tags = field.NewField(table, "tags")
+	g.IsSystem = field.NewBool(table, "is_system")
+	g.Checksum = field.NewString(table, "checksum")
+	g.WorkbookName = field.NewString(table, "workbook_name")
+	g.ProjectID = field.NewString(table, "project_id")
+	g.Scope = field.NewString(table, "scope")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	w.fillFieldMap()
+	g.fillFieldMap()
 
-	return w
+	return g
 }
 
-func (w *workflowDefinitionsV2) WithContext(ctx context.Context) *workflowDefinitionsV2Do {
-	return w.workflowDefinitionsV2Do.WithContext(ctx)
+func (g *gWfDefModel) WithContext(ctx context.Context) *gWfDefModelDo {
+	return g.gWfDefModelDo.WithContext(ctx)
 }
 
-func (w workflowDefinitionsV2) TableName() string { return w.workflowDefinitionsV2Do.TableName() }
+func (g gWfDefModel) TableName() string { return g.gWfDefModelDo.TableName() }
 
-func (w workflowDefinitionsV2) Alias() string { return w.workflowDefinitionsV2Do.Alias() }
+func (g gWfDefModel) Alias() string { return g.gWfDefModelDo.Alias() }
 
-func (w workflowDefinitionsV2) Columns(cols ...field.Expr) gen.Columns {
-	return w.workflowDefinitionsV2Do.Columns(cols...)
-}
+func (g gWfDefModel) Columns(cols ...field.Expr) gen.Columns { return g.gWfDefModelDo.Columns(cols...) }
 
-func (w *workflowDefinitionsV2) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := w.fieldMap[fieldName]
+func (g *gWfDefModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -89,219 +116,229 @@ func (w *workflowDefinitionsV2) GetFieldByName(fieldName string) (field.OrderExp
 	return _oe, ok
 }
 
-func (w *workflowDefinitionsV2) fillFieldMap() {
-	w.fieldMap = make(map[string]field.Expr, 3)
-	w.fieldMap["id"] = w.ID
-	w.fieldMap["name"] = w.Name
-	w.fieldMap["data"] = w.Data
+func (g *gWfDefModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 13)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["name"] = g.Name
+	g.fieldMap["namespace"] = g.Namespace
+	g.fieldMap["definition"] = g.Definition
+	g.fieldMap["spec"] = g.Spec
+	g.fieldMap["tags"] = g.Tags
+	g.fieldMap["is_system"] = g.IsSystem
+	g.fieldMap["checksum"] = g.Checksum
+	g.fieldMap["workbook_name"] = g.WorkbookName
+	g.fieldMap["project_id"] = g.ProjectID
+	g.fieldMap["scope"] = g.Scope
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (w workflowDefinitionsV2) clone(db *gorm.DB) workflowDefinitionsV2 {
-	w.workflowDefinitionsV2Do.ReplaceConnPool(db.Statement.ConnPool)
-	return w
+func (g gWfDefModel) clone(db *gorm.DB) gWfDefModel {
+	g.gWfDefModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (w workflowDefinitionsV2) replaceDB(db *gorm.DB) workflowDefinitionsV2 {
-	w.workflowDefinitionsV2Do.ReplaceDB(db)
-	return w
+func (g gWfDefModel) replaceDB(db *gorm.DB) gWfDefModel {
+	g.gWfDefModelDo.ReplaceDB(db)
+	return g
 }
 
-type workflowDefinitionsV2Do struct{ gen.DO }
+type gWfDefModelDo struct{ gen.DO }
 
-func (w workflowDefinitionsV2Do) Debug() *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Debug())
+func (g gWfDefModelDo) Debug() *gWfDefModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (w workflowDefinitionsV2Do) WithContext(ctx context.Context) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.WithContext(ctx))
+func (g gWfDefModelDo) WithContext(ctx context.Context) *gWfDefModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (w workflowDefinitionsV2Do) ReadDB() *workflowDefinitionsV2Do {
-	return w.Clauses(dbresolver.Read)
+func (g gWfDefModelDo) ReadDB() *gWfDefModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (w workflowDefinitionsV2Do) WriteDB() *workflowDefinitionsV2Do {
-	return w.Clauses(dbresolver.Write)
+func (g gWfDefModelDo) WriteDB() *gWfDefModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (w workflowDefinitionsV2Do) Session(config *gorm.Session) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Session(config))
+func (g gWfDefModelDo) Session(config *gorm.Session) *gWfDefModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (w workflowDefinitionsV2Do) Clauses(conds ...clause.Expression) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Clauses(conds...))
+func (g gWfDefModelDo) Clauses(conds ...clause.Expression) *gWfDefModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (w workflowDefinitionsV2Do) Returning(value interface{}, columns ...string) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Returning(value, columns...))
+func (g gWfDefModelDo) Returning(value interface{}, columns ...string) *gWfDefModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (w workflowDefinitionsV2Do) Not(conds ...gen.Condition) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Not(conds...))
+func (g gWfDefModelDo) Not(conds ...gen.Condition) *gWfDefModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (w workflowDefinitionsV2Do) Or(conds ...gen.Condition) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Or(conds...))
+func (g gWfDefModelDo) Or(conds ...gen.Condition) *gWfDefModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (w workflowDefinitionsV2Do) Select(conds ...field.Expr) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Select(conds...))
+func (g gWfDefModelDo) Select(conds ...field.Expr) *gWfDefModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (w workflowDefinitionsV2Do) Where(conds ...gen.Condition) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Where(conds...))
+func (g gWfDefModelDo) Where(conds ...gen.Condition) *gWfDefModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (w workflowDefinitionsV2Do) Order(conds ...field.Expr) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Order(conds...))
+func (g gWfDefModelDo) Order(conds ...field.Expr) *gWfDefModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (w workflowDefinitionsV2Do) Distinct(cols ...field.Expr) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Distinct(cols...))
+func (g gWfDefModelDo) Distinct(cols ...field.Expr) *gWfDefModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (w workflowDefinitionsV2Do) Omit(cols ...field.Expr) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Omit(cols...))
+func (g gWfDefModelDo) Omit(cols ...field.Expr) *gWfDefModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (w workflowDefinitionsV2Do) Join(table schema.Tabler, on ...field.Expr) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Join(table, on...))
+func (g gWfDefModelDo) Join(table schema.Tabler, on ...field.Expr) *gWfDefModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (w workflowDefinitionsV2Do) LeftJoin(table schema.Tabler, on ...field.Expr) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.LeftJoin(table, on...))
+func (g gWfDefModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gWfDefModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (w workflowDefinitionsV2Do) RightJoin(table schema.Tabler, on ...field.Expr) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.RightJoin(table, on...))
+func (g gWfDefModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gWfDefModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (w workflowDefinitionsV2Do) Group(cols ...field.Expr) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Group(cols...))
+func (g gWfDefModelDo) Group(cols ...field.Expr) *gWfDefModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (w workflowDefinitionsV2Do) Having(conds ...gen.Condition) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Having(conds...))
+func (g gWfDefModelDo) Having(conds ...gen.Condition) *gWfDefModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (w workflowDefinitionsV2Do) Limit(limit int) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Limit(limit))
+func (g gWfDefModelDo) Limit(limit int) *gWfDefModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (w workflowDefinitionsV2Do) Offset(offset int) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Offset(offset))
+func (g gWfDefModelDo) Offset(offset int) *gWfDefModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (w workflowDefinitionsV2Do) Scopes(funcs ...func(gen.Dao) gen.Dao) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Scopes(funcs...))
+func (g gWfDefModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gWfDefModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (w workflowDefinitionsV2Do) Unscoped() *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Unscoped())
+func (g gWfDefModelDo) Unscoped() *gWfDefModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (w workflowDefinitionsV2Do) Create(values ...*model.WorkflowDefinitionsV2) error {
+func (g gWfDefModelDo) Create(values ...*sqlmodel.GWfDefModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return w.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (w workflowDefinitionsV2Do) CreateInBatches(values []*model.WorkflowDefinitionsV2, batchSize int) error {
-	return w.DO.CreateInBatches(values, batchSize)
+func (g gWfDefModelDo) CreateInBatches(values []*sqlmodel.GWfDefModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (w workflowDefinitionsV2Do) Save(values ...*model.WorkflowDefinitionsV2) error {
+func (g gWfDefModelDo) Save(values ...*sqlmodel.GWfDefModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return w.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (w workflowDefinitionsV2Do) First() (*model.WorkflowDefinitionsV2, error) {
-	if result, err := w.DO.First(); err != nil {
+func (g gWfDefModelDo) First() (*sqlmodel.GWfDefModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkflowDefinitionsV2), nil
+		return result.(*sqlmodel.GWfDefModel), nil
 	}
 }
 
-func (w workflowDefinitionsV2Do) Take() (*model.WorkflowDefinitionsV2, error) {
-	if result, err := w.DO.Take(); err != nil {
+func (g gWfDefModelDo) Take() (*sqlmodel.GWfDefModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkflowDefinitionsV2), nil
+		return result.(*sqlmodel.GWfDefModel), nil
 	}
 }
 
-func (w workflowDefinitionsV2Do) Last() (*model.WorkflowDefinitionsV2, error) {
-	if result, err := w.DO.Last(); err != nil {
+func (g gWfDefModelDo) Last() (*sqlmodel.GWfDefModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkflowDefinitionsV2), nil
+		return result.(*sqlmodel.GWfDefModel), nil
 	}
 }
 
-func (w workflowDefinitionsV2Do) Find() ([]*model.WorkflowDefinitionsV2, error) {
-	result, err := w.DO.Find()
-	return result.([]*model.WorkflowDefinitionsV2), err
+func (g gWfDefModelDo) Find() ([]*sqlmodel.GWfDefModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GWfDefModel), err
 }
 
-func (w workflowDefinitionsV2Do) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.WorkflowDefinitionsV2, err error) {
-	buf := make([]*model.WorkflowDefinitionsV2, 0, batchSize)
-	err = w.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gWfDefModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GWfDefModel, err error) {
+	buf := make([]*sqlmodel.GWfDefModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (w workflowDefinitionsV2Do) FindInBatches(result *[]*model.WorkflowDefinitionsV2, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return w.DO.FindInBatches(result, batchSize, fc)
+func (g gWfDefModelDo) FindInBatches(result *[]*sqlmodel.GWfDefModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (w workflowDefinitionsV2Do) Attrs(attrs ...field.AssignExpr) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Attrs(attrs...))
+func (g gWfDefModelDo) Attrs(attrs ...field.AssignExpr) *gWfDefModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (w workflowDefinitionsV2Do) Assign(attrs ...field.AssignExpr) *workflowDefinitionsV2Do {
-	return w.withDO(w.DO.Assign(attrs...))
+func (g gWfDefModelDo) Assign(attrs ...field.AssignExpr) *gWfDefModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (w workflowDefinitionsV2Do) Joins(fields ...field.RelationField) *workflowDefinitionsV2Do {
+func (g gWfDefModelDo) Joins(fields ...field.RelationField) *gWfDefModelDo {
 	for _, _f := range fields {
-		w = *w.withDO(w.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &w
+	return &g
 }
 
-func (w workflowDefinitionsV2Do) Preload(fields ...field.RelationField) *workflowDefinitionsV2Do {
+func (g gWfDefModelDo) Preload(fields ...field.RelationField) *gWfDefModelDo {
 	for _, _f := range fields {
-		w = *w.withDO(w.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &w
+	return &g
 }
 
-func (w workflowDefinitionsV2Do) FirstOrInit() (*model.WorkflowDefinitionsV2, error) {
-	if result, err := w.DO.FirstOrInit(); err != nil {
+func (g gWfDefModelDo) FirstOrInit() (*sqlmodel.GWfDefModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkflowDefinitionsV2), nil
+		return result.(*sqlmodel.GWfDefModel), nil
 	}
 }
 
-func (w workflowDefinitionsV2Do) FirstOrCreate() (*model.WorkflowDefinitionsV2, error) {
-	if result, err := w.DO.FirstOrCreate(); err != nil {
+func (g gWfDefModelDo) FirstOrCreate() (*sqlmodel.GWfDefModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.WorkflowDefinitionsV2), nil
+		return result.(*sqlmodel.GWfDefModel), nil
 	}
 }
 
-func (w workflowDefinitionsV2Do) FindByPage(offset int, limit int) (result []*model.WorkflowDefinitionsV2, count int64, err error) {
-	result, err = w.Offset(offset).Limit(limit).Find()
+func (g gWfDefModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GWfDefModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -311,29 +348,29 @@ func (w workflowDefinitionsV2Do) FindByPage(offset int, limit int) (result []*mo
 		return
 	}
 
-	count, err = w.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (w workflowDefinitionsV2Do) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = w.Count()
+func (g gWfDefModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = w.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (w workflowDefinitionsV2Do) Scan(result interface{}) (err error) {
-	return w.DO.Scan(result)
+func (g gWfDefModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (w workflowDefinitionsV2Do) Delete(models ...*model.WorkflowDefinitionsV2) (result gen.ResultInfo, err error) {
-	return w.DO.Delete(models)
+func (g gWfDefModelDo) Delete(models ...*sqlmodel.GWfDefModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (w *workflowDefinitionsV2Do) withDO(do gen.Dao) *workflowDefinitionsV2Do {
-	w.DO = *do.(*gen.DO)
-	return w
+func (g *gWfDefModelDo) withDO(do gen.Dao) *gWfDefModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

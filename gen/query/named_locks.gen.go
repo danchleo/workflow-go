@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,68 +16,74 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newNamedLock(db *gorm.DB, opts ...gen.DOOption) namedLock {
-	_namedLock := namedLock{}
+func newGNamedLockModel(db *gorm.DB, opts ...gen.DOOption) gNamedLockModel {
+	_gNamedLockModel := gNamedLockModel{}
 
-	_namedLock.namedLockDo.UseDB(db, opts...)
-	_namedLock.namedLockDo.UseModel(&model.NamedLock{})
+	_gNamedLockModel.gNamedLockModelDo.UseDB(db, opts...)
+	_gNamedLockModel.gNamedLockModelDo.UseModel(&sqlmodel.GNamedLockModel{})
 
-	tableName := _namedLock.namedLockDo.TableName()
-	_namedLock.ALL = field.NewAsterisk(tableName)
-	_namedLock.ID = field.NewString(tableName, "id")
-	_namedLock.Name = field.NewString(tableName, "name")
+	tableName := _gNamedLockModel.gNamedLockModelDo.TableName()
+	_gNamedLockModel.ALL = field.NewAsterisk(tableName)
+	_gNamedLockModel.ID = field.NewString(tableName, "id")
+	_gNamedLockModel.Name = field.NewString(tableName, "name")
+	_gNamedLockModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gNamedLockModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_namedLock.fillFieldMap()
+	_gNamedLockModel.fillFieldMap()
 
-	return _namedLock
+	return _gNamedLockModel
 }
 
-type namedLock struct {
-	namedLockDo namedLockDo
+type gNamedLockModel struct {
+	gNamedLockModelDo gNamedLockModelDo
 
-	ALL  field.Asterisk
-	ID   field.String
-	Name field.String
+	ALL       field.Asterisk
+	ID        field.String
+	Name      field.String
+	CreatedAt field.Time
+	UpdatedAt field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (n namedLock) Table(newTableName string) *namedLock {
-	n.namedLockDo.UseTable(newTableName)
-	return n.updateTableName(newTableName)
+func (g gNamedLockModel) Table(newTableName string) *gNamedLockModel {
+	g.gNamedLockModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (n namedLock) As(alias string) *namedLock {
-	n.namedLockDo.DO = *(n.namedLockDo.As(alias).(*gen.DO))
-	return n.updateTableName(alias)
+func (g gNamedLockModel) As(alias string) *gNamedLockModel {
+	g.gNamedLockModelDo.DO = *(g.gNamedLockModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (n *namedLock) updateTableName(table string) *namedLock {
-	n.ALL = field.NewAsterisk(table)
-	n.ID = field.NewString(table, "id")
-	n.Name = field.NewString(table, "name")
+func (g *gNamedLockModel) updateTableName(table string) *gNamedLockModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.Name = field.NewString(table, "name")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	n.fillFieldMap()
+	g.fillFieldMap()
 
-	return n
+	return g
 }
 
-func (n *namedLock) WithContext(ctx context.Context) *namedLockDo {
-	return n.namedLockDo.WithContext(ctx)
+func (g *gNamedLockModel) WithContext(ctx context.Context) *gNamedLockModelDo {
+	return g.gNamedLockModelDo.WithContext(ctx)
 }
 
-func (n namedLock) TableName() string { return n.namedLockDo.TableName() }
+func (g gNamedLockModel) TableName() string { return g.gNamedLockModelDo.TableName() }
 
-func (n namedLock) Alias() string { return n.namedLockDo.Alias() }
+func (g gNamedLockModel) Alias() string { return g.gNamedLockModelDo.Alias() }
 
-func (n namedLock) Columns(cols ...field.Expr) gen.Columns { return n.namedLockDo.Columns(cols...) }
+func (g gNamedLockModel) Columns(cols ...field.Expr) gen.Columns {
+	return g.gNamedLockModelDo.Columns(cols...)
+}
 
-func (n *namedLock) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := n.fieldMap[fieldName]
+func (g *gNamedLockModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -84,218 +91,220 @@ func (n *namedLock) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
 	return _oe, ok
 }
 
-func (n *namedLock) fillFieldMap() {
-	n.fieldMap = make(map[string]field.Expr, 2)
-	n.fieldMap["id"] = n.ID
-	n.fieldMap["name"] = n.Name
+func (g *gNamedLockModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 4)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["name"] = g.Name
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (n namedLock) clone(db *gorm.DB) namedLock {
-	n.namedLockDo.ReplaceConnPool(db.Statement.ConnPool)
-	return n
+func (g gNamedLockModel) clone(db *gorm.DB) gNamedLockModel {
+	g.gNamedLockModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (n namedLock) replaceDB(db *gorm.DB) namedLock {
-	n.namedLockDo.ReplaceDB(db)
-	return n
+func (g gNamedLockModel) replaceDB(db *gorm.DB) gNamedLockModel {
+	g.gNamedLockModelDo.ReplaceDB(db)
+	return g
 }
 
-type namedLockDo struct{ gen.DO }
+type gNamedLockModelDo struct{ gen.DO }
 
-func (n namedLockDo) Debug() *namedLockDo {
-	return n.withDO(n.DO.Debug())
+func (g gNamedLockModelDo) Debug() *gNamedLockModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (n namedLockDo) WithContext(ctx context.Context) *namedLockDo {
-	return n.withDO(n.DO.WithContext(ctx))
+func (g gNamedLockModelDo) WithContext(ctx context.Context) *gNamedLockModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (n namedLockDo) ReadDB() *namedLockDo {
-	return n.Clauses(dbresolver.Read)
+func (g gNamedLockModelDo) ReadDB() *gNamedLockModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (n namedLockDo) WriteDB() *namedLockDo {
-	return n.Clauses(dbresolver.Write)
+func (g gNamedLockModelDo) WriteDB() *gNamedLockModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (n namedLockDo) Session(config *gorm.Session) *namedLockDo {
-	return n.withDO(n.DO.Session(config))
+func (g gNamedLockModelDo) Session(config *gorm.Session) *gNamedLockModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (n namedLockDo) Clauses(conds ...clause.Expression) *namedLockDo {
-	return n.withDO(n.DO.Clauses(conds...))
+func (g gNamedLockModelDo) Clauses(conds ...clause.Expression) *gNamedLockModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (n namedLockDo) Returning(value interface{}, columns ...string) *namedLockDo {
-	return n.withDO(n.DO.Returning(value, columns...))
+func (g gNamedLockModelDo) Returning(value interface{}, columns ...string) *gNamedLockModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (n namedLockDo) Not(conds ...gen.Condition) *namedLockDo {
-	return n.withDO(n.DO.Not(conds...))
+func (g gNamedLockModelDo) Not(conds ...gen.Condition) *gNamedLockModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (n namedLockDo) Or(conds ...gen.Condition) *namedLockDo {
-	return n.withDO(n.DO.Or(conds...))
+func (g gNamedLockModelDo) Or(conds ...gen.Condition) *gNamedLockModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (n namedLockDo) Select(conds ...field.Expr) *namedLockDo {
-	return n.withDO(n.DO.Select(conds...))
+func (g gNamedLockModelDo) Select(conds ...field.Expr) *gNamedLockModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (n namedLockDo) Where(conds ...gen.Condition) *namedLockDo {
-	return n.withDO(n.DO.Where(conds...))
+func (g gNamedLockModelDo) Where(conds ...gen.Condition) *gNamedLockModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (n namedLockDo) Order(conds ...field.Expr) *namedLockDo {
-	return n.withDO(n.DO.Order(conds...))
+func (g gNamedLockModelDo) Order(conds ...field.Expr) *gNamedLockModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (n namedLockDo) Distinct(cols ...field.Expr) *namedLockDo {
-	return n.withDO(n.DO.Distinct(cols...))
+func (g gNamedLockModelDo) Distinct(cols ...field.Expr) *gNamedLockModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (n namedLockDo) Omit(cols ...field.Expr) *namedLockDo {
-	return n.withDO(n.DO.Omit(cols...))
+func (g gNamedLockModelDo) Omit(cols ...field.Expr) *gNamedLockModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (n namedLockDo) Join(table schema.Tabler, on ...field.Expr) *namedLockDo {
-	return n.withDO(n.DO.Join(table, on...))
+func (g gNamedLockModelDo) Join(table schema.Tabler, on ...field.Expr) *gNamedLockModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (n namedLockDo) LeftJoin(table schema.Tabler, on ...field.Expr) *namedLockDo {
-	return n.withDO(n.DO.LeftJoin(table, on...))
+func (g gNamedLockModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gNamedLockModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (n namedLockDo) RightJoin(table schema.Tabler, on ...field.Expr) *namedLockDo {
-	return n.withDO(n.DO.RightJoin(table, on...))
+func (g gNamedLockModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gNamedLockModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (n namedLockDo) Group(cols ...field.Expr) *namedLockDo {
-	return n.withDO(n.DO.Group(cols...))
+func (g gNamedLockModelDo) Group(cols ...field.Expr) *gNamedLockModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (n namedLockDo) Having(conds ...gen.Condition) *namedLockDo {
-	return n.withDO(n.DO.Having(conds...))
+func (g gNamedLockModelDo) Having(conds ...gen.Condition) *gNamedLockModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (n namedLockDo) Limit(limit int) *namedLockDo {
-	return n.withDO(n.DO.Limit(limit))
+func (g gNamedLockModelDo) Limit(limit int) *gNamedLockModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (n namedLockDo) Offset(offset int) *namedLockDo {
-	return n.withDO(n.DO.Offset(offset))
+func (g gNamedLockModelDo) Offset(offset int) *gNamedLockModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (n namedLockDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *namedLockDo {
-	return n.withDO(n.DO.Scopes(funcs...))
+func (g gNamedLockModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gNamedLockModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (n namedLockDo) Unscoped() *namedLockDo {
-	return n.withDO(n.DO.Unscoped())
+func (g gNamedLockModelDo) Unscoped() *gNamedLockModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (n namedLockDo) Create(values ...*model.NamedLock) error {
+func (g gNamedLockModelDo) Create(values ...*sqlmodel.GNamedLockModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return n.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (n namedLockDo) CreateInBatches(values []*model.NamedLock, batchSize int) error {
-	return n.DO.CreateInBatches(values, batchSize)
+func (g gNamedLockModelDo) CreateInBatches(values []*sqlmodel.GNamedLockModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (n namedLockDo) Save(values ...*model.NamedLock) error {
+func (g gNamedLockModelDo) Save(values ...*sqlmodel.GNamedLockModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return n.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (n namedLockDo) First() (*model.NamedLock, error) {
-	if result, err := n.DO.First(); err != nil {
+func (g gNamedLockModelDo) First() (*sqlmodel.GNamedLockModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.NamedLock), nil
+		return result.(*sqlmodel.GNamedLockModel), nil
 	}
 }
 
-func (n namedLockDo) Take() (*model.NamedLock, error) {
-	if result, err := n.DO.Take(); err != nil {
+func (g gNamedLockModelDo) Take() (*sqlmodel.GNamedLockModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.NamedLock), nil
+		return result.(*sqlmodel.GNamedLockModel), nil
 	}
 }
 
-func (n namedLockDo) Last() (*model.NamedLock, error) {
-	if result, err := n.DO.Last(); err != nil {
+func (g gNamedLockModelDo) Last() (*sqlmodel.GNamedLockModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.NamedLock), nil
+		return result.(*sqlmodel.GNamedLockModel), nil
 	}
 }
 
-func (n namedLockDo) Find() ([]*model.NamedLock, error) {
-	result, err := n.DO.Find()
-	return result.([]*model.NamedLock), err
+func (g gNamedLockModelDo) Find() ([]*sqlmodel.GNamedLockModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GNamedLockModel), err
 }
 
-func (n namedLockDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.NamedLock, err error) {
-	buf := make([]*model.NamedLock, 0, batchSize)
-	err = n.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gNamedLockModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GNamedLockModel, err error) {
+	buf := make([]*sqlmodel.GNamedLockModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (n namedLockDo) FindInBatches(result *[]*model.NamedLock, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return n.DO.FindInBatches(result, batchSize, fc)
+func (g gNamedLockModelDo) FindInBatches(result *[]*sqlmodel.GNamedLockModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (n namedLockDo) Attrs(attrs ...field.AssignExpr) *namedLockDo {
-	return n.withDO(n.DO.Attrs(attrs...))
+func (g gNamedLockModelDo) Attrs(attrs ...field.AssignExpr) *gNamedLockModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (n namedLockDo) Assign(attrs ...field.AssignExpr) *namedLockDo {
-	return n.withDO(n.DO.Assign(attrs...))
+func (g gNamedLockModelDo) Assign(attrs ...field.AssignExpr) *gNamedLockModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (n namedLockDo) Joins(fields ...field.RelationField) *namedLockDo {
+func (g gNamedLockModelDo) Joins(fields ...field.RelationField) *gNamedLockModelDo {
 	for _, _f := range fields {
-		n = *n.withDO(n.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &n
+	return &g
 }
 
-func (n namedLockDo) Preload(fields ...field.RelationField) *namedLockDo {
+func (g gNamedLockModelDo) Preload(fields ...field.RelationField) *gNamedLockModelDo {
 	for _, _f := range fields {
-		n = *n.withDO(n.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &n
+	return &g
 }
 
-func (n namedLockDo) FirstOrInit() (*model.NamedLock, error) {
-	if result, err := n.DO.FirstOrInit(); err != nil {
+func (g gNamedLockModelDo) FirstOrInit() (*sqlmodel.GNamedLockModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.NamedLock), nil
+		return result.(*sqlmodel.GNamedLockModel), nil
 	}
 }
 
-func (n namedLockDo) FirstOrCreate() (*model.NamedLock, error) {
-	if result, err := n.DO.FirstOrCreate(); err != nil {
+func (g gNamedLockModelDo) FirstOrCreate() (*sqlmodel.GNamedLockModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.NamedLock), nil
+		return result.(*sqlmodel.GNamedLockModel), nil
 	}
 }
 
-func (n namedLockDo) FindByPage(offset int, limit int) (result []*model.NamedLock, count int64, err error) {
-	result, err = n.Offset(offset).Limit(limit).Find()
+func (g gNamedLockModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GNamedLockModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -305,29 +314,29 @@ func (n namedLockDo) FindByPage(offset int, limit int) (result []*model.NamedLoc
 		return
 	}
 
-	count, err = n.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (n namedLockDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = n.Count()
+func (g gNamedLockModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = n.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (n namedLockDo) Scan(result interface{}) (err error) {
-	return n.DO.Scan(result)
+func (g gNamedLockModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (n namedLockDo) Delete(models ...*model.NamedLock) (result gen.ResultInfo, err error) {
-	return n.DO.Delete(models)
+func (g gNamedLockModelDo) Delete(models ...*sqlmodel.GNamedLockModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (n *namedLockDo) withDO(do gen.Dao) *namedLockDo {
-	n.DO = *do.(*gen.DO)
-	return n
+func (g *gNamedLockModelDo) withDO(do gen.Dao) *gNamedLockModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,73 +16,84 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newEnvironmentsV2(db *gorm.DB, opts ...gen.DOOption) environmentsV2 {
-	_environmentsV2 := environmentsV2{}
+func newGEnvModel(db *gorm.DB, opts ...gen.DOOption) gEnvModel {
+	_gEnvModel := gEnvModel{}
 
-	_environmentsV2.environmentsV2Do.UseDB(db, opts...)
-	_environmentsV2.environmentsV2Do.UseModel(&model.EnvironmentsV2{})
+	_gEnvModel.gEnvModelDo.UseDB(db, opts...)
+	_gEnvModel.gEnvModelDo.UseModel(&sqlmodel.GEnvModel{})
 
-	tableName := _environmentsV2.environmentsV2Do.TableName()
-	_environmentsV2.ALL = field.NewAsterisk(tableName)
-	_environmentsV2.ID = field.NewString(tableName, "id")
-	_environmentsV2.Name = field.NewString(tableName, "name")
-	_environmentsV2.Data = field.NewString(tableName, "data")
+	tableName := _gEnvModel.gEnvModelDo.TableName()
+	_gEnvModel.ALL = field.NewAsterisk(tableName)
+	_gEnvModel.ID = field.NewString(tableName, "id")
+	_gEnvModel.Name = field.NewString(tableName, "name")
+	_gEnvModel.Description = field.NewString(tableName, "description")
+	_gEnvModel.Variables = field.NewField(tableName, "variables")
+	_gEnvModel.ProjectID = field.NewString(tableName, "project_id")
+	_gEnvModel.Scope = field.NewString(tableName, "scope")
+	_gEnvModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gEnvModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_environmentsV2.fillFieldMap()
+	_gEnvModel.fillFieldMap()
 
-	return _environmentsV2
+	return _gEnvModel
 }
 
-type environmentsV2 struct {
-	environmentsV2Do environmentsV2Do
+type gEnvModel struct {
+	gEnvModelDo gEnvModelDo
 
-	ALL  field.Asterisk
-	ID   field.String
-	Name field.String
-	Data field.String
+	ALL         field.Asterisk
+	ID          field.String
+	Name        field.String
+	Description field.String
+	Variables   field.Field
+	ProjectID   field.String
+	Scope       field.String
+	CreatedAt   field.Time
+	UpdatedAt   field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (e environmentsV2) Table(newTableName string) *environmentsV2 {
-	e.environmentsV2Do.UseTable(newTableName)
-	return e.updateTableName(newTableName)
+func (g gEnvModel) Table(newTableName string) *gEnvModel {
+	g.gEnvModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (e environmentsV2) As(alias string) *environmentsV2 {
-	e.environmentsV2Do.DO = *(e.environmentsV2Do.As(alias).(*gen.DO))
-	return e.updateTableName(alias)
+func (g gEnvModel) As(alias string) *gEnvModel {
+	g.gEnvModelDo.DO = *(g.gEnvModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (e *environmentsV2) updateTableName(table string) *environmentsV2 {
-	e.ALL = field.NewAsterisk(table)
-	e.ID = field.NewString(table, "id")
-	e.Name = field.NewString(table, "name")
-	e.Data = field.NewString(table, "data")
+func (g *gEnvModel) updateTableName(table string) *gEnvModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.Name = field.NewString(table, "name")
+	g.Description = field.NewString(table, "description")
+	g.Variables = field.NewField(table, "variables")
+	g.ProjectID = field.NewString(table, "project_id")
+	g.Scope = field.NewString(table, "scope")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	e.fillFieldMap()
+	g.fillFieldMap()
 
-	return e
+	return g
 }
 
-func (e *environmentsV2) WithContext(ctx context.Context) *environmentsV2Do {
-	return e.environmentsV2Do.WithContext(ctx)
+func (g *gEnvModel) WithContext(ctx context.Context) *gEnvModelDo {
+	return g.gEnvModelDo.WithContext(ctx)
 }
 
-func (e environmentsV2) TableName() string { return e.environmentsV2Do.TableName() }
+func (g gEnvModel) TableName() string { return g.gEnvModelDo.TableName() }
 
-func (e environmentsV2) Alias() string { return e.environmentsV2Do.Alias() }
+func (g gEnvModel) Alias() string { return g.gEnvModelDo.Alias() }
 
-func (e environmentsV2) Columns(cols ...field.Expr) gen.Columns {
-	return e.environmentsV2Do.Columns(cols...)
-}
+func (g gEnvModel) Columns(cols ...field.Expr) gen.Columns { return g.gEnvModelDo.Columns(cols...) }
 
-func (e *environmentsV2) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := e.fieldMap[fieldName]
+func (g *gEnvModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -89,219 +101,224 @@ func (e *environmentsV2) GetFieldByName(fieldName string) (field.OrderExpr, bool
 	return _oe, ok
 }
 
-func (e *environmentsV2) fillFieldMap() {
-	e.fieldMap = make(map[string]field.Expr, 3)
-	e.fieldMap["id"] = e.ID
-	e.fieldMap["name"] = e.Name
-	e.fieldMap["data"] = e.Data
+func (g *gEnvModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 8)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["name"] = g.Name
+	g.fieldMap["description"] = g.Description
+	g.fieldMap["variables"] = g.Variables
+	g.fieldMap["project_id"] = g.ProjectID
+	g.fieldMap["scope"] = g.Scope
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (e environmentsV2) clone(db *gorm.DB) environmentsV2 {
-	e.environmentsV2Do.ReplaceConnPool(db.Statement.ConnPool)
-	return e
+func (g gEnvModel) clone(db *gorm.DB) gEnvModel {
+	g.gEnvModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (e environmentsV2) replaceDB(db *gorm.DB) environmentsV2 {
-	e.environmentsV2Do.ReplaceDB(db)
-	return e
+func (g gEnvModel) replaceDB(db *gorm.DB) gEnvModel {
+	g.gEnvModelDo.ReplaceDB(db)
+	return g
 }
 
-type environmentsV2Do struct{ gen.DO }
+type gEnvModelDo struct{ gen.DO }
 
-func (e environmentsV2Do) Debug() *environmentsV2Do {
-	return e.withDO(e.DO.Debug())
+func (g gEnvModelDo) Debug() *gEnvModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (e environmentsV2Do) WithContext(ctx context.Context) *environmentsV2Do {
-	return e.withDO(e.DO.WithContext(ctx))
+func (g gEnvModelDo) WithContext(ctx context.Context) *gEnvModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (e environmentsV2Do) ReadDB() *environmentsV2Do {
-	return e.Clauses(dbresolver.Read)
+func (g gEnvModelDo) ReadDB() *gEnvModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (e environmentsV2Do) WriteDB() *environmentsV2Do {
-	return e.Clauses(dbresolver.Write)
+func (g gEnvModelDo) WriteDB() *gEnvModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (e environmentsV2Do) Session(config *gorm.Session) *environmentsV2Do {
-	return e.withDO(e.DO.Session(config))
+func (g gEnvModelDo) Session(config *gorm.Session) *gEnvModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (e environmentsV2Do) Clauses(conds ...clause.Expression) *environmentsV2Do {
-	return e.withDO(e.DO.Clauses(conds...))
+func (g gEnvModelDo) Clauses(conds ...clause.Expression) *gEnvModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (e environmentsV2Do) Returning(value interface{}, columns ...string) *environmentsV2Do {
-	return e.withDO(e.DO.Returning(value, columns...))
+func (g gEnvModelDo) Returning(value interface{}, columns ...string) *gEnvModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (e environmentsV2Do) Not(conds ...gen.Condition) *environmentsV2Do {
-	return e.withDO(e.DO.Not(conds...))
+func (g gEnvModelDo) Not(conds ...gen.Condition) *gEnvModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (e environmentsV2Do) Or(conds ...gen.Condition) *environmentsV2Do {
-	return e.withDO(e.DO.Or(conds...))
+func (g gEnvModelDo) Or(conds ...gen.Condition) *gEnvModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (e environmentsV2Do) Select(conds ...field.Expr) *environmentsV2Do {
-	return e.withDO(e.DO.Select(conds...))
+func (g gEnvModelDo) Select(conds ...field.Expr) *gEnvModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (e environmentsV2Do) Where(conds ...gen.Condition) *environmentsV2Do {
-	return e.withDO(e.DO.Where(conds...))
+func (g gEnvModelDo) Where(conds ...gen.Condition) *gEnvModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (e environmentsV2Do) Order(conds ...field.Expr) *environmentsV2Do {
-	return e.withDO(e.DO.Order(conds...))
+func (g gEnvModelDo) Order(conds ...field.Expr) *gEnvModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (e environmentsV2Do) Distinct(cols ...field.Expr) *environmentsV2Do {
-	return e.withDO(e.DO.Distinct(cols...))
+func (g gEnvModelDo) Distinct(cols ...field.Expr) *gEnvModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (e environmentsV2Do) Omit(cols ...field.Expr) *environmentsV2Do {
-	return e.withDO(e.DO.Omit(cols...))
+func (g gEnvModelDo) Omit(cols ...field.Expr) *gEnvModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (e environmentsV2Do) Join(table schema.Tabler, on ...field.Expr) *environmentsV2Do {
-	return e.withDO(e.DO.Join(table, on...))
+func (g gEnvModelDo) Join(table schema.Tabler, on ...field.Expr) *gEnvModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (e environmentsV2Do) LeftJoin(table schema.Tabler, on ...field.Expr) *environmentsV2Do {
-	return e.withDO(e.DO.LeftJoin(table, on...))
+func (g gEnvModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gEnvModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (e environmentsV2Do) RightJoin(table schema.Tabler, on ...field.Expr) *environmentsV2Do {
-	return e.withDO(e.DO.RightJoin(table, on...))
+func (g gEnvModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gEnvModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (e environmentsV2Do) Group(cols ...field.Expr) *environmentsV2Do {
-	return e.withDO(e.DO.Group(cols...))
+func (g gEnvModelDo) Group(cols ...field.Expr) *gEnvModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (e environmentsV2Do) Having(conds ...gen.Condition) *environmentsV2Do {
-	return e.withDO(e.DO.Having(conds...))
+func (g gEnvModelDo) Having(conds ...gen.Condition) *gEnvModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (e environmentsV2Do) Limit(limit int) *environmentsV2Do {
-	return e.withDO(e.DO.Limit(limit))
+func (g gEnvModelDo) Limit(limit int) *gEnvModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (e environmentsV2Do) Offset(offset int) *environmentsV2Do {
-	return e.withDO(e.DO.Offset(offset))
+func (g gEnvModelDo) Offset(offset int) *gEnvModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (e environmentsV2Do) Scopes(funcs ...func(gen.Dao) gen.Dao) *environmentsV2Do {
-	return e.withDO(e.DO.Scopes(funcs...))
+func (g gEnvModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gEnvModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (e environmentsV2Do) Unscoped() *environmentsV2Do {
-	return e.withDO(e.DO.Unscoped())
+func (g gEnvModelDo) Unscoped() *gEnvModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (e environmentsV2Do) Create(values ...*model.EnvironmentsV2) error {
+func (g gEnvModelDo) Create(values ...*sqlmodel.GEnvModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return e.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (e environmentsV2Do) CreateInBatches(values []*model.EnvironmentsV2, batchSize int) error {
-	return e.DO.CreateInBatches(values, batchSize)
+func (g gEnvModelDo) CreateInBatches(values []*sqlmodel.GEnvModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (e environmentsV2Do) Save(values ...*model.EnvironmentsV2) error {
+func (g gEnvModelDo) Save(values ...*sqlmodel.GEnvModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return e.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (e environmentsV2Do) First() (*model.EnvironmentsV2, error) {
-	if result, err := e.DO.First(); err != nil {
+func (g gEnvModelDo) First() (*sqlmodel.GEnvModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.EnvironmentsV2), nil
+		return result.(*sqlmodel.GEnvModel), nil
 	}
 }
 
-func (e environmentsV2Do) Take() (*model.EnvironmentsV2, error) {
-	if result, err := e.DO.Take(); err != nil {
+func (g gEnvModelDo) Take() (*sqlmodel.GEnvModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.EnvironmentsV2), nil
+		return result.(*sqlmodel.GEnvModel), nil
 	}
 }
 
-func (e environmentsV2Do) Last() (*model.EnvironmentsV2, error) {
-	if result, err := e.DO.Last(); err != nil {
+func (g gEnvModelDo) Last() (*sqlmodel.GEnvModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.EnvironmentsV2), nil
+		return result.(*sqlmodel.GEnvModel), nil
 	}
 }
 
-func (e environmentsV2Do) Find() ([]*model.EnvironmentsV2, error) {
-	result, err := e.DO.Find()
-	return result.([]*model.EnvironmentsV2), err
+func (g gEnvModelDo) Find() ([]*sqlmodel.GEnvModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GEnvModel), err
 }
 
-func (e environmentsV2Do) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.EnvironmentsV2, err error) {
-	buf := make([]*model.EnvironmentsV2, 0, batchSize)
-	err = e.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gEnvModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GEnvModel, err error) {
+	buf := make([]*sqlmodel.GEnvModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (e environmentsV2Do) FindInBatches(result *[]*model.EnvironmentsV2, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return e.DO.FindInBatches(result, batchSize, fc)
+func (g gEnvModelDo) FindInBatches(result *[]*sqlmodel.GEnvModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (e environmentsV2Do) Attrs(attrs ...field.AssignExpr) *environmentsV2Do {
-	return e.withDO(e.DO.Attrs(attrs...))
+func (g gEnvModelDo) Attrs(attrs ...field.AssignExpr) *gEnvModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (e environmentsV2Do) Assign(attrs ...field.AssignExpr) *environmentsV2Do {
-	return e.withDO(e.DO.Assign(attrs...))
+func (g gEnvModelDo) Assign(attrs ...field.AssignExpr) *gEnvModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (e environmentsV2Do) Joins(fields ...field.RelationField) *environmentsV2Do {
+func (g gEnvModelDo) Joins(fields ...field.RelationField) *gEnvModelDo {
 	for _, _f := range fields {
-		e = *e.withDO(e.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &e
+	return &g
 }
 
-func (e environmentsV2Do) Preload(fields ...field.RelationField) *environmentsV2Do {
+func (g gEnvModelDo) Preload(fields ...field.RelationField) *gEnvModelDo {
 	for _, _f := range fields {
-		e = *e.withDO(e.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &e
+	return &g
 }
 
-func (e environmentsV2Do) FirstOrInit() (*model.EnvironmentsV2, error) {
-	if result, err := e.DO.FirstOrInit(); err != nil {
+func (g gEnvModelDo) FirstOrInit() (*sqlmodel.GEnvModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.EnvironmentsV2), nil
+		return result.(*sqlmodel.GEnvModel), nil
 	}
 }
 
-func (e environmentsV2Do) FirstOrCreate() (*model.EnvironmentsV2, error) {
-	if result, err := e.DO.FirstOrCreate(); err != nil {
+func (g gEnvModelDo) FirstOrCreate() (*sqlmodel.GEnvModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.EnvironmentsV2), nil
+		return result.(*sqlmodel.GEnvModel), nil
 	}
 }
 
-func (e environmentsV2Do) FindByPage(offset int, limit int) (result []*model.EnvironmentsV2, count int64, err error) {
-	result, err = e.Offset(offset).Limit(limit).Find()
+func (g gEnvModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GEnvModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -311,29 +328,29 @@ func (e environmentsV2Do) FindByPage(offset int, limit int) (result []*model.Env
 		return
 	}
 
-	count, err = e.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (e environmentsV2Do) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = e.Count()
+func (g gEnvModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = e.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (e environmentsV2Do) Scan(result interface{}) (err error) {
-	return e.DO.Scan(result)
+func (g gEnvModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (e environmentsV2Do) Delete(models ...*model.EnvironmentsV2) (result gen.ResultInfo, err error) {
-	return e.DO.Delete(models)
+func (g gEnvModelDo) Delete(models ...*sqlmodel.GEnvModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (e *environmentsV2Do) withDO(do gen.Dao) *environmentsV2Do {
-	e.DO = *do.(*gen.DO)
-	return e
+func (g *gEnvModelDo) withDO(do gen.Dao) *gEnvModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

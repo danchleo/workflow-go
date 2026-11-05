@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,73 +16,110 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newActionDefinitionsV2(db *gorm.DB, opts ...gen.DOOption) actionDefinitionsV2 {
-	_actionDefinitionsV2 := actionDefinitionsV2{}
+func newGActDefModel(db *gorm.DB, opts ...gen.DOOption) gActDefModel {
+	_gActDefModel := gActDefModel{}
 
-	_actionDefinitionsV2.actionDefinitionsV2Do.UseDB(db, opts...)
-	_actionDefinitionsV2.actionDefinitionsV2Do.UseModel(&model.ActionDefinitionsV2{})
+	_gActDefModel.gActDefModelDo.UseDB(db, opts...)
+	_gActDefModel.gActDefModelDo.UseModel(&sqlmodel.GActDefModel{})
 
-	tableName := _actionDefinitionsV2.actionDefinitionsV2Do.TableName()
-	_actionDefinitionsV2.ALL = field.NewAsterisk(tableName)
-	_actionDefinitionsV2.ID = field.NewString(tableName, "id")
-	_actionDefinitionsV2.Name = field.NewString(tableName, "name")
-	_actionDefinitionsV2.Data = field.NewString(tableName, "data")
+	tableName := _gActDefModel.gActDefModelDo.TableName()
+	_gActDefModel.ALL = field.NewAsterisk(tableName)
+	_gActDefModel.ID = field.NewString(tableName, "id")
+	_gActDefModel.Name = field.NewString(tableName, "name")
+	_gActDefModel.Namespace = field.NewString(tableName, "namespace")
+	_gActDefModel.Definition = field.NewString(tableName, "definition")
+	_gActDefModel.Spec = field.NewField(tableName, "spec")
+	_gActDefModel.Tags = field.NewField(tableName, "tags")
+	_gActDefModel.IsSystem = field.NewBool(tableName, "is_system")
+	_gActDefModel.WorkbookName = field.NewString(tableName, "workbook_name")
+	_gActDefModel.Description = field.NewString(tableName, "description")
+	_gActDefModel.Input = field.NewString(tableName, "input")
+	_gActDefModel.ActionClass = field.NewString(tableName, "action_class")
+	_gActDefModel.Attributes = field.NewField(tableName, "attributes")
+	_gActDefModel.ProjectID = field.NewString(tableName, "project_id")
+	_gActDefModel.Scope = field.NewString(tableName, "scope")
+	_gActDefModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gActDefModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_actionDefinitionsV2.fillFieldMap()
+	_gActDefModel.fillFieldMap()
 
-	return _actionDefinitionsV2
+	return _gActDefModel
 }
 
-type actionDefinitionsV2 struct {
-	actionDefinitionsV2Do actionDefinitionsV2Do
+type gActDefModel struct {
+	gActDefModelDo gActDefModelDo
 
-	ALL  field.Asterisk
-	ID   field.String
-	Name field.String
-	Data field.String
+	ALL          field.Asterisk
+	ID           field.String
+	Name         field.String
+	Namespace    field.String
+	Definition   field.String
+	Spec         field.Field
+	Tags         field.Field
+	IsSystem     field.Bool
+	WorkbookName field.String
+	Description  field.String
+	Input        field.String
+	ActionClass  field.String
+	Attributes   field.Field
+	ProjectID    field.String
+	Scope        field.String
+	CreatedAt    field.Time
+	UpdatedAt    field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (a actionDefinitionsV2) Table(newTableName string) *actionDefinitionsV2 {
-	a.actionDefinitionsV2Do.UseTable(newTableName)
-	return a.updateTableName(newTableName)
+func (g gActDefModel) Table(newTableName string) *gActDefModel {
+	g.gActDefModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (a actionDefinitionsV2) As(alias string) *actionDefinitionsV2 {
-	a.actionDefinitionsV2Do.DO = *(a.actionDefinitionsV2Do.As(alias).(*gen.DO))
-	return a.updateTableName(alias)
+func (g gActDefModel) As(alias string) *gActDefModel {
+	g.gActDefModelDo.DO = *(g.gActDefModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (a *actionDefinitionsV2) updateTableName(table string) *actionDefinitionsV2 {
-	a.ALL = field.NewAsterisk(table)
-	a.ID = field.NewString(table, "id")
-	a.Name = field.NewString(table, "name")
-	a.Data = field.NewString(table, "data")
+func (g *gActDefModel) updateTableName(table string) *gActDefModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.Name = field.NewString(table, "name")
+	g.Namespace = field.NewString(table, "namespace")
+	g.Definition = field.NewString(table, "definition")
+	g.Spec = field.NewField(table, "spec")
+	g.Tags = field.NewField(table, "tags")
+	g.IsSystem = field.NewBool(table, "is_system")
+	g.WorkbookName = field.NewString(table, "workbook_name")
+	g.Description = field.NewString(table, "description")
+	g.Input = field.NewString(table, "input")
+	g.ActionClass = field.NewString(table, "action_class")
+	g.Attributes = field.NewField(table, "attributes")
+	g.ProjectID = field.NewString(table, "project_id")
+	g.Scope = field.NewString(table, "scope")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	a.fillFieldMap()
+	g.fillFieldMap()
 
-	return a
+	return g
 }
 
-func (a *actionDefinitionsV2) WithContext(ctx context.Context) *actionDefinitionsV2Do {
-	return a.actionDefinitionsV2Do.WithContext(ctx)
+func (g *gActDefModel) WithContext(ctx context.Context) *gActDefModelDo {
+	return g.gActDefModelDo.WithContext(ctx)
 }
 
-func (a actionDefinitionsV2) TableName() string { return a.actionDefinitionsV2Do.TableName() }
+func (g gActDefModel) TableName() string { return g.gActDefModelDo.TableName() }
 
-func (a actionDefinitionsV2) Alias() string { return a.actionDefinitionsV2Do.Alias() }
+func (g gActDefModel) Alias() string { return g.gActDefModelDo.Alias() }
 
-func (a actionDefinitionsV2) Columns(cols ...field.Expr) gen.Columns {
-	return a.actionDefinitionsV2Do.Columns(cols...)
+func (g gActDefModel) Columns(cols ...field.Expr) gen.Columns {
+	return g.gActDefModelDo.Columns(cols...)
 }
 
-func (a *actionDefinitionsV2) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := a.fieldMap[fieldName]
+func (g *gActDefModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -89,219 +127,232 @@ func (a *actionDefinitionsV2) GetFieldByName(fieldName string) (field.OrderExpr,
 	return _oe, ok
 }
 
-func (a *actionDefinitionsV2) fillFieldMap() {
-	a.fieldMap = make(map[string]field.Expr, 3)
-	a.fieldMap["id"] = a.ID
-	a.fieldMap["name"] = a.Name
-	a.fieldMap["data"] = a.Data
+func (g *gActDefModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 16)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["name"] = g.Name
+	g.fieldMap["namespace"] = g.Namespace
+	g.fieldMap["definition"] = g.Definition
+	g.fieldMap["spec"] = g.Spec
+	g.fieldMap["tags"] = g.Tags
+	g.fieldMap["is_system"] = g.IsSystem
+	g.fieldMap["workbook_name"] = g.WorkbookName
+	g.fieldMap["description"] = g.Description
+	g.fieldMap["input"] = g.Input
+	g.fieldMap["action_class"] = g.ActionClass
+	g.fieldMap["attributes"] = g.Attributes
+	g.fieldMap["project_id"] = g.ProjectID
+	g.fieldMap["scope"] = g.Scope
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (a actionDefinitionsV2) clone(db *gorm.DB) actionDefinitionsV2 {
-	a.actionDefinitionsV2Do.ReplaceConnPool(db.Statement.ConnPool)
-	return a
+func (g gActDefModel) clone(db *gorm.DB) gActDefModel {
+	g.gActDefModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (a actionDefinitionsV2) replaceDB(db *gorm.DB) actionDefinitionsV2 {
-	a.actionDefinitionsV2Do.ReplaceDB(db)
-	return a
+func (g gActDefModel) replaceDB(db *gorm.DB) gActDefModel {
+	g.gActDefModelDo.ReplaceDB(db)
+	return g
 }
 
-type actionDefinitionsV2Do struct{ gen.DO }
+type gActDefModelDo struct{ gen.DO }
 
-func (a actionDefinitionsV2Do) Debug() *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Debug())
+func (g gActDefModelDo) Debug() *gActDefModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (a actionDefinitionsV2Do) WithContext(ctx context.Context) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.WithContext(ctx))
+func (g gActDefModelDo) WithContext(ctx context.Context) *gActDefModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (a actionDefinitionsV2Do) ReadDB() *actionDefinitionsV2Do {
-	return a.Clauses(dbresolver.Read)
+func (g gActDefModelDo) ReadDB() *gActDefModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (a actionDefinitionsV2Do) WriteDB() *actionDefinitionsV2Do {
-	return a.Clauses(dbresolver.Write)
+func (g gActDefModelDo) WriteDB() *gActDefModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (a actionDefinitionsV2Do) Session(config *gorm.Session) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Session(config))
+func (g gActDefModelDo) Session(config *gorm.Session) *gActDefModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (a actionDefinitionsV2Do) Clauses(conds ...clause.Expression) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Clauses(conds...))
+func (g gActDefModelDo) Clauses(conds ...clause.Expression) *gActDefModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (a actionDefinitionsV2Do) Returning(value interface{}, columns ...string) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Returning(value, columns...))
+func (g gActDefModelDo) Returning(value interface{}, columns ...string) *gActDefModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (a actionDefinitionsV2Do) Not(conds ...gen.Condition) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Not(conds...))
+func (g gActDefModelDo) Not(conds ...gen.Condition) *gActDefModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (a actionDefinitionsV2Do) Or(conds ...gen.Condition) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Or(conds...))
+func (g gActDefModelDo) Or(conds ...gen.Condition) *gActDefModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (a actionDefinitionsV2Do) Select(conds ...field.Expr) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Select(conds...))
+func (g gActDefModelDo) Select(conds ...field.Expr) *gActDefModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (a actionDefinitionsV2Do) Where(conds ...gen.Condition) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Where(conds...))
+func (g gActDefModelDo) Where(conds ...gen.Condition) *gActDefModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (a actionDefinitionsV2Do) Order(conds ...field.Expr) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Order(conds...))
+func (g gActDefModelDo) Order(conds ...field.Expr) *gActDefModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (a actionDefinitionsV2Do) Distinct(cols ...field.Expr) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Distinct(cols...))
+func (g gActDefModelDo) Distinct(cols ...field.Expr) *gActDefModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (a actionDefinitionsV2Do) Omit(cols ...field.Expr) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Omit(cols...))
+func (g gActDefModelDo) Omit(cols ...field.Expr) *gActDefModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (a actionDefinitionsV2Do) Join(table schema.Tabler, on ...field.Expr) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Join(table, on...))
+func (g gActDefModelDo) Join(table schema.Tabler, on ...field.Expr) *gActDefModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (a actionDefinitionsV2Do) LeftJoin(table schema.Tabler, on ...field.Expr) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.LeftJoin(table, on...))
+func (g gActDefModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gActDefModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (a actionDefinitionsV2Do) RightJoin(table schema.Tabler, on ...field.Expr) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.RightJoin(table, on...))
+func (g gActDefModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gActDefModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (a actionDefinitionsV2Do) Group(cols ...field.Expr) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Group(cols...))
+func (g gActDefModelDo) Group(cols ...field.Expr) *gActDefModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (a actionDefinitionsV2Do) Having(conds ...gen.Condition) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Having(conds...))
+func (g gActDefModelDo) Having(conds ...gen.Condition) *gActDefModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (a actionDefinitionsV2Do) Limit(limit int) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Limit(limit))
+func (g gActDefModelDo) Limit(limit int) *gActDefModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (a actionDefinitionsV2Do) Offset(offset int) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Offset(offset))
+func (g gActDefModelDo) Offset(offset int) *gActDefModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (a actionDefinitionsV2Do) Scopes(funcs ...func(gen.Dao) gen.Dao) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Scopes(funcs...))
+func (g gActDefModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gActDefModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (a actionDefinitionsV2Do) Unscoped() *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Unscoped())
+func (g gActDefModelDo) Unscoped() *gActDefModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (a actionDefinitionsV2Do) Create(values ...*model.ActionDefinitionsV2) error {
+func (g gActDefModelDo) Create(values ...*sqlmodel.GActDefModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return a.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (a actionDefinitionsV2Do) CreateInBatches(values []*model.ActionDefinitionsV2, batchSize int) error {
-	return a.DO.CreateInBatches(values, batchSize)
+func (g gActDefModelDo) CreateInBatches(values []*sqlmodel.GActDefModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (a actionDefinitionsV2Do) Save(values ...*model.ActionDefinitionsV2) error {
+func (g gActDefModelDo) Save(values ...*sqlmodel.GActDefModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return a.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (a actionDefinitionsV2Do) First() (*model.ActionDefinitionsV2, error) {
-	if result, err := a.DO.First(); err != nil {
+func (g gActDefModelDo) First() (*sqlmodel.GActDefModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ActionDefinitionsV2), nil
+		return result.(*sqlmodel.GActDefModel), nil
 	}
 }
 
-func (a actionDefinitionsV2Do) Take() (*model.ActionDefinitionsV2, error) {
-	if result, err := a.DO.Take(); err != nil {
+func (g gActDefModelDo) Take() (*sqlmodel.GActDefModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ActionDefinitionsV2), nil
+		return result.(*sqlmodel.GActDefModel), nil
 	}
 }
 
-func (a actionDefinitionsV2Do) Last() (*model.ActionDefinitionsV2, error) {
-	if result, err := a.DO.Last(); err != nil {
+func (g gActDefModelDo) Last() (*sqlmodel.GActDefModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ActionDefinitionsV2), nil
+		return result.(*sqlmodel.GActDefModel), nil
 	}
 }
 
-func (a actionDefinitionsV2Do) Find() ([]*model.ActionDefinitionsV2, error) {
-	result, err := a.DO.Find()
-	return result.([]*model.ActionDefinitionsV2), err
+func (g gActDefModelDo) Find() ([]*sqlmodel.GActDefModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GActDefModel), err
 }
 
-func (a actionDefinitionsV2Do) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.ActionDefinitionsV2, err error) {
-	buf := make([]*model.ActionDefinitionsV2, 0, batchSize)
-	err = a.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gActDefModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GActDefModel, err error) {
+	buf := make([]*sqlmodel.GActDefModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (a actionDefinitionsV2Do) FindInBatches(result *[]*model.ActionDefinitionsV2, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return a.DO.FindInBatches(result, batchSize, fc)
+func (g gActDefModelDo) FindInBatches(result *[]*sqlmodel.GActDefModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (a actionDefinitionsV2Do) Attrs(attrs ...field.AssignExpr) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Attrs(attrs...))
+func (g gActDefModelDo) Attrs(attrs ...field.AssignExpr) *gActDefModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (a actionDefinitionsV2Do) Assign(attrs ...field.AssignExpr) *actionDefinitionsV2Do {
-	return a.withDO(a.DO.Assign(attrs...))
+func (g gActDefModelDo) Assign(attrs ...field.AssignExpr) *gActDefModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (a actionDefinitionsV2Do) Joins(fields ...field.RelationField) *actionDefinitionsV2Do {
+func (g gActDefModelDo) Joins(fields ...field.RelationField) *gActDefModelDo {
 	for _, _f := range fields {
-		a = *a.withDO(a.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &a
+	return &g
 }
 
-func (a actionDefinitionsV2Do) Preload(fields ...field.RelationField) *actionDefinitionsV2Do {
+func (g gActDefModelDo) Preload(fields ...field.RelationField) *gActDefModelDo {
 	for _, _f := range fields {
-		a = *a.withDO(a.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &a
+	return &g
 }
 
-func (a actionDefinitionsV2Do) FirstOrInit() (*model.ActionDefinitionsV2, error) {
-	if result, err := a.DO.FirstOrInit(); err != nil {
+func (g gActDefModelDo) FirstOrInit() (*sqlmodel.GActDefModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ActionDefinitionsV2), nil
+		return result.(*sqlmodel.GActDefModel), nil
 	}
 }
 
-func (a actionDefinitionsV2Do) FirstOrCreate() (*model.ActionDefinitionsV2, error) {
-	if result, err := a.DO.FirstOrCreate(); err != nil {
+func (g gActDefModelDo) FirstOrCreate() (*sqlmodel.GActDefModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ActionDefinitionsV2), nil
+		return result.(*sqlmodel.GActDefModel), nil
 	}
 }
 
-func (a actionDefinitionsV2Do) FindByPage(offset int, limit int) (result []*model.ActionDefinitionsV2, count int64, err error) {
-	result, err = a.Offset(offset).Limit(limit).Find()
+func (g gActDefModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GActDefModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -311,29 +362,29 @@ func (a actionDefinitionsV2Do) FindByPage(offset int, limit int) (result []*mode
 		return
 	}
 
-	count, err = a.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (a actionDefinitionsV2Do) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = a.Count()
+func (g gActDefModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = a.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (a actionDefinitionsV2Do) Scan(result interface{}) (err error) {
-	return a.DO.Scan(result)
+func (g gActDefModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (a actionDefinitionsV2Do) Delete(models ...*model.ActionDefinitionsV2) (result gen.ResultInfo, err error) {
-	return a.DO.Delete(models)
+func (g gActDefModelDo) Delete(models ...*sqlmodel.GActDefModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (a *actionDefinitionsV2Do) withDO(do gen.Dao) *actionDefinitionsV2Do {
-	a.DO = *do.(*gen.DO)
-	return a
+func (g *gActDefModelDo) withDO(do gen.Dao) *gActDefModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

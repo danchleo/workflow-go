@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,70 +16,89 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newResourceMembersV2(db *gorm.DB, opts ...gen.DOOption) resourceMembersV2 {
-	_resourceMembersV2 := resourceMembersV2{}
+func newGResourceMemberModel(db *gorm.DB, opts ...gen.DOOption) gResourceMemberModel {
+	_gResourceMemberModel := gResourceMemberModel{}
 
-	_resourceMembersV2.resourceMembersV2Do.UseDB(db, opts...)
-	_resourceMembersV2.resourceMembersV2Do.UseModel(&model.ResourceMembersV2{})
+	_gResourceMemberModel.gResourceMemberModelDo.UseDB(db, opts...)
+	_gResourceMemberModel.gResourceMemberModelDo.UseModel(&sqlmodel.GResourceMemberModel{})
 
-	tableName := _resourceMembersV2.resourceMembersV2Do.TableName()
-	_resourceMembersV2.ALL = field.NewAsterisk(tableName)
-	_resourceMembersV2.ID = field.NewString(tableName, "id")
-	_resourceMembersV2.Data = field.NewString(tableName, "data")
+	tableName := _gResourceMemberModel.gResourceMemberModelDo.TableName()
+	_gResourceMemberModel.ALL = field.NewAsterisk(tableName)
+	_gResourceMemberModel.ID = field.NewString(tableName, "id")
+	_gResourceMemberModel.ResourceID = field.NewString(tableName, "resource_id")
+	_gResourceMemberModel.ResourceType = field.NewString(tableName, "resource_type")
+	_gResourceMemberModel.ProjectID = field.NewString(tableName, "project_id")
+	_gResourceMemberModel.Scope = field.NewString(tableName, "scope")
+	_gResourceMemberModel.MemberID = field.NewString(tableName, "member_id")
+	_gResourceMemberModel.Status = field.NewString(tableName, "status")
+	_gResourceMemberModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gResourceMemberModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_resourceMembersV2.fillFieldMap()
+	_gResourceMemberModel.fillFieldMap()
 
-	return _resourceMembersV2
+	return _gResourceMemberModel
 }
 
-type resourceMembersV2 struct {
-	resourceMembersV2Do resourceMembersV2Do
+type gResourceMemberModel struct {
+	gResourceMemberModelDo gResourceMemberModelDo
 
-	ALL  field.Asterisk
-	ID   field.String
-	Data field.String
+	ALL          field.Asterisk
+	ID           field.String
+	ResourceID   field.String
+	ResourceType field.String
+	ProjectID    field.String
+	Scope        field.String
+	MemberID     field.String
+	Status       field.String
+	CreatedAt    field.Time
+	UpdatedAt    field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (r resourceMembersV2) Table(newTableName string) *resourceMembersV2 {
-	r.resourceMembersV2Do.UseTable(newTableName)
-	return r.updateTableName(newTableName)
+func (g gResourceMemberModel) Table(newTableName string) *gResourceMemberModel {
+	g.gResourceMemberModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (r resourceMembersV2) As(alias string) *resourceMembersV2 {
-	r.resourceMembersV2Do.DO = *(r.resourceMembersV2Do.As(alias).(*gen.DO))
-	return r.updateTableName(alias)
+func (g gResourceMemberModel) As(alias string) *gResourceMemberModel {
+	g.gResourceMemberModelDo.DO = *(g.gResourceMemberModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (r *resourceMembersV2) updateTableName(table string) *resourceMembersV2 {
-	r.ALL = field.NewAsterisk(table)
-	r.ID = field.NewString(table, "id")
-	r.Data = field.NewString(table, "data")
+func (g *gResourceMemberModel) updateTableName(table string) *gResourceMemberModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.ResourceID = field.NewString(table, "resource_id")
+	g.ResourceType = field.NewString(table, "resource_type")
+	g.ProjectID = field.NewString(table, "project_id")
+	g.Scope = field.NewString(table, "scope")
+	g.MemberID = field.NewString(table, "member_id")
+	g.Status = field.NewString(table, "status")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	r.fillFieldMap()
+	g.fillFieldMap()
 
-	return r
+	return g
 }
 
-func (r *resourceMembersV2) WithContext(ctx context.Context) *resourceMembersV2Do {
-	return r.resourceMembersV2Do.WithContext(ctx)
+func (g *gResourceMemberModel) WithContext(ctx context.Context) *gResourceMemberModelDo {
+	return g.gResourceMemberModelDo.WithContext(ctx)
 }
 
-func (r resourceMembersV2) TableName() string { return r.resourceMembersV2Do.TableName() }
+func (g gResourceMemberModel) TableName() string { return g.gResourceMemberModelDo.TableName() }
 
-func (r resourceMembersV2) Alias() string { return r.resourceMembersV2Do.Alias() }
+func (g gResourceMemberModel) Alias() string { return g.gResourceMemberModelDo.Alias() }
 
-func (r resourceMembersV2) Columns(cols ...field.Expr) gen.Columns {
-	return r.resourceMembersV2Do.Columns(cols...)
+func (g gResourceMemberModel) Columns(cols ...field.Expr) gen.Columns {
+	return g.gResourceMemberModelDo.Columns(cols...)
 }
 
-func (r *resourceMembersV2) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := r.fieldMap[fieldName]
+func (g *gResourceMemberModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -86,218 +106,225 @@ func (r *resourceMembersV2) GetFieldByName(fieldName string) (field.OrderExpr, b
 	return _oe, ok
 }
 
-func (r *resourceMembersV2) fillFieldMap() {
-	r.fieldMap = make(map[string]field.Expr, 2)
-	r.fieldMap["id"] = r.ID
-	r.fieldMap["data"] = r.Data
+func (g *gResourceMemberModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 9)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["resource_id"] = g.ResourceID
+	g.fieldMap["resource_type"] = g.ResourceType
+	g.fieldMap["project_id"] = g.ProjectID
+	g.fieldMap["scope"] = g.Scope
+	g.fieldMap["member_id"] = g.MemberID
+	g.fieldMap["status"] = g.Status
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (r resourceMembersV2) clone(db *gorm.DB) resourceMembersV2 {
-	r.resourceMembersV2Do.ReplaceConnPool(db.Statement.ConnPool)
-	return r
+func (g gResourceMemberModel) clone(db *gorm.DB) gResourceMemberModel {
+	g.gResourceMemberModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (r resourceMembersV2) replaceDB(db *gorm.DB) resourceMembersV2 {
-	r.resourceMembersV2Do.ReplaceDB(db)
-	return r
+func (g gResourceMemberModel) replaceDB(db *gorm.DB) gResourceMemberModel {
+	g.gResourceMemberModelDo.ReplaceDB(db)
+	return g
 }
 
-type resourceMembersV2Do struct{ gen.DO }
+type gResourceMemberModelDo struct{ gen.DO }
 
-func (r resourceMembersV2Do) Debug() *resourceMembersV2Do {
-	return r.withDO(r.DO.Debug())
+func (g gResourceMemberModelDo) Debug() *gResourceMemberModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (r resourceMembersV2Do) WithContext(ctx context.Context) *resourceMembersV2Do {
-	return r.withDO(r.DO.WithContext(ctx))
+func (g gResourceMemberModelDo) WithContext(ctx context.Context) *gResourceMemberModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (r resourceMembersV2Do) ReadDB() *resourceMembersV2Do {
-	return r.Clauses(dbresolver.Read)
+func (g gResourceMemberModelDo) ReadDB() *gResourceMemberModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (r resourceMembersV2Do) WriteDB() *resourceMembersV2Do {
-	return r.Clauses(dbresolver.Write)
+func (g gResourceMemberModelDo) WriteDB() *gResourceMemberModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (r resourceMembersV2Do) Session(config *gorm.Session) *resourceMembersV2Do {
-	return r.withDO(r.DO.Session(config))
+func (g gResourceMemberModelDo) Session(config *gorm.Session) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (r resourceMembersV2Do) Clauses(conds ...clause.Expression) *resourceMembersV2Do {
-	return r.withDO(r.DO.Clauses(conds...))
+func (g gResourceMemberModelDo) Clauses(conds ...clause.Expression) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (r resourceMembersV2Do) Returning(value interface{}, columns ...string) *resourceMembersV2Do {
-	return r.withDO(r.DO.Returning(value, columns...))
+func (g gResourceMemberModelDo) Returning(value interface{}, columns ...string) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (r resourceMembersV2Do) Not(conds ...gen.Condition) *resourceMembersV2Do {
-	return r.withDO(r.DO.Not(conds...))
+func (g gResourceMemberModelDo) Not(conds ...gen.Condition) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (r resourceMembersV2Do) Or(conds ...gen.Condition) *resourceMembersV2Do {
-	return r.withDO(r.DO.Or(conds...))
+func (g gResourceMemberModelDo) Or(conds ...gen.Condition) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (r resourceMembersV2Do) Select(conds ...field.Expr) *resourceMembersV2Do {
-	return r.withDO(r.DO.Select(conds...))
+func (g gResourceMemberModelDo) Select(conds ...field.Expr) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (r resourceMembersV2Do) Where(conds ...gen.Condition) *resourceMembersV2Do {
-	return r.withDO(r.DO.Where(conds...))
+func (g gResourceMemberModelDo) Where(conds ...gen.Condition) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (r resourceMembersV2Do) Order(conds ...field.Expr) *resourceMembersV2Do {
-	return r.withDO(r.DO.Order(conds...))
+func (g gResourceMemberModelDo) Order(conds ...field.Expr) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (r resourceMembersV2Do) Distinct(cols ...field.Expr) *resourceMembersV2Do {
-	return r.withDO(r.DO.Distinct(cols...))
+func (g gResourceMemberModelDo) Distinct(cols ...field.Expr) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (r resourceMembersV2Do) Omit(cols ...field.Expr) *resourceMembersV2Do {
-	return r.withDO(r.DO.Omit(cols...))
+func (g gResourceMemberModelDo) Omit(cols ...field.Expr) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (r resourceMembersV2Do) Join(table schema.Tabler, on ...field.Expr) *resourceMembersV2Do {
-	return r.withDO(r.DO.Join(table, on...))
+func (g gResourceMemberModelDo) Join(table schema.Tabler, on ...field.Expr) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (r resourceMembersV2Do) LeftJoin(table schema.Tabler, on ...field.Expr) *resourceMembersV2Do {
-	return r.withDO(r.DO.LeftJoin(table, on...))
+func (g gResourceMemberModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gResourceMemberModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (r resourceMembersV2Do) RightJoin(table schema.Tabler, on ...field.Expr) *resourceMembersV2Do {
-	return r.withDO(r.DO.RightJoin(table, on...))
+func (g gResourceMemberModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gResourceMemberModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (r resourceMembersV2Do) Group(cols ...field.Expr) *resourceMembersV2Do {
-	return r.withDO(r.DO.Group(cols...))
+func (g gResourceMemberModelDo) Group(cols ...field.Expr) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (r resourceMembersV2Do) Having(conds ...gen.Condition) *resourceMembersV2Do {
-	return r.withDO(r.DO.Having(conds...))
+func (g gResourceMemberModelDo) Having(conds ...gen.Condition) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (r resourceMembersV2Do) Limit(limit int) *resourceMembersV2Do {
-	return r.withDO(r.DO.Limit(limit))
+func (g gResourceMemberModelDo) Limit(limit int) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (r resourceMembersV2Do) Offset(offset int) *resourceMembersV2Do {
-	return r.withDO(r.DO.Offset(offset))
+func (g gResourceMemberModelDo) Offset(offset int) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (r resourceMembersV2Do) Scopes(funcs ...func(gen.Dao) gen.Dao) *resourceMembersV2Do {
-	return r.withDO(r.DO.Scopes(funcs...))
+func (g gResourceMemberModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (r resourceMembersV2Do) Unscoped() *resourceMembersV2Do {
-	return r.withDO(r.DO.Unscoped())
+func (g gResourceMemberModelDo) Unscoped() *gResourceMemberModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (r resourceMembersV2Do) Create(values ...*model.ResourceMembersV2) error {
+func (g gResourceMemberModelDo) Create(values ...*sqlmodel.GResourceMemberModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return r.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (r resourceMembersV2Do) CreateInBatches(values []*model.ResourceMembersV2, batchSize int) error {
-	return r.DO.CreateInBatches(values, batchSize)
+func (g gResourceMemberModelDo) CreateInBatches(values []*sqlmodel.GResourceMemberModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (r resourceMembersV2Do) Save(values ...*model.ResourceMembersV2) error {
+func (g gResourceMemberModelDo) Save(values ...*sqlmodel.GResourceMemberModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return r.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (r resourceMembersV2Do) First() (*model.ResourceMembersV2, error) {
-	if result, err := r.DO.First(); err != nil {
+func (g gResourceMemberModelDo) First() (*sqlmodel.GResourceMemberModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ResourceMembersV2), nil
+		return result.(*sqlmodel.GResourceMemberModel), nil
 	}
 }
 
-func (r resourceMembersV2Do) Take() (*model.ResourceMembersV2, error) {
-	if result, err := r.DO.Take(); err != nil {
+func (g gResourceMemberModelDo) Take() (*sqlmodel.GResourceMemberModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ResourceMembersV2), nil
+		return result.(*sqlmodel.GResourceMemberModel), nil
 	}
 }
 
-func (r resourceMembersV2Do) Last() (*model.ResourceMembersV2, error) {
-	if result, err := r.DO.Last(); err != nil {
+func (g gResourceMemberModelDo) Last() (*sqlmodel.GResourceMemberModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ResourceMembersV2), nil
+		return result.(*sqlmodel.GResourceMemberModel), nil
 	}
 }
 
-func (r resourceMembersV2Do) Find() ([]*model.ResourceMembersV2, error) {
-	result, err := r.DO.Find()
-	return result.([]*model.ResourceMembersV2), err
+func (g gResourceMemberModelDo) Find() ([]*sqlmodel.GResourceMemberModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GResourceMemberModel), err
 }
 
-func (r resourceMembersV2Do) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.ResourceMembersV2, err error) {
-	buf := make([]*model.ResourceMembersV2, 0, batchSize)
-	err = r.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gResourceMemberModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GResourceMemberModel, err error) {
+	buf := make([]*sqlmodel.GResourceMemberModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (r resourceMembersV2Do) FindInBatches(result *[]*model.ResourceMembersV2, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return r.DO.FindInBatches(result, batchSize, fc)
+func (g gResourceMemberModelDo) FindInBatches(result *[]*sqlmodel.GResourceMemberModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (r resourceMembersV2Do) Attrs(attrs ...field.AssignExpr) *resourceMembersV2Do {
-	return r.withDO(r.DO.Attrs(attrs...))
+func (g gResourceMemberModelDo) Attrs(attrs ...field.AssignExpr) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (r resourceMembersV2Do) Assign(attrs ...field.AssignExpr) *resourceMembersV2Do {
-	return r.withDO(r.DO.Assign(attrs...))
+func (g gResourceMemberModelDo) Assign(attrs ...field.AssignExpr) *gResourceMemberModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (r resourceMembersV2Do) Joins(fields ...field.RelationField) *resourceMembersV2Do {
+func (g gResourceMemberModelDo) Joins(fields ...field.RelationField) *gResourceMemberModelDo {
 	for _, _f := range fields {
-		r = *r.withDO(r.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &r
+	return &g
 }
 
-func (r resourceMembersV2Do) Preload(fields ...field.RelationField) *resourceMembersV2Do {
+func (g gResourceMemberModelDo) Preload(fields ...field.RelationField) *gResourceMemberModelDo {
 	for _, _f := range fields {
-		r = *r.withDO(r.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &r
+	return &g
 }
 
-func (r resourceMembersV2Do) FirstOrInit() (*model.ResourceMembersV2, error) {
-	if result, err := r.DO.FirstOrInit(); err != nil {
+func (g gResourceMemberModelDo) FirstOrInit() (*sqlmodel.GResourceMemberModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ResourceMembersV2), nil
+		return result.(*sqlmodel.GResourceMemberModel), nil
 	}
 }
 
-func (r resourceMembersV2Do) FirstOrCreate() (*model.ResourceMembersV2, error) {
-	if result, err := r.DO.FirstOrCreate(); err != nil {
+func (g gResourceMemberModelDo) FirstOrCreate() (*sqlmodel.GResourceMemberModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.ResourceMembersV2), nil
+		return result.(*sqlmodel.GResourceMemberModel), nil
 	}
 }
 
-func (r resourceMembersV2Do) FindByPage(offset int, limit int) (result []*model.ResourceMembersV2, count int64, err error) {
-	result, err = r.Offset(offset).Limit(limit).Find()
+func (g gResourceMemberModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GResourceMemberModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -307,29 +334,29 @@ func (r resourceMembersV2Do) FindByPage(offset int, limit int) (result []*model.
 		return
 	}
 
-	count, err = r.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (r resourceMembersV2Do) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = r.Count()
+func (g gResourceMemberModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = r.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (r resourceMembersV2Do) Scan(result interface{}) (err error) {
-	return r.DO.Scan(result)
+func (g gResourceMemberModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (r resourceMembersV2Do) Delete(models ...*model.ResourceMembersV2) (result gen.ResultInfo, err error) {
-	return r.DO.Delete(models)
+func (g gResourceMemberModelDo) Delete(models ...*sqlmodel.GResourceMemberModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (r *resourceMembersV2Do) withDO(do gen.Dao) *resourceMembersV2Do {
-	r.DO = *do.(*gen.DO)
-	return r
+func (g *gResourceMemberModelDo) withDO(do gen.Dao) *gResourceMemberModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

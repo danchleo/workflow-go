@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,73 +16,101 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newEventTriggersV2(db *gorm.DB, opts ...gen.DOOption) eventTriggersV2 {
-	_eventTriggersV2 := eventTriggersV2{}
+func newGEventTriggerModel(db *gorm.DB, opts ...gen.DOOption) gEventTriggerModel {
+	_gEventTriggerModel := gEventTriggerModel{}
 
-	_eventTriggersV2.eventTriggersV2Do.UseDB(db, opts...)
-	_eventTriggersV2.eventTriggersV2Do.UseModel(&model.EventTriggersV2{})
+	_gEventTriggerModel.gEventTriggerModelDo.UseDB(db, opts...)
+	_gEventTriggerModel.gEventTriggerModelDo.UseModel(&sqlmodel.GEventTriggerModel{})
 
-	tableName := _eventTriggersV2.eventTriggersV2Do.TableName()
-	_eventTriggersV2.ALL = field.NewAsterisk(tableName)
-	_eventTriggersV2.ID = field.NewString(tableName, "id")
-	_eventTriggersV2.Name = field.NewString(tableName, "name")
-	_eventTriggersV2.Data = field.NewString(tableName, "data")
+	tableName := _gEventTriggerModel.gEventTriggerModelDo.TableName()
+	_gEventTriggerModel.ALL = field.NewAsterisk(tableName)
+	_gEventTriggerModel.ID = field.NewString(tableName, "id")
+	_gEventTriggerModel.Name = field.NewString(tableName, "name")
+	_gEventTriggerModel.WorkflowID = field.NewString(tableName, "workflow_id")
+	_gEventTriggerModel.WorkflowParams = field.NewField(tableName, "workflow_params")
+	_gEventTriggerModel.WorkflowInput = field.NewField(tableName, "workflow_input")
+	_gEventTriggerModel.Exchange = field.NewString(tableName, "exchange")
+	_gEventTriggerModel.Topic = field.NewString(tableName, "topic")
+	_gEventTriggerModel.Event = field.NewString(tableName, "event")
+	_gEventTriggerModel.TrustID = field.NewString(tableName, "trust_id")
+	_gEventTriggerModel.ProjectID = field.NewString(tableName, "project_id")
+	_gEventTriggerModel.Scope = field.NewString(tableName, "scope")
+	_gEventTriggerModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gEventTriggerModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_eventTriggersV2.fillFieldMap()
+	_gEventTriggerModel.fillFieldMap()
 
-	return _eventTriggersV2
+	return _gEventTriggerModel
 }
 
-type eventTriggersV2 struct {
-	eventTriggersV2Do eventTriggersV2Do
+type gEventTriggerModel struct {
+	gEventTriggerModelDo gEventTriggerModelDo
 
-	ALL  field.Asterisk
-	ID   field.String
-	Name field.String
-	Data field.String
+	ALL            field.Asterisk
+	ID             field.String
+	Name           field.String
+	WorkflowID     field.String
+	WorkflowParams field.Field
+	WorkflowInput  field.Field
+	Exchange       field.String
+	Topic          field.String
+	Event          field.String
+	TrustID        field.String
+	ProjectID      field.String
+	Scope          field.String
+	CreatedAt      field.Time
+	UpdatedAt      field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (e eventTriggersV2) Table(newTableName string) *eventTriggersV2 {
-	e.eventTriggersV2Do.UseTable(newTableName)
-	return e.updateTableName(newTableName)
+func (g gEventTriggerModel) Table(newTableName string) *gEventTriggerModel {
+	g.gEventTriggerModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (e eventTriggersV2) As(alias string) *eventTriggersV2 {
-	e.eventTriggersV2Do.DO = *(e.eventTriggersV2Do.As(alias).(*gen.DO))
-	return e.updateTableName(alias)
+func (g gEventTriggerModel) As(alias string) *gEventTriggerModel {
+	g.gEventTriggerModelDo.DO = *(g.gEventTriggerModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (e *eventTriggersV2) updateTableName(table string) *eventTriggersV2 {
-	e.ALL = field.NewAsterisk(table)
-	e.ID = field.NewString(table, "id")
-	e.Name = field.NewString(table, "name")
-	e.Data = field.NewString(table, "data")
+func (g *gEventTriggerModel) updateTableName(table string) *gEventTriggerModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.Name = field.NewString(table, "name")
+	g.WorkflowID = field.NewString(table, "workflow_id")
+	g.WorkflowParams = field.NewField(table, "workflow_params")
+	g.WorkflowInput = field.NewField(table, "workflow_input")
+	g.Exchange = field.NewString(table, "exchange")
+	g.Topic = field.NewString(table, "topic")
+	g.Event = field.NewString(table, "event")
+	g.TrustID = field.NewString(table, "trust_id")
+	g.ProjectID = field.NewString(table, "project_id")
+	g.Scope = field.NewString(table, "scope")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	e.fillFieldMap()
+	g.fillFieldMap()
 
-	return e
+	return g
 }
 
-func (e *eventTriggersV2) WithContext(ctx context.Context) *eventTriggersV2Do {
-	return e.eventTriggersV2Do.WithContext(ctx)
+func (g *gEventTriggerModel) WithContext(ctx context.Context) *gEventTriggerModelDo {
+	return g.gEventTriggerModelDo.WithContext(ctx)
 }
 
-func (e eventTriggersV2) TableName() string { return e.eventTriggersV2Do.TableName() }
+func (g gEventTriggerModel) TableName() string { return g.gEventTriggerModelDo.TableName() }
 
-func (e eventTriggersV2) Alias() string { return e.eventTriggersV2Do.Alias() }
+func (g gEventTriggerModel) Alias() string { return g.gEventTriggerModelDo.Alias() }
 
-func (e eventTriggersV2) Columns(cols ...field.Expr) gen.Columns {
-	return e.eventTriggersV2Do.Columns(cols...)
+func (g gEventTriggerModel) Columns(cols ...field.Expr) gen.Columns {
+	return g.gEventTriggerModelDo.Columns(cols...)
 }
 
-func (e *eventTriggersV2) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := e.fieldMap[fieldName]
+func (g *gEventTriggerModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -89,219 +118,229 @@ func (e *eventTriggersV2) GetFieldByName(fieldName string) (field.OrderExpr, boo
 	return _oe, ok
 }
 
-func (e *eventTriggersV2) fillFieldMap() {
-	e.fieldMap = make(map[string]field.Expr, 3)
-	e.fieldMap["id"] = e.ID
-	e.fieldMap["name"] = e.Name
-	e.fieldMap["data"] = e.Data
+func (g *gEventTriggerModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 13)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["name"] = g.Name
+	g.fieldMap["workflow_id"] = g.WorkflowID
+	g.fieldMap["workflow_params"] = g.WorkflowParams
+	g.fieldMap["workflow_input"] = g.WorkflowInput
+	g.fieldMap["exchange"] = g.Exchange
+	g.fieldMap["topic"] = g.Topic
+	g.fieldMap["event"] = g.Event
+	g.fieldMap["trust_id"] = g.TrustID
+	g.fieldMap["project_id"] = g.ProjectID
+	g.fieldMap["scope"] = g.Scope
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (e eventTriggersV2) clone(db *gorm.DB) eventTriggersV2 {
-	e.eventTriggersV2Do.ReplaceConnPool(db.Statement.ConnPool)
-	return e
+func (g gEventTriggerModel) clone(db *gorm.DB) gEventTriggerModel {
+	g.gEventTriggerModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (e eventTriggersV2) replaceDB(db *gorm.DB) eventTriggersV2 {
-	e.eventTriggersV2Do.ReplaceDB(db)
-	return e
+func (g gEventTriggerModel) replaceDB(db *gorm.DB) gEventTriggerModel {
+	g.gEventTriggerModelDo.ReplaceDB(db)
+	return g
 }
 
-type eventTriggersV2Do struct{ gen.DO }
+type gEventTriggerModelDo struct{ gen.DO }
 
-func (e eventTriggersV2Do) Debug() *eventTriggersV2Do {
-	return e.withDO(e.DO.Debug())
+func (g gEventTriggerModelDo) Debug() *gEventTriggerModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (e eventTriggersV2Do) WithContext(ctx context.Context) *eventTriggersV2Do {
-	return e.withDO(e.DO.WithContext(ctx))
+func (g gEventTriggerModelDo) WithContext(ctx context.Context) *gEventTriggerModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (e eventTriggersV2Do) ReadDB() *eventTriggersV2Do {
-	return e.Clauses(dbresolver.Read)
+func (g gEventTriggerModelDo) ReadDB() *gEventTriggerModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (e eventTriggersV2Do) WriteDB() *eventTriggersV2Do {
-	return e.Clauses(dbresolver.Write)
+func (g gEventTriggerModelDo) WriteDB() *gEventTriggerModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (e eventTriggersV2Do) Session(config *gorm.Session) *eventTriggersV2Do {
-	return e.withDO(e.DO.Session(config))
+func (g gEventTriggerModelDo) Session(config *gorm.Session) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (e eventTriggersV2Do) Clauses(conds ...clause.Expression) *eventTriggersV2Do {
-	return e.withDO(e.DO.Clauses(conds...))
+func (g gEventTriggerModelDo) Clauses(conds ...clause.Expression) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (e eventTriggersV2Do) Returning(value interface{}, columns ...string) *eventTriggersV2Do {
-	return e.withDO(e.DO.Returning(value, columns...))
+func (g gEventTriggerModelDo) Returning(value interface{}, columns ...string) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (e eventTriggersV2Do) Not(conds ...gen.Condition) *eventTriggersV2Do {
-	return e.withDO(e.DO.Not(conds...))
+func (g gEventTriggerModelDo) Not(conds ...gen.Condition) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (e eventTriggersV2Do) Or(conds ...gen.Condition) *eventTriggersV2Do {
-	return e.withDO(e.DO.Or(conds...))
+func (g gEventTriggerModelDo) Or(conds ...gen.Condition) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (e eventTriggersV2Do) Select(conds ...field.Expr) *eventTriggersV2Do {
-	return e.withDO(e.DO.Select(conds...))
+func (g gEventTriggerModelDo) Select(conds ...field.Expr) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (e eventTriggersV2Do) Where(conds ...gen.Condition) *eventTriggersV2Do {
-	return e.withDO(e.DO.Where(conds...))
+func (g gEventTriggerModelDo) Where(conds ...gen.Condition) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (e eventTriggersV2Do) Order(conds ...field.Expr) *eventTriggersV2Do {
-	return e.withDO(e.DO.Order(conds...))
+func (g gEventTriggerModelDo) Order(conds ...field.Expr) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (e eventTriggersV2Do) Distinct(cols ...field.Expr) *eventTriggersV2Do {
-	return e.withDO(e.DO.Distinct(cols...))
+func (g gEventTriggerModelDo) Distinct(cols ...field.Expr) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (e eventTriggersV2Do) Omit(cols ...field.Expr) *eventTriggersV2Do {
-	return e.withDO(e.DO.Omit(cols...))
+func (g gEventTriggerModelDo) Omit(cols ...field.Expr) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (e eventTriggersV2Do) Join(table schema.Tabler, on ...field.Expr) *eventTriggersV2Do {
-	return e.withDO(e.DO.Join(table, on...))
+func (g gEventTriggerModelDo) Join(table schema.Tabler, on ...field.Expr) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (e eventTriggersV2Do) LeftJoin(table schema.Tabler, on ...field.Expr) *eventTriggersV2Do {
-	return e.withDO(e.DO.LeftJoin(table, on...))
+func (g gEventTriggerModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gEventTriggerModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (e eventTriggersV2Do) RightJoin(table schema.Tabler, on ...field.Expr) *eventTriggersV2Do {
-	return e.withDO(e.DO.RightJoin(table, on...))
+func (g gEventTriggerModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gEventTriggerModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (e eventTriggersV2Do) Group(cols ...field.Expr) *eventTriggersV2Do {
-	return e.withDO(e.DO.Group(cols...))
+func (g gEventTriggerModelDo) Group(cols ...field.Expr) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (e eventTriggersV2Do) Having(conds ...gen.Condition) *eventTriggersV2Do {
-	return e.withDO(e.DO.Having(conds...))
+func (g gEventTriggerModelDo) Having(conds ...gen.Condition) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (e eventTriggersV2Do) Limit(limit int) *eventTriggersV2Do {
-	return e.withDO(e.DO.Limit(limit))
+func (g gEventTriggerModelDo) Limit(limit int) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (e eventTriggersV2Do) Offset(offset int) *eventTriggersV2Do {
-	return e.withDO(e.DO.Offset(offset))
+func (g gEventTriggerModelDo) Offset(offset int) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (e eventTriggersV2Do) Scopes(funcs ...func(gen.Dao) gen.Dao) *eventTriggersV2Do {
-	return e.withDO(e.DO.Scopes(funcs...))
+func (g gEventTriggerModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (e eventTriggersV2Do) Unscoped() *eventTriggersV2Do {
-	return e.withDO(e.DO.Unscoped())
+func (g gEventTriggerModelDo) Unscoped() *gEventTriggerModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (e eventTriggersV2Do) Create(values ...*model.EventTriggersV2) error {
+func (g gEventTriggerModelDo) Create(values ...*sqlmodel.GEventTriggerModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return e.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (e eventTriggersV2Do) CreateInBatches(values []*model.EventTriggersV2, batchSize int) error {
-	return e.DO.CreateInBatches(values, batchSize)
+func (g gEventTriggerModelDo) CreateInBatches(values []*sqlmodel.GEventTriggerModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (e eventTriggersV2Do) Save(values ...*model.EventTriggersV2) error {
+func (g gEventTriggerModelDo) Save(values ...*sqlmodel.GEventTriggerModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return e.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (e eventTriggersV2Do) First() (*model.EventTriggersV2, error) {
-	if result, err := e.DO.First(); err != nil {
+func (g gEventTriggerModelDo) First() (*sqlmodel.GEventTriggerModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.EventTriggersV2), nil
+		return result.(*sqlmodel.GEventTriggerModel), nil
 	}
 }
 
-func (e eventTriggersV2Do) Take() (*model.EventTriggersV2, error) {
-	if result, err := e.DO.Take(); err != nil {
+func (g gEventTriggerModelDo) Take() (*sqlmodel.GEventTriggerModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.EventTriggersV2), nil
+		return result.(*sqlmodel.GEventTriggerModel), nil
 	}
 }
 
-func (e eventTriggersV2Do) Last() (*model.EventTriggersV2, error) {
-	if result, err := e.DO.Last(); err != nil {
+func (g gEventTriggerModelDo) Last() (*sqlmodel.GEventTriggerModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.EventTriggersV2), nil
+		return result.(*sqlmodel.GEventTriggerModel), nil
 	}
 }
 
-func (e eventTriggersV2Do) Find() ([]*model.EventTriggersV2, error) {
-	result, err := e.DO.Find()
-	return result.([]*model.EventTriggersV2), err
+func (g gEventTriggerModelDo) Find() ([]*sqlmodel.GEventTriggerModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GEventTriggerModel), err
 }
 
-func (e eventTriggersV2Do) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.EventTriggersV2, err error) {
-	buf := make([]*model.EventTriggersV2, 0, batchSize)
-	err = e.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gEventTriggerModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GEventTriggerModel, err error) {
+	buf := make([]*sqlmodel.GEventTriggerModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (e eventTriggersV2Do) FindInBatches(result *[]*model.EventTriggersV2, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return e.DO.FindInBatches(result, batchSize, fc)
+func (g gEventTriggerModelDo) FindInBatches(result *[]*sqlmodel.GEventTriggerModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (e eventTriggersV2Do) Attrs(attrs ...field.AssignExpr) *eventTriggersV2Do {
-	return e.withDO(e.DO.Attrs(attrs...))
+func (g gEventTriggerModelDo) Attrs(attrs ...field.AssignExpr) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (e eventTriggersV2Do) Assign(attrs ...field.AssignExpr) *eventTriggersV2Do {
-	return e.withDO(e.DO.Assign(attrs...))
+func (g gEventTriggerModelDo) Assign(attrs ...field.AssignExpr) *gEventTriggerModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (e eventTriggersV2Do) Joins(fields ...field.RelationField) *eventTriggersV2Do {
+func (g gEventTriggerModelDo) Joins(fields ...field.RelationField) *gEventTriggerModelDo {
 	for _, _f := range fields {
-		e = *e.withDO(e.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &e
+	return &g
 }
 
-func (e eventTriggersV2Do) Preload(fields ...field.RelationField) *eventTriggersV2Do {
+func (g gEventTriggerModelDo) Preload(fields ...field.RelationField) *gEventTriggerModelDo {
 	for _, _f := range fields {
-		e = *e.withDO(e.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &e
+	return &g
 }
 
-func (e eventTriggersV2Do) FirstOrInit() (*model.EventTriggersV2, error) {
-	if result, err := e.DO.FirstOrInit(); err != nil {
+func (g gEventTriggerModelDo) FirstOrInit() (*sqlmodel.GEventTriggerModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.EventTriggersV2), nil
+		return result.(*sqlmodel.GEventTriggerModel), nil
 	}
 }
 
-func (e eventTriggersV2Do) FirstOrCreate() (*model.EventTriggersV2, error) {
-	if result, err := e.DO.FirstOrCreate(); err != nil {
+func (g gEventTriggerModelDo) FirstOrCreate() (*sqlmodel.GEventTriggerModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.EventTriggersV2), nil
+		return result.(*sqlmodel.GEventTriggerModel), nil
 	}
 }
 
-func (e eventTriggersV2Do) FindByPage(offset int, limit int) (result []*model.EventTriggersV2, count int64, err error) {
-	result, err = e.Offset(offset).Limit(limit).Find()
+func (g gEventTriggerModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GEventTriggerModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -311,29 +350,29 @@ func (e eventTriggersV2Do) FindByPage(offset int, limit int) (result []*model.Ev
 		return
 	}
 
-	count, err = e.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (e eventTriggersV2Do) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = e.Count()
+func (g gEventTriggerModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = e.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (e eventTriggersV2Do) Scan(result interface{}) (err error) {
-	return e.DO.Scan(result)
+func (g gEventTriggerModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (e eventTriggersV2Do) Delete(models ...*model.EventTriggersV2) (result gen.ResultInfo, err error) {
-	return e.DO.Delete(models)
+func (g gEventTriggerModelDo) Delete(models ...*sqlmodel.GEventTriggerModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (e *eventTriggersV2Do) withDO(do gen.Dao) *eventTriggersV2Do {
-	e.DO = *do.(*gen.DO)
-	return e
+func (g *gEventTriggerModelDo) withDO(do gen.Dao) *gEventTriggerModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

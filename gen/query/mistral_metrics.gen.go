@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,73 +16,77 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newMistralMetric(db *gorm.DB, opts ...gen.DOOption) mistralMetric {
-	_mistralMetric := mistralMetric{}
+func newGMetricsModel(db *gorm.DB, opts ...gen.DOOption) gMetricsModel {
+	_gMetricsModel := gMetricsModel{}
 
-	_mistralMetric.mistralMetricDo.UseDB(db, opts...)
-	_mistralMetric.mistralMetricDo.UseModel(&model.MistralMetric{})
+	_gMetricsModel.gMetricsModelDo.UseDB(db, opts...)
+	_gMetricsModel.gMetricsModelDo.UseModel(&sqlmodel.GMetricsModel{})
 
-	tableName := _mistralMetric.mistralMetricDo.TableName()
-	_mistralMetric.ALL = field.NewAsterisk(tableName)
-	_mistralMetric.ID = field.NewInt64(tableName, "id")
-	_mistralMetric.Name = field.NewString(tableName, "name")
-	_mistralMetric.Value = field.NewString(tableName, "value")
+	tableName := _gMetricsModel.gMetricsModelDo.TableName()
+	_gMetricsModel.ALL = field.NewAsterisk(tableName)
+	_gMetricsModel.ID = field.NewInt(tableName, "id")
+	_gMetricsModel.Name = field.NewString(tableName, "name")
+	_gMetricsModel.Value = field.NewString(tableName, "value")
+	_gMetricsModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gMetricsModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_mistralMetric.fillFieldMap()
+	_gMetricsModel.fillFieldMap()
 
-	return _mistralMetric
+	return _gMetricsModel
 }
 
-type mistralMetric struct {
-	mistralMetricDo mistralMetricDo
+type gMetricsModel struct {
+	gMetricsModelDo gMetricsModelDo
 
-	ALL   field.Asterisk
-	ID    field.Int64
-	Name  field.String
-	Value field.String
+	ALL       field.Asterisk
+	ID        field.Int
+	Name      field.String
+	Value     field.String
+	CreatedAt field.Time
+	UpdatedAt field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (m mistralMetric) Table(newTableName string) *mistralMetric {
-	m.mistralMetricDo.UseTable(newTableName)
-	return m.updateTableName(newTableName)
+func (g gMetricsModel) Table(newTableName string) *gMetricsModel {
+	g.gMetricsModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (m mistralMetric) As(alias string) *mistralMetric {
-	m.mistralMetricDo.DO = *(m.mistralMetricDo.As(alias).(*gen.DO))
-	return m.updateTableName(alias)
+func (g gMetricsModel) As(alias string) *gMetricsModel {
+	g.gMetricsModelDo.DO = *(g.gMetricsModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (m *mistralMetric) updateTableName(table string) *mistralMetric {
-	m.ALL = field.NewAsterisk(table)
-	m.ID = field.NewInt64(table, "id")
-	m.Name = field.NewString(table, "name")
-	m.Value = field.NewString(table, "value")
+func (g *gMetricsModel) updateTableName(table string) *gMetricsModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewInt(table, "id")
+	g.Name = field.NewString(table, "name")
+	g.Value = field.NewString(table, "value")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	m.fillFieldMap()
+	g.fillFieldMap()
 
-	return m
+	return g
 }
 
-func (m *mistralMetric) WithContext(ctx context.Context) *mistralMetricDo {
-	return m.mistralMetricDo.WithContext(ctx)
+func (g *gMetricsModel) WithContext(ctx context.Context) *gMetricsModelDo {
+	return g.gMetricsModelDo.WithContext(ctx)
 }
 
-func (m mistralMetric) TableName() string { return m.mistralMetricDo.TableName() }
+func (g gMetricsModel) TableName() string { return g.gMetricsModelDo.TableName() }
 
-func (m mistralMetric) Alias() string { return m.mistralMetricDo.Alias() }
+func (g gMetricsModel) Alias() string { return g.gMetricsModelDo.Alias() }
 
-func (m mistralMetric) Columns(cols ...field.Expr) gen.Columns {
-	return m.mistralMetricDo.Columns(cols...)
+func (g gMetricsModel) Columns(cols ...field.Expr) gen.Columns {
+	return g.gMetricsModelDo.Columns(cols...)
 }
 
-func (m *mistralMetric) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := m.fieldMap[fieldName]
+func (g *gMetricsModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -89,219 +94,221 @@ func (m *mistralMetric) GetFieldByName(fieldName string) (field.OrderExpr, bool)
 	return _oe, ok
 }
 
-func (m *mistralMetric) fillFieldMap() {
-	m.fieldMap = make(map[string]field.Expr, 3)
-	m.fieldMap["id"] = m.ID
-	m.fieldMap["name"] = m.Name
-	m.fieldMap["value"] = m.Value
+func (g *gMetricsModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 5)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["name"] = g.Name
+	g.fieldMap["value"] = g.Value
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (m mistralMetric) clone(db *gorm.DB) mistralMetric {
-	m.mistralMetricDo.ReplaceConnPool(db.Statement.ConnPool)
-	return m
+func (g gMetricsModel) clone(db *gorm.DB) gMetricsModel {
+	g.gMetricsModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (m mistralMetric) replaceDB(db *gorm.DB) mistralMetric {
-	m.mistralMetricDo.ReplaceDB(db)
-	return m
+func (g gMetricsModel) replaceDB(db *gorm.DB) gMetricsModel {
+	g.gMetricsModelDo.ReplaceDB(db)
+	return g
 }
 
-type mistralMetricDo struct{ gen.DO }
+type gMetricsModelDo struct{ gen.DO }
 
-func (m mistralMetricDo) Debug() *mistralMetricDo {
-	return m.withDO(m.DO.Debug())
+func (g gMetricsModelDo) Debug() *gMetricsModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (m mistralMetricDo) WithContext(ctx context.Context) *mistralMetricDo {
-	return m.withDO(m.DO.WithContext(ctx))
+func (g gMetricsModelDo) WithContext(ctx context.Context) *gMetricsModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (m mistralMetricDo) ReadDB() *mistralMetricDo {
-	return m.Clauses(dbresolver.Read)
+func (g gMetricsModelDo) ReadDB() *gMetricsModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (m mistralMetricDo) WriteDB() *mistralMetricDo {
-	return m.Clauses(dbresolver.Write)
+func (g gMetricsModelDo) WriteDB() *gMetricsModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (m mistralMetricDo) Session(config *gorm.Session) *mistralMetricDo {
-	return m.withDO(m.DO.Session(config))
+func (g gMetricsModelDo) Session(config *gorm.Session) *gMetricsModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (m mistralMetricDo) Clauses(conds ...clause.Expression) *mistralMetricDo {
-	return m.withDO(m.DO.Clauses(conds...))
+func (g gMetricsModelDo) Clauses(conds ...clause.Expression) *gMetricsModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (m mistralMetricDo) Returning(value interface{}, columns ...string) *mistralMetricDo {
-	return m.withDO(m.DO.Returning(value, columns...))
+func (g gMetricsModelDo) Returning(value interface{}, columns ...string) *gMetricsModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (m mistralMetricDo) Not(conds ...gen.Condition) *mistralMetricDo {
-	return m.withDO(m.DO.Not(conds...))
+func (g gMetricsModelDo) Not(conds ...gen.Condition) *gMetricsModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (m mistralMetricDo) Or(conds ...gen.Condition) *mistralMetricDo {
-	return m.withDO(m.DO.Or(conds...))
+func (g gMetricsModelDo) Or(conds ...gen.Condition) *gMetricsModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (m mistralMetricDo) Select(conds ...field.Expr) *mistralMetricDo {
-	return m.withDO(m.DO.Select(conds...))
+func (g gMetricsModelDo) Select(conds ...field.Expr) *gMetricsModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (m mistralMetricDo) Where(conds ...gen.Condition) *mistralMetricDo {
-	return m.withDO(m.DO.Where(conds...))
+func (g gMetricsModelDo) Where(conds ...gen.Condition) *gMetricsModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (m mistralMetricDo) Order(conds ...field.Expr) *mistralMetricDo {
-	return m.withDO(m.DO.Order(conds...))
+func (g gMetricsModelDo) Order(conds ...field.Expr) *gMetricsModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (m mistralMetricDo) Distinct(cols ...field.Expr) *mistralMetricDo {
-	return m.withDO(m.DO.Distinct(cols...))
+func (g gMetricsModelDo) Distinct(cols ...field.Expr) *gMetricsModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (m mistralMetricDo) Omit(cols ...field.Expr) *mistralMetricDo {
-	return m.withDO(m.DO.Omit(cols...))
+func (g gMetricsModelDo) Omit(cols ...field.Expr) *gMetricsModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (m mistralMetricDo) Join(table schema.Tabler, on ...field.Expr) *mistralMetricDo {
-	return m.withDO(m.DO.Join(table, on...))
+func (g gMetricsModelDo) Join(table schema.Tabler, on ...field.Expr) *gMetricsModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (m mistralMetricDo) LeftJoin(table schema.Tabler, on ...field.Expr) *mistralMetricDo {
-	return m.withDO(m.DO.LeftJoin(table, on...))
+func (g gMetricsModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gMetricsModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (m mistralMetricDo) RightJoin(table schema.Tabler, on ...field.Expr) *mistralMetricDo {
-	return m.withDO(m.DO.RightJoin(table, on...))
+func (g gMetricsModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gMetricsModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (m mistralMetricDo) Group(cols ...field.Expr) *mistralMetricDo {
-	return m.withDO(m.DO.Group(cols...))
+func (g gMetricsModelDo) Group(cols ...field.Expr) *gMetricsModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (m mistralMetricDo) Having(conds ...gen.Condition) *mistralMetricDo {
-	return m.withDO(m.DO.Having(conds...))
+func (g gMetricsModelDo) Having(conds ...gen.Condition) *gMetricsModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (m mistralMetricDo) Limit(limit int) *mistralMetricDo {
-	return m.withDO(m.DO.Limit(limit))
+func (g gMetricsModelDo) Limit(limit int) *gMetricsModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (m mistralMetricDo) Offset(offset int) *mistralMetricDo {
-	return m.withDO(m.DO.Offset(offset))
+func (g gMetricsModelDo) Offset(offset int) *gMetricsModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (m mistralMetricDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *mistralMetricDo {
-	return m.withDO(m.DO.Scopes(funcs...))
+func (g gMetricsModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gMetricsModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (m mistralMetricDo) Unscoped() *mistralMetricDo {
-	return m.withDO(m.DO.Unscoped())
+func (g gMetricsModelDo) Unscoped() *gMetricsModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (m mistralMetricDo) Create(values ...*model.MistralMetric) error {
+func (g gMetricsModelDo) Create(values ...*sqlmodel.GMetricsModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return m.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (m mistralMetricDo) CreateInBatches(values []*model.MistralMetric, batchSize int) error {
-	return m.DO.CreateInBatches(values, batchSize)
+func (g gMetricsModelDo) CreateInBatches(values []*sqlmodel.GMetricsModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (m mistralMetricDo) Save(values ...*model.MistralMetric) error {
+func (g gMetricsModelDo) Save(values ...*sqlmodel.GMetricsModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return m.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (m mistralMetricDo) First() (*model.MistralMetric, error) {
-	if result, err := m.DO.First(); err != nil {
+func (g gMetricsModelDo) First() (*sqlmodel.GMetricsModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.MistralMetric), nil
+		return result.(*sqlmodel.GMetricsModel), nil
 	}
 }
 
-func (m mistralMetricDo) Take() (*model.MistralMetric, error) {
-	if result, err := m.DO.Take(); err != nil {
+func (g gMetricsModelDo) Take() (*sqlmodel.GMetricsModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.MistralMetric), nil
+		return result.(*sqlmodel.GMetricsModel), nil
 	}
 }
 
-func (m mistralMetricDo) Last() (*model.MistralMetric, error) {
-	if result, err := m.DO.Last(); err != nil {
+func (g gMetricsModelDo) Last() (*sqlmodel.GMetricsModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.MistralMetric), nil
+		return result.(*sqlmodel.GMetricsModel), nil
 	}
 }
 
-func (m mistralMetricDo) Find() ([]*model.MistralMetric, error) {
-	result, err := m.DO.Find()
-	return result.([]*model.MistralMetric), err
+func (g gMetricsModelDo) Find() ([]*sqlmodel.GMetricsModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GMetricsModel), err
 }
 
-func (m mistralMetricDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.MistralMetric, err error) {
-	buf := make([]*model.MistralMetric, 0, batchSize)
-	err = m.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gMetricsModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GMetricsModel, err error) {
+	buf := make([]*sqlmodel.GMetricsModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (m mistralMetricDo) FindInBatches(result *[]*model.MistralMetric, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return m.DO.FindInBatches(result, batchSize, fc)
+func (g gMetricsModelDo) FindInBatches(result *[]*sqlmodel.GMetricsModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (m mistralMetricDo) Attrs(attrs ...field.AssignExpr) *mistralMetricDo {
-	return m.withDO(m.DO.Attrs(attrs...))
+func (g gMetricsModelDo) Attrs(attrs ...field.AssignExpr) *gMetricsModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (m mistralMetricDo) Assign(attrs ...field.AssignExpr) *mistralMetricDo {
-	return m.withDO(m.DO.Assign(attrs...))
+func (g gMetricsModelDo) Assign(attrs ...field.AssignExpr) *gMetricsModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (m mistralMetricDo) Joins(fields ...field.RelationField) *mistralMetricDo {
+func (g gMetricsModelDo) Joins(fields ...field.RelationField) *gMetricsModelDo {
 	for _, _f := range fields {
-		m = *m.withDO(m.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &m
+	return &g
 }
 
-func (m mistralMetricDo) Preload(fields ...field.RelationField) *mistralMetricDo {
+func (g gMetricsModelDo) Preload(fields ...field.RelationField) *gMetricsModelDo {
 	for _, _f := range fields {
-		m = *m.withDO(m.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &m
+	return &g
 }
 
-func (m mistralMetricDo) FirstOrInit() (*model.MistralMetric, error) {
-	if result, err := m.DO.FirstOrInit(); err != nil {
+func (g gMetricsModelDo) FirstOrInit() (*sqlmodel.GMetricsModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.MistralMetric), nil
+		return result.(*sqlmodel.GMetricsModel), nil
 	}
 }
 
-func (m mistralMetricDo) FirstOrCreate() (*model.MistralMetric, error) {
-	if result, err := m.DO.FirstOrCreate(); err != nil {
+func (g gMetricsModelDo) FirstOrCreate() (*sqlmodel.GMetricsModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.MistralMetric), nil
+		return result.(*sqlmodel.GMetricsModel), nil
 	}
 }
 
-func (m mistralMetricDo) FindByPage(offset int, limit int) (result []*model.MistralMetric, count int64, err error) {
-	result, err = m.Offset(offset).Limit(limit).Find()
+func (g gMetricsModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GMetricsModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -311,29 +318,29 @@ func (m mistralMetricDo) FindByPage(offset int, limit int) (result []*model.Mist
 		return
 	}
 
-	count, err = m.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (m mistralMetricDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = m.Count()
+func (g gMetricsModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = m.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (m mistralMetricDo) Scan(result interface{}) (err error) {
-	return m.DO.Scan(result)
+func (g gMetricsModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (m mistralMetricDo) Delete(models ...*model.MistralMetric) (result gen.ResultInfo, err error) {
-	return m.DO.Delete(models)
+func (g gMetricsModelDo) Delete(models ...*sqlmodel.GMetricsModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (m *mistralMetricDo) withDO(do gen.Dao) *mistralMetricDo {
-	m.DO = *do.(*gen.DO)
-	return m
+func (g *gMetricsModelDo) withDO(do gen.Dao) *gMetricsModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }

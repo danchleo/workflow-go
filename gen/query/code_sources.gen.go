@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 
+	"github.com/danchleo/workflow-go/gen/sqlmodel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -15,71 +16,92 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"github.com/danchleo/workflow-go/gen/model"
 )
 
-func newCodeSource(db *gorm.DB, opts ...gen.DOOption) codeSource {
-	_codeSource := codeSource{}
+func newGCodeSourceModel(db *gorm.DB, opts ...gen.DOOption) gCodeSourceModel {
+	_gCodeSourceModel := gCodeSourceModel{}
 
-	_codeSource.codeSourceDo.UseDB(db, opts...)
-	_codeSource.codeSourceDo.UseModel(&model.CodeSource{})
+	_gCodeSourceModel.gCodeSourceModelDo.UseDB(db, opts...)
+	_gCodeSourceModel.gCodeSourceModelDo.UseModel(&sqlmodel.GCodeSourceModel{})
 
-	tableName := _codeSource.codeSourceDo.TableName()
-	_codeSource.ALL = field.NewAsterisk(tableName)
-	_codeSource.ID = field.NewString(tableName, "id")
-	_codeSource.Name = field.NewString(tableName, "name")
-	_codeSource.Data = field.NewString(tableName, "data")
+	tableName := _gCodeSourceModel.gCodeSourceModelDo.TableName()
+	_gCodeSourceModel.ALL = field.NewAsterisk(tableName)
+	_gCodeSourceModel.ID = field.NewString(tableName, "id")
+	_gCodeSourceModel.Name = field.NewString(tableName, "name")
+	_gCodeSourceModel.Content = field.NewString(tableName, "content")
+	_gCodeSourceModel.Version = field.NewInt(tableName, "version")
+	_gCodeSourceModel.Namespace = field.NewString(tableName, "namespace")
+	_gCodeSourceModel.Tags = field.NewField(tableName, "tags")
+	_gCodeSourceModel.ProjectID = field.NewString(tableName, "project_id")
+	_gCodeSourceModel.Scope = field.NewString(tableName, "scope")
+	_gCodeSourceModel.CreatedAt = field.NewTime(tableName, "created_at")
+	_gCodeSourceModel.UpdatedAt = field.NewTime(tableName, "updated_at")
 
-	_codeSource.fillFieldMap()
+	_gCodeSourceModel.fillFieldMap()
 
-	return _codeSource
+	return _gCodeSourceModel
 }
 
-type codeSource struct {
-	codeSourceDo codeSourceDo
+type gCodeSourceModel struct {
+	gCodeSourceModelDo gCodeSourceModelDo
 
-	ALL  field.Asterisk
-	ID   field.String
-	Name field.String
-	Data field.String
+	ALL       field.Asterisk
+	ID        field.String
+	Name      field.String
+	Content   field.String
+	Version   field.Int
+	Namespace field.String
+	Tags      field.Field
+	ProjectID field.String
+	Scope     field.String
+	CreatedAt field.Time
+	UpdatedAt field.Time
 
 	fieldMap map[string]field.Expr
 }
 
-func (c codeSource) Table(newTableName string) *codeSource {
-	c.codeSourceDo.UseTable(newTableName)
-	return c.updateTableName(newTableName)
+func (g gCodeSourceModel) Table(newTableName string) *gCodeSourceModel {
+	g.gCodeSourceModelDo.UseTable(newTableName)
+	return g.updateTableName(newTableName)
 }
 
-func (c codeSource) As(alias string) *codeSource {
-	c.codeSourceDo.DO = *(c.codeSourceDo.As(alias).(*gen.DO))
-	return c.updateTableName(alias)
+func (g gCodeSourceModel) As(alias string) *gCodeSourceModel {
+	g.gCodeSourceModelDo.DO = *(g.gCodeSourceModelDo.As(alias).(*gen.DO))
+	return g.updateTableName(alias)
 }
 
-func (c *codeSource) updateTableName(table string) *codeSource {
-	c.ALL = field.NewAsterisk(table)
-	c.ID = field.NewString(table, "id")
-	c.Name = field.NewString(table, "name")
-	c.Data = field.NewString(table, "data")
+func (g *gCodeSourceModel) updateTableName(table string) *gCodeSourceModel {
+	g.ALL = field.NewAsterisk(table)
+	g.ID = field.NewString(table, "id")
+	g.Name = field.NewString(table, "name")
+	g.Content = field.NewString(table, "content")
+	g.Version = field.NewInt(table, "version")
+	g.Namespace = field.NewString(table, "namespace")
+	g.Tags = field.NewField(table, "tags")
+	g.ProjectID = field.NewString(table, "project_id")
+	g.Scope = field.NewString(table, "scope")
+	g.CreatedAt = field.NewTime(table, "created_at")
+	g.UpdatedAt = field.NewTime(table, "updated_at")
 
-	c.fillFieldMap()
+	g.fillFieldMap()
 
-	return c
+	return g
 }
 
-func (c *codeSource) WithContext(ctx context.Context) *codeSourceDo {
-	return c.codeSourceDo.WithContext(ctx)
+func (g *gCodeSourceModel) WithContext(ctx context.Context) *gCodeSourceModelDo {
+	return g.gCodeSourceModelDo.WithContext(ctx)
 }
 
-func (c codeSource) TableName() string { return c.codeSourceDo.TableName() }
+func (g gCodeSourceModel) TableName() string { return g.gCodeSourceModelDo.TableName() }
 
-func (c codeSource) Alias() string { return c.codeSourceDo.Alias() }
+func (g gCodeSourceModel) Alias() string { return g.gCodeSourceModelDo.Alias() }
 
-func (c codeSource) Columns(cols ...field.Expr) gen.Columns { return c.codeSourceDo.Columns(cols...) }
+func (g gCodeSourceModel) Columns(cols ...field.Expr) gen.Columns {
+	return g.gCodeSourceModelDo.Columns(cols...)
+}
 
-func (c *codeSource) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
-	_f, ok := c.fieldMap[fieldName]
+func (g *gCodeSourceModel) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
+	_f, ok := g.fieldMap[fieldName]
 	if !ok || _f == nil {
 		return nil, false
 	}
@@ -87,219 +109,226 @@ func (c *codeSource) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
 	return _oe, ok
 }
 
-func (c *codeSource) fillFieldMap() {
-	c.fieldMap = make(map[string]field.Expr, 3)
-	c.fieldMap["id"] = c.ID
-	c.fieldMap["name"] = c.Name
-	c.fieldMap["data"] = c.Data
+func (g *gCodeSourceModel) fillFieldMap() {
+	g.fieldMap = make(map[string]field.Expr, 10)
+	g.fieldMap["id"] = g.ID
+	g.fieldMap["name"] = g.Name
+	g.fieldMap["content"] = g.Content
+	g.fieldMap["version"] = g.Version
+	g.fieldMap["namespace"] = g.Namespace
+	g.fieldMap["tags"] = g.Tags
+	g.fieldMap["project_id"] = g.ProjectID
+	g.fieldMap["scope"] = g.Scope
+	g.fieldMap["created_at"] = g.CreatedAt
+	g.fieldMap["updated_at"] = g.UpdatedAt
 }
 
-func (c codeSource) clone(db *gorm.DB) codeSource {
-	c.codeSourceDo.ReplaceConnPool(db.Statement.ConnPool)
-	return c
+func (g gCodeSourceModel) clone(db *gorm.DB) gCodeSourceModel {
+	g.gCodeSourceModelDo.ReplaceConnPool(db.Statement.ConnPool)
+	return g
 }
 
-func (c codeSource) replaceDB(db *gorm.DB) codeSource {
-	c.codeSourceDo.ReplaceDB(db)
-	return c
+func (g gCodeSourceModel) replaceDB(db *gorm.DB) gCodeSourceModel {
+	g.gCodeSourceModelDo.ReplaceDB(db)
+	return g
 }
 
-type codeSourceDo struct{ gen.DO }
+type gCodeSourceModelDo struct{ gen.DO }
 
-func (c codeSourceDo) Debug() *codeSourceDo {
-	return c.withDO(c.DO.Debug())
+func (g gCodeSourceModelDo) Debug() *gCodeSourceModelDo {
+	return g.withDO(g.DO.Debug())
 }
 
-func (c codeSourceDo) WithContext(ctx context.Context) *codeSourceDo {
-	return c.withDO(c.DO.WithContext(ctx))
+func (g gCodeSourceModelDo) WithContext(ctx context.Context) *gCodeSourceModelDo {
+	return g.withDO(g.DO.WithContext(ctx))
 }
 
-func (c codeSourceDo) ReadDB() *codeSourceDo {
-	return c.Clauses(dbresolver.Read)
+func (g gCodeSourceModelDo) ReadDB() *gCodeSourceModelDo {
+	return g.Clauses(dbresolver.Read)
 }
 
-func (c codeSourceDo) WriteDB() *codeSourceDo {
-	return c.Clauses(dbresolver.Write)
+func (g gCodeSourceModelDo) WriteDB() *gCodeSourceModelDo {
+	return g.Clauses(dbresolver.Write)
 }
 
-func (c codeSourceDo) Session(config *gorm.Session) *codeSourceDo {
-	return c.withDO(c.DO.Session(config))
+func (g gCodeSourceModelDo) Session(config *gorm.Session) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Session(config))
 }
 
-func (c codeSourceDo) Clauses(conds ...clause.Expression) *codeSourceDo {
-	return c.withDO(c.DO.Clauses(conds...))
+func (g gCodeSourceModelDo) Clauses(conds ...clause.Expression) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Clauses(conds...))
 }
 
-func (c codeSourceDo) Returning(value interface{}, columns ...string) *codeSourceDo {
-	return c.withDO(c.DO.Returning(value, columns...))
+func (g gCodeSourceModelDo) Returning(value interface{}, columns ...string) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Returning(value, columns...))
 }
 
-func (c codeSourceDo) Not(conds ...gen.Condition) *codeSourceDo {
-	return c.withDO(c.DO.Not(conds...))
+func (g gCodeSourceModelDo) Not(conds ...gen.Condition) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Not(conds...))
 }
 
-func (c codeSourceDo) Or(conds ...gen.Condition) *codeSourceDo {
-	return c.withDO(c.DO.Or(conds...))
+func (g gCodeSourceModelDo) Or(conds ...gen.Condition) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Or(conds...))
 }
 
-func (c codeSourceDo) Select(conds ...field.Expr) *codeSourceDo {
-	return c.withDO(c.DO.Select(conds...))
+func (g gCodeSourceModelDo) Select(conds ...field.Expr) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Select(conds...))
 }
 
-func (c codeSourceDo) Where(conds ...gen.Condition) *codeSourceDo {
-	return c.withDO(c.DO.Where(conds...))
+func (g gCodeSourceModelDo) Where(conds ...gen.Condition) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Where(conds...))
 }
 
-func (c codeSourceDo) Order(conds ...field.Expr) *codeSourceDo {
-	return c.withDO(c.DO.Order(conds...))
+func (g gCodeSourceModelDo) Order(conds ...field.Expr) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Order(conds...))
 }
 
-func (c codeSourceDo) Distinct(cols ...field.Expr) *codeSourceDo {
-	return c.withDO(c.DO.Distinct(cols...))
+func (g gCodeSourceModelDo) Distinct(cols ...field.Expr) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Distinct(cols...))
 }
 
-func (c codeSourceDo) Omit(cols ...field.Expr) *codeSourceDo {
-	return c.withDO(c.DO.Omit(cols...))
+func (g gCodeSourceModelDo) Omit(cols ...field.Expr) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Omit(cols...))
 }
 
-func (c codeSourceDo) Join(table schema.Tabler, on ...field.Expr) *codeSourceDo {
-	return c.withDO(c.DO.Join(table, on...))
+func (g gCodeSourceModelDo) Join(table schema.Tabler, on ...field.Expr) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Join(table, on...))
 }
 
-func (c codeSourceDo) LeftJoin(table schema.Tabler, on ...field.Expr) *codeSourceDo {
-	return c.withDO(c.DO.LeftJoin(table, on...))
+func (g gCodeSourceModelDo) LeftJoin(table schema.Tabler, on ...field.Expr) *gCodeSourceModelDo {
+	return g.withDO(g.DO.LeftJoin(table, on...))
 }
 
-func (c codeSourceDo) RightJoin(table schema.Tabler, on ...field.Expr) *codeSourceDo {
-	return c.withDO(c.DO.RightJoin(table, on...))
+func (g gCodeSourceModelDo) RightJoin(table schema.Tabler, on ...field.Expr) *gCodeSourceModelDo {
+	return g.withDO(g.DO.RightJoin(table, on...))
 }
 
-func (c codeSourceDo) Group(cols ...field.Expr) *codeSourceDo {
-	return c.withDO(c.DO.Group(cols...))
+func (g gCodeSourceModelDo) Group(cols ...field.Expr) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Group(cols...))
 }
 
-func (c codeSourceDo) Having(conds ...gen.Condition) *codeSourceDo {
-	return c.withDO(c.DO.Having(conds...))
+func (g gCodeSourceModelDo) Having(conds ...gen.Condition) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Having(conds...))
 }
 
-func (c codeSourceDo) Limit(limit int) *codeSourceDo {
-	return c.withDO(c.DO.Limit(limit))
+func (g gCodeSourceModelDo) Limit(limit int) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Limit(limit))
 }
 
-func (c codeSourceDo) Offset(offset int) *codeSourceDo {
-	return c.withDO(c.DO.Offset(offset))
+func (g gCodeSourceModelDo) Offset(offset int) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Offset(offset))
 }
 
-func (c codeSourceDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *codeSourceDo {
-	return c.withDO(c.DO.Scopes(funcs...))
+func (g gCodeSourceModelDo) Scopes(funcs ...func(gen.Dao) gen.Dao) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Scopes(funcs...))
 }
 
-func (c codeSourceDo) Unscoped() *codeSourceDo {
-	return c.withDO(c.DO.Unscoped())
+func (g gCodeSourceModelDo) Unscoped() *gCodeSourceModelDo {
+	return g.withDO(g.DO.Unscoped())
 }
 
-func (c codeSourceDo) Create(values ...*model.CodeSource) error {
+func (g gCodeSourceModelDo) Create(values ...*sqlmodel.GCodeSourceModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return c.DO.Create(values)
+	return g.DO.Create(values)
 }
 
-func (c codeSourceDo) CreateInBatches(values []*model.CodeSource, batchSize int) error {
-	return c.DO.CreateInBatches(values, batchSize)
+func (g gCodeSourceModelDo) CreateInBatches(values []*sqlmodel.GCodeSourceModel, batchSize int) error {
+	return g.DO.CreateInBatches(values, batchSize)
 }
 
 // Save : !!! underlying implementation is different with GORM
 // The method is equivalent to executing the statement: db.Clauses(clause.OnConflict{UpdateAll: true}).Create(values)
-func (c codeSourceDo) Save(values ...*model.CodeSource) error {
+func (g gCodeSourceModelDo) Save(values ...*sqlmodel.GCodeSourceModel) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return c.DO.Save(values)
+	return g.DO.Save(values)
 }
 
-func (c codeSourceDo) First() (*model.CodeSource, error) {
-	if result, err := c.DO.First(); err != nil {
+func (g gCodeSourceModelDo) First() (*sqlmodel.GCodeSourceModel, error) {
+	if result, err := g.DO.First(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.CodeSource), nil
+		return result.(*sqlmodel.GCodeSourceModel), nil
 	}
 }
 
-func (c codeSourceDo) Take() (*model.CodeSource, error) {
-	if result, err := c.DO.Take(); err != nil {
+func (g gCodeSourceModelDo) Take() (*sqlmodel.GCodeSourceModel, error) {
+	if result, err := g.DO.Take(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.CodeSource), nil
+		return result.(*sqlmodel.GCodeSourceModel), nil
 	}
 }
 
-func (c codeSourceDo) Last() (*model.CodeSource, error) {
-	if result, err := c.DO.Last(); err != nil {
+func (g gCodeSourceModelDo) Last() (*sqlmodel.GCodeSourceModel, error) {
+	if result, err := g.DO.Last(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.CodeSource), nil
+		return result.(*sqlmodel.GCodeSourceModel), nil
 	}
 }
 
-func (c codeSourceDo) Find() ([]*model.CodeSource, error) {
-	result, err := c.DO.Find()
-	return result.([]*model.CodeSource), err
+func (g gCodeSourceModelDo) Find() ([]*sqlmodel.GCodeSourceModel, error) {
+	result, err := g.DO.Find()
+	return result.([]*sqlmodel.GCodeSourceModel), err
 }
 
-func (c codeSourceDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*model.CodeSource, err error) {
-	buf := make([]*model.CodeSource, 0, batchSize)
-	err = c.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+func (g gCodeSourceModelDo) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*sqlmodel.GCodeSourceModel, err error) {
+	buf := make([]*sqlmodel.GCodeSourceModel, 0, batchSize)
+	err = g.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
 		defer func() { results = append(results, buf...) }()
 		return fc(tx, batch)
 	})
 	return results, err
 }
 
-func (c codeSourceDo) FindInBatches(result *[]*model.CodeSource, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return c.DO.FindInBatches(result, batchSize, fc)
+func (g gCodeSourceModelDo) FindInBatches(result *[]*sqlmodel.GCodeSourceModel, batchSize int, fc func(tx gen.Dao, batch int) error) error {
+	return g.DO.FindInBatches(result, batchSize, fc)
 }
 
-func (c codeSourceDo) Attrs(attrs ...field.AssignExpr) *codeSourceDo {
-	return c.withDO(c.DO.Attrs(attrs...))
+func (g gCodeSourceModelDo) Attrs(attrs ...field.AssignExpr) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Attrs(attrs...))
 }
 
-func (c codeSourceDo) Assign(attrs ...field.AssignExpr) *codeSourceDo {
-	return c.withDO(c.DO.Assign(attrs...))
+func (g gCodeSourceModelDo) Assign(attrs ...field.AssignExpr) *gCodeSourceModelDo {
+	return g.withDO(g.DO.Assign(attrs...))
 }
 
-func (c codeSourceDo) Joins(fields ...field.RelationField) *codeSourceDo {
+func (g gCodeSourceModelDo) Joins(fields ...field.RelationField) *gCodeSourceModelDo {
 	for _, _f := range fields {
-		c = *c.withDO(c.DO.Joins(_f))
+		g = *g.withDO(g.DO.Joins(_f))
 	}
-	return &c
+	return &g
 }
 
-func (c codeSourceDo) Preload(fields ...field.RelationField) *codeSourceDo {
+func (g gCodeSourceModelDo) Preload(fields ...field.RelationField) *gCodeSourceModelDo {
 	for _, _f := range fields {
-		c = *c.withDO(c.DO.Preload(_f))
+		g = *g.withDO(g.DO.Preload(_f))
 	}
-	return &c
+	return &g
 }
 
-func (c codeSourceDo) FirstOrInit() (*model.CodeSource, error) {
-	if result, err := c.DO.FirstOrInit(); err != nil {
+func (g gCodeSourceModelDo) FirstOrInit() (*sqlmodel.GCodeSourceModel, error) {
+	if result, err := g.DO.FirstOrInit(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.CodeSource), nil
+		return result.(*sqlmodel.GCodeSourceModel), nil
 	}
 }
 
-func (c codeSourceDo) FirstOrCreate() (*model.CodeSource, error) {
-	if result, err := c.DO.FirstOrCreate(); err != nil {
+func (g gCodeSourceModelDo) FirstOrCreate() (*sqlmodel.GCodeSourceModel, error) {
+	if result, err := g.DO.FirstOrCreate(); err != nil {
 		return nil, err
 	} else {
-		return result.(*model.CodeSource), nil
+		return result.(*sqlmodel.GCodeSourceModel), nil
 	}
 }
 
-func (c codeSourceDo) FindByPage(offset int, limit int) (result []*model.CodeSource, count int64, err error) {
-	result, err = c.Offset(offset).Limit(limit).Find()
+func (g gCodeSourceModelDo) FindByPage(offset int, limit int) (result []*sqlmodel.GCodeSourceModel, count int64, err error) {
+	result, err = g.Offset(offset).Limit(limit).Find()
 	if err != nil {
 		return
 	}
@@ -309,29 +338,29 @@ func (c codeSourceDo) FindByPage(offset int, limit int) (result []*model.CodeSou
 		return
 	}
 
-	count, err = c.Offset(-1).Limit(-1).Count()
+	count, err = g.Offset(-1).Limit(-1).Count()
 	return
 }
 
-func (c codeSourceDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
-	count, err = c.Count()
+func (g gCodeSourceModelDo) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = g.Count()
 	if err != nil {
 		return
 	}
 
-	err = c.Offset(offset).Limit(limit).Scan(result)
+	err = g.Offset(offset).Limit(limit).Scan(result)
 	return
 }
 
-func (c codeSourceDo) Scan(result interface{}) (err error) {
-	return c.DO.Scan(result)
+func (g gCodeSourceModelDo) Scan(result interface{}) (err error) {
+	return g.DO.Scan(result)
 }
 
-func (c codeSourceDo) Delete(models ...*model.CodeSource) (result gen.ResultInfo, err error) {
-	return c.DO.Delete(models)
+func (g gCodeSourceModelDo) Delete(models ...*sqlmodel.GCodeSourceModel) (result gen.ResultInfo, err error) {
+	return g.DO.Delete(models)
 }
 
-func (c *codeSourceDo) withDO(do gen.Dao) *codeSourceDo {
-	c.DO = *do.(*gen.DO)
-	return c
+func (g *gCodeSourceModelDo) withDO(do gen.Dao) *gCodeSourceModelDo {
+	g.DO = *do.(*gen.DO)
+	return g
 }
