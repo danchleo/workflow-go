@@ -353,7 +353,7 @@ func TestEngine_StartWorkflow_MissingDefinitionID(t *testing.T) {
 // ------------------------------------------------------------
 
 func TestPostTxQueue_DrainSync_Order(t *testing.T) {
-	q := NewPostTxQueue()
+	q := NewPostTxQueue(nil, "")
 	var order []string
 	q.Register(func() { order = append(order, "a") })
 	q.Register(func() { order = append(order, "b") })
@@ -366,7 +366,7 @@ func TestPostTxQueue_DrainSync_Order(t *testing.T) {
 }
 
 func TestPostTxQueue_DrainSync_ClearsQueue(t *testing.T) {
-	q := NewPostTxQueue()
+	q := NewPostTxQueue(nil, "")
 	called := 0
 	q.Register(func() { called++ })
 	q.DrainSync()
@@ -377,7 +377,7 @@ func TestPostTxQueue_DrainSync_ClearsQueue(t *testing.T) {
 }
 
 func TestPostTxQueue_DrainSync_NormalBeforeInTx(t *testing.T) {
-	q := NewPostTxQueue()
+	q := NewPostTxQueue(nil, "")
 	var order []string
 	q.Register(func() { order = append(order, "normal1") })
 	q.Register(func() { order = append(order, "intx1") }, true)
@@ -399,7 +399,7 @@ func TestPostTxQueue_DrainSync_NormalBeforeInTx(t *testing.T) {
 }
 
 func TestPostTxQueue_Drain_Async(t *testing.T) {
-	q := NewPostTxQueue()
+	q := NewPostTxQueue(nil, "")
 	var wg sync.WaitGroup
 	wg.Add(1)
 	q.Register(func() { wg.Done() })
@@ -419,7 +419,7 @@ func TestPostTxQueue_Drain_Async(t *testing.T) {
 }
 
 func TestPostTxQueue_PanicIsCaught(t *testing.T) {
-	q := NewPostTxQueue()
+	q := NewPostTxQueue(nil, "")
 	q.Register(func() { panic("boom") })
 	q.Register(func() { /* this should still be reachable */ })
 	q.DrainSync() // no panic escapes → pass
@@ -521,7 +521,6 @@ func TestEngine_StartWorkflow_NoStartTask_Direct(t *testing.T) {
 	}
 
 	eng := NewDefaultEngine(store)
-	eng.AutoExecute = false
 	_, err = eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", defaultParams())
 	if err == nil {
 		t.Fatal("expected error: NewWorkflowSpec should reject no-start-task wf")
@@ -559,7 +558,6 @@ tasks:
 		t.Fatalf("reverse workflow with cycle should be valid: %v", err)
 	}
 	eng := NewDefaultEngine(store)
-	eng.AutoExecute = false
 	wfEx, err := eng.StartWorkflow(context.Background(), wfDef.ID, "", "", nil, "", defaultParams())
 	if err != nil {
 		t.Fatalf("StartWorkflow reverse cycle: %v", err)

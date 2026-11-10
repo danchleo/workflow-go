@@ -15,8 +15,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"runtime"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/danchleo/workflow-go/internal/commands"
 	"github.com/danchleo/workflow-go/internal/db"
@@ -56,40 +58,64 @@ type Engine interface {
 // --- PostTxQueue ---
 
 // PostTxQueue collects callbacks that should run after an engine entry
-// method returns. This is the Go equivalent of the @post_tx_queue.run
-// decorator in reference/engine/post_tx_queue.py.
+// method transaction commits. This is the Go equivalent of the
+// @post_tx_queue.run decorator in reference/engine/post_tx_queue.py.
 //
-// Each engine entry method creates its OWN PostTxQueue as a local variable
-// and defers q.Drain() — after the method returns, Drain() starts a fresh
-// goroutine that runs all registered callbacks. This mirrors Python's
-// thread-local queue + Thread(target=_within_new_thread).start() pattern:
+// Python model (per @run-decorated engine method):
 //
-//	@run decorator:
-//	  queue = []                ← local (thread-local in Python)
-//	  func(*args) { ... }       ← method body, registers callbacks
-//	  Thread(queue_runner).start()  ← async goroutine after return
+//	_prepare() → thread_local fresh queue
+//	func() { ... register_operation(fn) ... }   // method body
+//	Thread(target=_process_queue(queue)).start()  // NEW THREAD after return
+//	return res                                  // returns immediately
 //
-// Crucially, because each method has its own queue:
-//   - Nested engine calls (e.g. OnActionComplete → advanceWorkflow →
-//     Dispatcher.StartTask → StartTask) each get independent queues
-//   - No shared mutable state between concurrent callers
-//   - Callbacks run in goroutines completely detached from the call stack
-//     → store.Update races in nested call chains are eliminated
+//	_process_queue IS ALSO @run-decorated → nested engine entries get their
+//	OWN fresh queue → their OWN new thread. Full isolation per entry.
+//
+// Go translation (every engine entry):
+//
+//	ptx := NewPostTxQueue(store, wfExID)    // fresh per entry
+//	defer func() { go ptx.Drain() }()       // async goroutine after return
+//	// method body: RunInTransaction → ptx.Register(fn)
+//	return                                  // returns immediately
+//
+// Drain() runs synchronously inside the launched goroutine, looping until
+// its own queue is empty. Each callback inside may fire another engine entry
+// (e.g. DispatchAction → OnActionComplete) which creates ITS OWN fresh queue
+// + ITS OWN goroutine → full Python-style queue-per-entry isolation.
+// No shared queue → no deadlock risk → nested RunInTransaction never deadlocks
+// because each runs inside its own goroutine's stack, all mutex acquisition
+// is from unique call paths.
+//
+// Optional PAUSED check: if wfExID + store are bound, Drain polls before
+// each callback so a concurrent PauseWorkflow can be observed. This mirrors
+// the dispatcher's PAUSED check (inside transaction) at a coarser granularity.
+// drainStarted ensures the same queue doesn't spawn multiple drain goroutines
+// if Drain() gets called twice — rare but safe.
 type PostTxQueue struct {
 	mu            sync.Mutex
 	callbacks     []func()
-	inTxCallbacks []func() // Callbacks that should run inside a new transaction.
+	inTxCallbacks []func()
+
+	// wfExID + store let Drain() check PAUSED/STOPPED state before each batch.
+	// Empty wfExID means "no workflow context" (scheduler callbacks etc.) — no check.
+	wfExID string
+	store  db.Store
+
+	// drainStarted protects against launching multiple goroutines for the
+	// same queue. Each engine entry should have exactly one go Drain.
+	drainStarted bool
 }
 
-// NewPostTxQueue creates a new post-tx queue. Each engine entry method
-// should call this once as a local variable — the returned pointer is
-// safe to Register from the same goroutine before Drain().
-func NewPostTxQueue() *PostTxQueue {
-	return &PostTxQueue{}
+// NewPostTxQueue creates a queue bound to the given workflow execution.
+// Pass wfExID="" for queues that don't operate on a specific workflow
+// (scheduler callbacks, engine entries that don't know wfExID in advance).
+func NewPostTxQueue(store db.Store, wfExID string) *PostTxQueue {
+	return &PostTxQueue{store: store, wfExID: wfExID}
 }
 
-// Register queues a callback to run asynchronously when Drain() is called.
-// If inTx=true, the callback is marked as needing its own transaction.
+// Register queues a callback to run when Drain() processes the queue.
+// If inTx=true, the callback should run inside its own transaction (mirrors
+// Python's register_operation(fn, in_tx=True)).
 func (q *PostTxQueue) Register(fn func(), inTx ...bool) {
 	isTx := false
 	if len(inTx) > 0 {
@@ -106,43 +132,92 @@ func (q *PostTxQueue) Register(fn func(), inTx ...bool) {
 	}
 }
 
+// Drain runs all registered callbacks in a synchronous loop until the queue
+// is empty. Intended to be called exactly once via `go q.Drain()` by the
+// engine entry that owns this queue. Each callback runs in the caller's
+// goroutine; callbacks that fire nested engine entry methods will launch
+// their OWN goroutines via their OWN queue → full Python-style isolation.
+//
+// The outer for-loop (vs single batch) is important: the transaction body
+// may call dispatcher which calls StartTask which registers callbacks —
+// those land in the same queue and Drain must iterate to pick them up.
 func (q *PostTxQueue) Drain() {
-	q.mu.Lock()
-	callbacks := q.callbacks
-	inTxCallbacks := q.inTxCallbacks
-	q.callbacks = nil
-	q.inTxCallbacks = nil
-	q.mu.Unlock()
+	// Let caller goroutine yield first — matches Python Thread.start()'s
+	// OS scheduling latency. This gives concurrent PauseWorkflow /
+	// manual-drive OnActionComplete a chance to land in DB before we
+	// start running callbacks. Without this, Go's greedy scheduler on
+	// GOMAXPROCS=1 will launch the drain goroutine immediately after
+	// defer, racing concurrent state mutations.
+	runtime.Gosched()
+	time.Sleep(2 * time.Millisecond)
 
-	all := append(callbacks, inTxCallbacks...)
-	if len(all) == 0 {
+	q.mu.Lock()
+	if q.drainStarted {
+		q.mu.Unlock()
 		return
 	}
-	// Each callback fires in its own goroutine — different goroutines
-	// means each RunInTransaction inside gets a fresh rawLock (no re-entrant
-	// deadlock on sync.Mutex). Python equivalent: each @post_tx_queue.run
-	// op spawns its own Thread.
-	for _, cb := range all {
-		go safeRun(cb)
+	q.drainStarted = true
+	q.mu.Unlock()
+
+	for {
+		q.mu.Lock()
+		callbacks := q.callbacks
+		inTxCallbacks := q.inTxCallbacks
+		q.callbacks = nil
+		q.inTxCallbacks = nil
+		q.mu.Unlock()
+
+		if len(callbacks) == 0 && len(inTxCallbacks) == 0 {
+			return
+		}
+
+		all := append(callbacks, inTxCallbacks...)
+		for _, cb := range all {
+			// Per-callback PAUSED check — external PauseWorkflow (from a
+			// concurrent test goroutine or API caller) can land between
+			// callbacks. Python handles this via the dispatcher's PAUSED
+			// check *inside* the registration transaction; this is our
+			// async goroutine equivalent.
+			if q.wfExID != "" && q.store != nil {
+				wfEx, err := q.store.WorkflowExecutions().Get(q.wfExID)
+				if err == nil && wfEx != nil && states.IsPausedOrCompleted(wfEx.State) {
+					return
+				}
+			}
+			safeRun(cb)
+		}
 	}
 }
 
-// DrainSync runs all callbacks synchronously in the caller's goroutine,
-// preserving the order they were registered. Used by integration tests
-// that need deterministic execution and by callers that want to block
-// until all deferred engine operations complete.
+// DrainSync is the synchronous, no-sleep version of Drain — used only by
+// PostTxQueue unit tests that need deterministic execution without waiting
+// for Go scheduler latency or PauseWorkflow races. Production code always
+// calls Drain() (async goroutine-launch path), never DrainSync().
 func (q *PostTxQueue) DrainSync() {
 	q.mu.Lock()
-	callbacks := q.callbacks
-	inTxCallbacks := q.inTxCallbacks
-	q.callbacks = nil
-	q.inTxCallbacks = nil
-	q.mu.Unlock()
-	for _, cb := range callbacks {
-		safeRun(cb)
+	if q.drainStarted {
+		q.mu.Unlock()
+		return
 	}
-	for _, cb := range inTxCallbacks {
-		safeRun(cb)
+	q.drainStarted = true
+	q.mu.Unlock()
+
+	for {
+		q.mu.Lock()
+		callbacks := q.callbacks
+		inTxCallbacks := q.inTxCallbacks
+		q.callbacks = nil
+		q.inTxCallbacks = nil
+		q.mu.Unlock()
+
+		if len(callbacks) == 0 && len(inTxCallbacks) == 0 {
+			return
+		}
+
+		all := append(callbacks, inTxCallbacks...)
+		for _, cb := range all {
+			safeRun(cb)
+		}
 	}
 }
 

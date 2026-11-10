@@ -128,7 +128,6 @@ func newEngine(t *testing.T) (*DefaultEngine, db.Store) {
 	t.Helper()
 	store := db.MustNewSQLStore(":memory:")
 	eng := NewDefaultEngine(store)
-	eng.AutoExecute = false // engine unit tests drive OnActionComplete manually
 	return eng, store
 }
 

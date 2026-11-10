@@ -49,7 +49,6 @@ func runWorkflowFromYAML(t *testing.T, f fixture) (*db.WorkflowExecution, db.Sto
 		t.Fatalf("NewSQLStore: %v", err)
 	}
 	eng := engine.NewDefaultEngine(store)
-	eng.AutoExecute = false // integration tests drive OnActionComplete manually
 
 	svc := services.NewWorkflowService(store)
 
@@ -397,7 +396,6 @@ func TestIntegration_ErrorHandling_OnError(t *testing.T) {
 	yamlFile, _ := os.ReadFile("testdata/error_handling.yaml")
 	store, _ := db.NewSQLStore(":memory:")
 	eng := engine.NewDefaultEngine(store)
-	eng.AutoExecute = false // integration tests drive OnActionComplete manually
 
 	svc := services.NewWorkflowService(store)
 	wfDef, _ := svc.CreateWorkflow("err-test", string(yamlFile), "p", "")
@@ -550,7 +548,6 @@ func TestIntegration_PauseResumeStop(t *testing.T) {
 	}
 	store, _ := db.NewSQLStore(":memory:")
 	eng := engine.NewDefaultEngine(store)
-	eng.AutoExecute = false // integration tests drive OnActionComplete manually
 
 	svc := services.NewWorkflowService(store)
 	wfDef, _ := svc.CreateWorkflow("pause-test", string(data), "p", "")
@@ -1687,7 +1684,6 @@ func TestIntegration_RetryDelay_RespectsDelay(t *testing.T) {
 	defer coreSched.Stop()
 
 	eng := engine.NewDefaultEngine(store)
-	eng.AutoExecute = false // integration tests drive OnActionComplete manually
 
 	eng.WithScheduler(coreSched)
 	svc := services.NewWorkflowService(store)
@@ -1815,7 +1811,6 @@ func TestIntegration_TimeoutPolicy_ForcesError(t *testing.T) {
 		t.Fatalf("NewSQLStore: %v", err)
 	}
 	eng := engine.NewDefaultEngine(store)
-	eng.AutoExecute = false // integration tests drive OnActionComplete manually
 
 	svc := services.NewWorkflowService(store)
 
@@ -1941,7 +1936,6 @@ func TestIntegration_TimeoutRetry_RetryRecoversFromTimeout(t *testing.T) {
 		t.Fatalf("NewSQLStore: %v", err)
 	}
 	eng := engine.NewDefaultEngine(store)
-	eng.AutoExecute = false // integration tests drive OnActionComplete manually
 
 	svc := services.NewWorkflowService(store)
 
@@ -2068,7 +2062,6 @@ func TestIntegration_TimeoutRetry_AllTimeout(t *testing.T) {
 		t.Fatalf("NewSQLStore: %v", err)
 	}
 	eng := engine.NewDefaultEngine(store)
-	eng.AutoExecute = false // integration tests drive OnActionComplete manually
 
 	svc := services.NewWorkflowService(store)
 
@@ -2184,7 +2177,6 @@ func TestIntegration_CronTrigger_FiresWorkflow(t *testing.T) {
 		t.Fatalf("NewSQLStore: %v", err)
 	}
 	eng := engine.NewDefaultEngine(store)
-	eng.AutoExecute = false // integration tests drive OnActionComplete manually
 
 	svc := services.NewWorkflowService(store)
 
@@ -2282,7 +2274,6 @@ func TestIntegration_CronTrigger_Unlimited(t *testing.T) {
 		t.Fatalf("NewSQLStore: %v", err)
 	}
 	eng := engine.NewDefaultEngine(store)
-	eng.AutoExecute = false // integration tests drive OnActionComplete manually
 
 	svc := services.NewWorkflowService(store)
 
@@ -2362,7 +2353,6 @@ func TestIntegration_PauseBefore_PausesThenResumes(t *testing.T) {
 	defer coreSched.Stop()
 
 	eng := engine.NewDefaultEngine(store)
-	eng.AutoExecute = false // integration tests drive OnActionComplete manually
 
 	eng.WithScheduler(coreSched)
 	svc := services.NewWorkflowService(store)

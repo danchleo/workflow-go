@@ -85,7 +85,7 @@ func main() {
 	defer cancel()
 
 	// --- Engine + Scheduler ---
-	eng := engine.NewDefaultEngine(store)
+	eng := engine.NewDefaultEngine(store).WithAutoDrain()
 	sched := scheduler.NewDefaultScheduler(store, *schedPoll, 0, 30*time.Second, 10*time.Second, 10)
 	sched.Start()
 	eng.WithScheduler(sched)

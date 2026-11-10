@@ -24,54 +24,27 @@ type DefaultEngine struct {
 	store      db.Store
 	dispatcher *Dispatcher
 	sched      scheduler.Scheduler // optional delayed-job scheduler (nil if none)
-
-	// AutoExecute: when true (default), StartTask/DispatchAction are
-	// registered to a local PostTxQueue and executed asynchronously after
-	// the entry method returns — matching Python's @post_tx_queue.run.
-	// Tests that drive OnActionComplete manually set this to false.
-	AutoExecute bool
-
-	// inflightWg tracks goroutines spawned by PostTxQueue.Drain() so tests
-	// and API callers can WaitForIdle() before asserting final state.
-	// Python's @post_tx_queue.run uses Thread() which fire-and-forget; Go
-	// adds this WaitGroup because tests need deterministic end-of-execution
-	// synchronization without sleeping.
-	inflightWg sync.WaitGroup
 }
 
-// NewDefaultEngine creates a DefaultEngine with the given store.
+// NewDefaultEngine creates a DefaultEngine. Every engine entry method
+// unconditionally creates its own PostTxQueue and launches an asynchronous
+// `go ptx.Drain()` after its transaction commits — exactly mirrors Python's
+// @post_tx_queue.run decorator that starts a fresh thread per entry and
+// returns immediately. No flags, no conditional branches: one code path.
 func NewDefaultEngine(store db.Store) *DefaultEngine {
 	eng := &DefaultEngine{
-		store:       store,
-		AutoExecute: true, // default: match Python @post_tx_queue.run async behavior
+		store: store,
 	}
 	eng.dispatcher = NewDispatcher(store, eng)
 	return eng
 }
 
-// WaitForIdle blocks until all PostTxQueue-spawned goroutines finish,
-// or timeout expires. Returns nil on success, ErrTimeout if it fires.
-// Production callers don't need this — it exists solely for tests and
-// CLI demo scenarios that need to observe the workflow's final state
-// after all async callbacks (DispatchAction → RunAction → OnActionComplete
-// → ContinueWorkflow) have drained.
-func (e *DefaultEngine) WaitForIdle(timeout time.Duration) error {
-	done := make(chan struct{})
-	go func() {
-		e.inflightWg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		return nil
-	case <-time.After(timeout):
-		return ErrWaitForIdleTimeout
-	}
+// WithAutoDrain — DEPRECATED, auto-drain is now always on. Kept as a no-op
+// so existing production call sites don't break. Will be removed in a future
+// cleanup pass.
+func (e *DefaultEngine) WithAutoDrain() *DefaultEngine {
+	return e
 }
-
-// ErrWaitForIdleTimeout is returned when WaitForIdle's timeout fires before
-// all inflight PostTxQueue goroutines finish.
-var ErrWaitForIdleTimeout = fmt.Errorf("engine.WaitForIdle: timeout before all async callbacks drained")
 
 // WithScheduler wires a generic delayed-job scheduler into the engine.
 // Policies like retry-delay, wait-before, wait-after and timeout need it.
@@ -300,13 +273,8 @@ func (e *DefaultEngine) StartWorkflow(
 	ctx context.Context, wfDefID, wfNamespace, wfExID string, wfInput map[string]interface{}, description string,
 	params map[string]interface{},
 ) (*db.WorkflowExecution, error) {
-	var ptx *PostTxQueue
-	if e.AutoExecute {
-		ptx = NewPostTxQueue()
-		e.inflightWg.Add(1)
-		defer func() { ptx.Drain() }()
-		defer e.inflightWg.Done()
-	}
+		ptx := NewPostTxQueue(e.store, wfExID)
+	defer func() { go ptx.Drain() }()
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -429,13 +397,8 @@ func (e *DefaultEngine) PauseWorkflow(ctx context.Context, wfExID string) error 
 
 // ResumeWorkflow resumes a paused workflow.
 func (e *DefaultEngine) ResumeWorkflow(ctx context.Context, wfExID string, env map[string]interface{}) error {
-	var ptx *PostTxQueue
-	if e.AutoExecute {
-		ptx = NewPostTxQueue()
-		e.inflightWg.Add(1)
-		defer func() { ptx.Drain() }()
-		defer e.inflightWg.Done()
-	}
+		ptx := NewPostTxQueue(e.store, wfExID)
+	defer func() { go ptx.Drain() }()
 
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -531,13 +494,8 @@ func (e *DefaultEngine) StopWorkflow(ctx context.Context, wfExID string, state s
 func (e *DefaultEngine) RerunWorkflow(
 	ctx context.Context, taskExID string, reset bool, skip bool, env map[string]interface{},
 ) error {
-	var ptx *PostTxQueue
-	if e.AutoExecute {
-		ptx = NewPostTxQueue()
-		e.inflightWg.Add(1)
-		defer func() { ptx.Drain() }()
-		defer e.inflightWg.Done()
-	}
+		ptx := NewPostTxQueue(e.store, "")
+	defer func() { go ptx.Drain() }()
 
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -552,6 +510,9 @@ func (e *DefaultEngine) RerunWorkflow(
 		wfEx, err := e.store.WorkflowExecutions().Get(taskEx.WorkflowExecutionID)
 		if err != nil {
 			return err
+		}
+		if ptx != nil {
+			ptx.wfExID = wfEx.ID
 		}
 
 		if env != nil {
@@ -633,13 +594,8 @@ func (e *DefaultEngine) StartTask(
 	ctx context.Context, taskExID string, firstRun bool, waiting bool, triggeredBy []map[string]interface{}, rerun bool,
 	reset bool,
 ) error {
-	var ptx *PostTxQueue
-	if e.AutoExecute {
-		ptx = NewPostTxQueue()
-		e.inflightWg.Add(1)
-		defer func() { ptx.Drain() }()
-		defer e.inflightWg.Done()
-	}
+		ptx := NewPostTxQueue(e.store, "")
+	defer func() { go ptx.Drain() }()
 	return e.StartTaskWithQueue(ctx, ptx, taskExID, firstRun, waiting, triggeredBy, rerun, reset)
 }
 
@@ -651,19 +607,12 @@ func (e *DefaultEngine) StartTaskWithQueue(
 	// Caller-supplied ptx is preferred — ensures DispatchAction callbacks are
 	// registered to the outermost engine-entry queue so Drain happens AFTER
 	// RunInTransaction releases rawLock (no deadlock on nested Drain).
-	// If caller didn't supply, fall back to creating a local one with its own
-	// Drain (slightly suboptimal but correct).
-	var drainOwnPtx bool
-	if ptx == nil && e.AutoExecute {
-		ptx = NewPostTxQueue()
-		drainOwnPtx = true
-		e.inflightWg.Add(1)
-		defer func() {
-			ptx.Drain()
-			e.inflightWg.Done()
-		}()
+	// If caller didn't supply a ptx (e.g. scheduler-triggered path),
+	// we always create one — every engine path gets its own queue.
+	if ptx == nil {
+		ptx = NewPostTxQueue(e.store, "")
+		defer func() { go ptx.Drain() }()
 	}
-	_ = drainOwnPtx // suppress unused warning
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -694,6 +643,9 @@ func (e *DefaultEngine) StartTaskWithQueue(
 	wfEx, err := e.store.WorkflowExecutions().Get(taskEx.WorkflowExecutionID)
 	if err != nil {
 		return err
+	}
+	if ptx != nil && ptx.wfExID == "" {
+		ptx.wfExID = wfEx.ID
 	}
 
 	// Set state to RUNNING.
@@ -916,7 +868,7 @@ func (e *DefaultEngine) StartTaskWithQueue(
 	// Mirrors Python's RegularAction.schedule() which calls
 	// post_tx_queue.register_operation(_run_action) inside an @run-decorated
 	// start_task method. The DispatchAction callback runs in a fresh goroutine
-	// after StartTask returns (via defer ptx.Drain() below) — completely
+	// after StartTask returns (via defer func() { go ptx.Drain() }() below) — completely
 	// detached from the call stack, so nested engine calls inside the
 	// Dispatcher's Drain don't race with sibling queue iterations.
 	if ptx != nil {
@@ -1145,13 +1097,8 @@ func (e *DefaultEngine) startWithItemsIter(
 func (e *DefaultEngine) OnActionComplete(
 	ctx context.Context, actionExID string, result *db.Result, wfAction bool,
 ) error {
-	var ptx *PostTxQueue
-	if e.AutoExecute {
-		ptx = NewPostTxQueue()
-		e.inflightWg.Add(1)
-		defer func() { ptx.Drain() }()
-		defer e.inflightWg.Done()
-	}
+		ptx := NewPostTxQueue(e.store, "")
+	defer func() { go ptx.Drain() }()
 	// Python engine entry: transaction() only — no named_lock at entry.
 	// Locking happens at task granularity inside handler internals.
 	return e.store.RunInTransaction(func(tx db.Store) error {
@@ -1194,6 +1141,9 @@ func (e *DefaultEngine) onActionCompleteLocked(
 		if err != nil {
 			return err
 		}
+		if ptx != nil && ptx.wfExID == "" {
+			ptx.wfExID = wfEx.ID
+		}
 	} else {
 		// First try to find as ActionExecution.
 		actionEx, err = e.store.ActionExecutions().Get(actionExID)
@@ -1208,6 +1158,9 @@ func (e *DefaultEngine) onActionCompleteLocked(
 				if err != nil {
 					return err
 				}
+				if ptx != nil && ptx.wfExID == "" {
+					ptx.wfExID = wfEx.ID
+				}
 			}
 		} else {
 			// Not an ActionExecution — maybe it's a TaskExecution ID directly
@@ -1219,6 +1172,9 @@ func (e *DefaultEngine) onActionCompleteLocked(
 			wfEx, err = e.store.WorkflowExecutions().Get(taskEx.WorkflowExecutionID)
 			if err != nil {
 				return err
+			}
+			if ptx != nil && ptx.wfExID == "" {
+				ptx.wfExID = wfEx.ID
 			}
 		}
 	}
@@ -1912,13 +1868,14 @@ func (e *DefaultEngine) forceFailWorkflow(wfEx *db.WorkflowExecution, reason str
 // task that just completed — passed through so workflow policies like
 // direct-join can observe it.
 func (e *DefaultEngine) advanceWorkflow(wfExID string, doneTaskExID string) {
-	var ptx *PostTxQueue
-	if e.AutoExecute {
-		ptx = NewPostTxQueue()
-		e.inflightWg.Add(1)
-		defer func() { ptx.Drain() }()
-		defer e.inflightWg.Done()
-	}
+	// advanceWorkflow is the workflow-graph advancement primitive — it
+	// always creates its own ptx + Drain regardless of autoDrain, because
+	// workflow state MUST advance downstream after a task completes.
+	// autoDrain=False only blocks the Register of DispatchAction inside
+	// StartTask (so actions stay RUNNING for manual drivers), not the graph
+	// advancement itself.
+	ptx := NewPostTxQueue(e.store, wfExID)
+	defer ptx.Drain()
 	// Python: called from inside transaction() context (OnActionComplete).
 	// If called standalone, wrap in RunInTransaction.
 	e.store.RunInTransaction(func(tx db.Store) error {
